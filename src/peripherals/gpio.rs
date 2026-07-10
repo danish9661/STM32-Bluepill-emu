@@ -29,6 +29,7 @@ pub struct GpioPorts {
     read_callbacks: [Vec<(u8, Box<dyn FnMut(&System) -> bool>)>; NUM_PORTS],
     write_callbacks: [Vec<(u8, Box<dyn FnMut(&System, bool)>)>; NUM_PORTS],
     output_states: [u16; NUM_PORTS],
+    input_states: [u16; NUM_PORTS],
 }
 
 impl GpioPorts {
@@ -76,18 +77,24 @@ impl GpioPorts {
 
     pub fn set_input_pin(&mut self, port: u8, pin: u8, value: bool) {
         let mut found = false;
-        for (p, cb) in &mut self.read_callbacks[port as usize] {
+        for (p, ref mut cb) in &mut self.read_callbacks[port as usize] {
             if *p == pin {
                 found = true;
+                *cb = Box::new(move |_| value);
             }
         }
         if !found {
             self.read_callbacks[port as usize].push((pin, Box::new(move |_| value)));
         }
+        if value {
+            self.input_states[port as usize] |= 1 << pin;
+        } else {
+            self.input_states[port as usize] &= !(1 << pin);
+        }
     }
 
     pub fn read_input_pin(&self, port: u8, pin: u8) -> bool {
-        false
+        (self.input_states[port as usize] >> pin) & 1 != 0
     }
 }
 

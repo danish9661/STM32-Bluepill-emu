@@ -22,8 +22,12 @@ pub struct I2c {
     active_device: Option<usize>,
     cr1: u32,
     cr2: u32,
+    oar1: u32,
+    oar2: u32,
     sr1: u32,
     sr2: u32,
+    ccr: u32,
+    trise: u32,
     dr: u32,
     state: I2cState,
     sr1_read_with_addr: bool,
@@ -35,7 +39,7 @@ impl Default for I2c {
     fn default() -> Self {
         Self {
             name: String::new(), devices: Vec::new(), active_device: None,
-            cr1: 0, cr2: 0, sr1: 0, sr2: 0, dr: 0,
+            cr1: 0, cr2: 0, oar1: 0, oar2: 0, sr1: 0, sr2: 0, ccr: 0, trise: 0, dr: 0,
             state: I2cState::Idle, sr1_read_with_addr: false,
             irq_ev: 0, irq_er: 0,
         }
@@ -82,6 +86,10 @@ impl Peripheral for I2c {
         match offset {
             0x00 => self.cr1,
             0x04 => self.cr2,
+            0x08 => self.oar1,
+            0x0C => self.oar2,
+            0x1C => self.ccr,
+            0x20 => self.trise,
             0x10 => {
                 let v = self.dr;
                 self.sr1 &= !(1 << 5);
@@ -159,9 +167,11 @@ impl Peripheral for I2c {
                     self.cr1 &= !(1 << 9);
                 }
             }
-            0x04 => {
+                    0x04 => {
                 self.cr2 = value & 0x07FF;
             }
+            0x08 => self.oar1 = value & 0x3FFF,
+            0x0C => self.oar2 = value & 0x3FF,
             0x10 => {
                 match self.state {
                     I2cState::StartSent => {
@@ -198,6 +208,8 @@ impl Peripheral for I2c {
                     _ => {}
                 }
             }
+            0x1C => self.ccr = value & 0xFFF,
+            0x20 => self.trise = value & 0x3F,
             _ => {}
         }
     }
