@@ -59,7 +59,7 @@ impl Timer {
     }
 
     fn prescaler(&self) -> u64 {
-        (self.psc as u64).max(1)
+        (self.psc as u64).saturating_add(1)
     }
 
     fn elapsed_ticks(&self) -> u64 {
@@ -82,7 +82,7 @@ impl Timer {
         for _ in 0..ticks.min(100) {
             match (cms, dir) {
                 (0, 0) => { // Up-counting
-                    if self.cnt < self.arr - 1 { self.cnt += 1; }
+                    if self.cnt < self.arr { self.cnt += 1; }
                     else {
                         self.cnt = 0;
                         self.sr |= 1; // UIF
@@ -107,7 +107,7 @@ impl Timer {
                 }
                 _ => { // Center-aligned modes
                     // Simplified: just up-count
-                    if self.cnt < self.arr - 1 { self.cnt += 1; }
+                    if self.cnt < self.arr { self.cnt += 1; }
                     else {
                         self.cnt = 0;
                         self.sr |= 1;

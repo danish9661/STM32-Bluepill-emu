@@ -582,6 +582,208 @@ periph_write(SCB + 0x04, 4, 1 << 26); // ICSR PENDSTSET
 assert_eq(has_pending_interrupt(), true, 'SCB PendSV via ICSR pending');
 
 // ============================================================
+// TIM Real Counting Test
+// ============================================================
+group('TIM Counting');
+
+reset();
+const T2 = 0x40000000;
+
+// Enable TIM2 clock
+periph_write(0x4002101C, 4, 1 << 0);
+
+// Set PSC=0 (no prescaler), ARR=999 → counts 0..999 then wraps
+periph_write(T2 + 0x28, 4, 0);    // PSC = 0
+periph_write(T2 + 0x2C, 4, 999);  // ARR = 999
+
+// Enable timer (CR1.CEN = bit 0)
+periph_write(T2 + 0x00, 4, 1);
+
+// Run 500 ticks — CNT should be ~500
+for (let i = 0; i < 500; i++) tick();
+let tcnt = periph_read(T2 + 0x24, 4);
+assert_eq(tcnt, 500, 'TIM2 CNT = 500 after 500 ticks with PSC=0');
+
+// Run another 600 ticks → should wrap (500+600=1100, wraps to 1000 mod 1000 = 100)
+for (let i = 0; i < 600; i++) tick();
+tcnt = periph_read(T2 + 0x24, 4);
+assert_eq(tcnt, 100, 'TIM2 CNT wrapped to 100 after 1100 total ticks');
+
+// Check SR.UIF (bit 0) set on overflow
+let tsr = periph_read(T2 + 0x10, 4);
+assert_eq(tsr & 1, 1, 'TIM2 SR UIF set after overflow');
+
+// Clear UIF by writing SR (write 0 to clear)
+periph_write(T2 + 0x10, 4, 0);
+tsr = periph_read(T2 + 0x10, 4);
+assert_eq(tsr & 1, 0, 'TIM2 SR UIF cleared');
+
+// ============================================================
+// TIM Update Interrupt Test
+// ============================================================
+group('TIM Interrupt');
+
+reset();
+
+periph_write(0x4002101C, 4, 1 << 0);
+periph_write(T2 + 0x28, 4, 0);    // PSC = 0
+periph_write(T2 + 0x2C, 4, 99);   // ARR = 99 (wrap every 100 ticks)
+periph_write(T2 + 0x0C, 4, 1);   // DIER.UIE = 1 (enable update interrupt)
+periph_write(T2 + 0x00, 4, 1);   // CEN = 1
+
+// Enable TIM2 IRQ (28) in NVIC ISER0
+periph_write(0xE000E100, 4, 1 << 28);
+
+// No interrupt should be pending yet
+assert_eq(has_pending_interrupt(), false, 'TIM2 no IRQ pending before overflow');
+
+// Run 200 ticks → should overflow twice
+for (let i = 0; i < 200; i++) tick();
+
+// Update interrupt should fire (TIM2 IRQ = 28)
+assert_eq(has_pending_interrupt(), true, 'TIM2 IRQ pending after overflow');
+let tim_irq = get_next_pending_interrupt();
+assert_eq(tim_irq, 28, 'TIM2 IRQ number = 28');
+assert_eq(has_pending_interrupt(), false, 'TIM2 IRQ cleared after get');
+
+// ============================================================
+// TIM Prescaler Test
+// ============================================================
+group('TIM Prescaler');
+
+reset();
+
+periph_write(0x4002101C, 4, 1 << 0);
+periph_write(T2 + 0x28, 4, 9);    // PSC = 9 (tick every 10 instructions)
+periph_write(T2 + 0x2C, 4, 99);   // ARR = 99
+periph_write(T2 + 0x00, 4, 1);    // CEN = 1
+
+// Run 500 ticks → prescaler divides by 10, so CNT should be 50
+for (let i = 0; i < 500; i++) tick();
+tcnt = periph_read(T2 + 0x24, 4);
+assert_eq(tcnt, 50, 'TIM2 CNT = 50 after 500 ticks with PSC=9');
+
+// ============================================================
+// RTC Real Counting Test
+// ============================================================
+group('RTC Counting');
+
+reset();
+
+// Enable RTC (CRL bit 0 = RTOFF)
+periph_write(0x40002800 + 0x04, 4, 1);
+
+// Set prescaler = 99 (CNT increments every 100 ticks)
+periph_write(0x40002800 + 0x0C, 4, 99);
+
+// Write initial CNT = 0
+periph_write(0x40002800 + 0x14, 4, 0); // cntl
+periph_write(0x40002800 + 0x10, 4, 0); // cnth
+
+assert_eq(periph_read(0x40002800 + 0x14, 4), 0, 'RTC CNTL = 0 initial');
+
+// Run 1000 ticks → should increment CNT by ~10
+for (let i = 0; i < 1000; i++) tick();
+
+let cntl = periph_read(0x40002800 + 0x14, 4);
+assert_eq(cntl, 10, 'RTC CNT = 10 after 1000 ticks with PRL=99');
+
+// Run 500 more ticks → CNT should be ~15
+for (let i = 0; i < 500; i++) tick();
+cntl = periph_read(0x40002800 + 0x14, 4);
+assert_eq(cntl, 15, 'RTC CNT = 15 after 1500 total ticks');
+
+// ============================================================
+// FLASH Unlock Test
+// ============================================================
+group('FLASH Unlock');
+
+reset();
+
+// CR should be locked initially (LOCK bit 7 = 1)
+let flash_cr = periph_read(0x40022000 + 0x0C, 4);
+assert_eq(flash_cr & (1 << 7), 1 << 7, 'FLASH CR LOCK = 1 locked');
+
+// Unlock sequence: write KEY1 then KEY2 to KEYR
+periph_write(0x40022000 + 0x04, 4, 0x45670123); // KEY1
+periph_write(0x40022000 + 0x04, 4, 0xCDEF89AB); // KEY2
+
+// CR should now be unlocked
+flash_cr = periph_read(0x40022000 + 0x0C, 4);
+assert_eq(flash_cr & (1 << 7), 0, 'FLASH CR LOCK = 0 after unlock');
+
+// Set PG (bit 0) for programming
+periph_write(0x40022000 + 0x0C, 4, 1); // PG=1
+flash_cr = periph_read(0x40022000 + 0x0C, 4);
+assert_eq(flash_cr & 1, 1, 'FLASH CR PG = 1 after unlock');
+
+// Write flash address to AR
+periph_write(0x40022000 + 0x10, 4, 0x08010000);
+assert_eq(periph_read(0x40022000 + 0x10, 4), 0x08010000, 'FLASH AR = 0x08010000');
+
+// Check SR — BSY should be set (bit 0) when PG is active
+let flash_sr = periph_read(0x40022000 + 0x08, 4);
+assert_eq(flash_sr & 1, 1, 'FLASH SR BSY = 1 while PG active');
+
+// Clear PG bit
+periph_write(0x40022000 + 0x0C, 4, 0);
+flash_sr = periph_read(0x40022000 + 0x08, 4);
+assert_eq(flash_sr & 1, 0, 'FLASH SR BSY = 0 after PG cleared');
+
+// ============================================================
+// CAN TX Mailbox Test
+// ============================================================
+group('CAN TX');
+
+reset();
+
+// Initial TSR — bits 26:24 (CODE) should indicate all mailboxes empty (0b100 = 4)
+let can_tsr = periph_read(0x40006400 + 0x08, 4);
+// TSR[31:26] = CODE field: 0x1C = 0b111 = mailbox 2 is the next empty one
+assert_eq((can_tsr >> 26) & 7, 7, 'CAN TSR CODE = 7 all mailboxes empty');
+
+// Write TX mailbox 0: TIR with TXRQ=1 (bit 0)
+periph_write(0x40006400 + 0x180, 4, 0xABCD0001); // STDID=0xABCD, TXRQ=1
+periph_write(0x40006400 + 0x184, 4, 8);          // DLC=8
+periph_write(0x40006400 + 0x188, 4, 0xDEADBEEF); // data low
+periph_write(0x40006400 + 0x18C, 4, 0x12345678); // data high
+
+// TSR should show mailbox 0 as active (TME0 = bit 26 = 0, RQCP0 = bit 0 = 1, TXOK0 = bit 16 = 1)
+can_tsr = periph_read(0x40006400 + 0x08, 4);
+assert_eq(can_tsr & (1 << 0), 1 << 0, 'CAN TSR RQCP0 = 1 (request completed)');
+assert_eq(can_tsr & (1 << 16), 1 << 16, 'CAN TSR TXOK0 = 1 (transmit OK)');
+
+// Read back mailbox for verification
+let can_tir = periph_read(0x40006400 + 0x180, 4);
+assert_eq(can_tir, 0xABCD0001, 'CAN TX mailbox TIR preserved');
+let can_tdtr = periph_read(0x40006400 + 0x184, 4);
+assert_eq(can_tdtr, 8, 'CAN TX mailbox TDTR DLC=8');
+
+// ============================================================
+// CAN RX Mailbox Test
+// ============================================================
+group('CAN RX');
+
+reset();
+
+// Simulate a received message: populate RX mailbox 0
+periph_write(0x40006400 + 0x1B0, 4, 0x1230001); // TIR with valid ID
+periph_write(0x40006400 + 0x1B4, 4, 4);          // DLC=4
+periph_write(0x40006400 + 0x1B8, 4, 0xAABBCCDD); // data
+// Set FMP = 1 to indicate 1 message pending in FIFO 0
+periph_write(0x40006400 + 0x0C, 4, 1);
+
+// RF0R should show 1 message pending (FMP bits 1:0)
+let can_rf0r = periph_read(0x40006400 + 0x0C, 4);
+assert_eq(can_rf0r & 0x3, 1, 'CAN RF0R FMP = 1 message pending');
+
+// Read RX mailbox 0 — should decrement FMP
+let can_rx_tir = periph_read(0x40006400 + 0x1B0, 4);
+assert_eq(can_rx_tir, 0x1230001, 'CAN RX mailbox TIR');
+can_rf0r = periph_read(0x40006400 + 0x0C, 4);
+assert_eq(can_rf0r & 0x3, 0, 'CAN RF0R FMP = 0 after reading RX mailbox');
+
+// ============================================================
 // Summary
 // ============================================================
 console.log(`\n${'='.repeat(50)}`);
