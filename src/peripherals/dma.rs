@@ -98,7 +98,7 @@ impl Peripheral for Dma {
                     if ch < 7 {
                         match reg {
                             0x00 => {
-                                self.channels[ch].cr = value & 0x3F7F;
+                                self.channels[ch].cr = value & 0x7F7F;
                                 if value & 1 != 0 {
                                     self.channels[ch].do_xfer(&self.name, sys, ch);
                                     self.isr |= (1 << 4) << (ch * 4);

@@ -291,9 +291,18 @@ impl Peripherals {
         (addr - byte_offset as u32, byte_offset)
     }
 
+    fn nvic_priority_check(addr: u32) -> bool {
+        const NVIC_PRIO_BASE: u32 = 0xE000E300;
+        addr >= NVIC_PRIO_BASE && addr < NVIC_PRIO_BASE + 0x100
+    }
+
     pub fn read(&self, sys: &System, addr: u32, size: u8) -> u32 {
         if let Some((addr, bit_number)) = Self::bitbanding(addr) {
             return (self.read(sys, addr, 1) >> bit_number) & 1;
+        }
+        // NVIC priority registers are byte-addressable, bypass alignment
+        if Self::nvic_priority_check(addr) {
+            return self.nvic.borrow_mut().read(sys, addr - Self::NVIC_REGS_BASE);
         }
         let is_reg = Self::is_register(addr);
         let (addr, byte_offset) = if is_reg {
@@ -313,6 +322,11 @@ impl Peripherals {
             v &= !(1 << bit_number);
             v |= (value & 1) << bit_number;
             return self.write(sys, addr, 1, v);
+        }
+        // NVIC priority registers are byte-addressable, bypass alignment
+        if Self::nvic_priority_check(addr) {
+            self.nvic.borrow_mut().write(sys, addr - Self::NVIC_REGS_BASE, value);
+            return;
         }
         let (addr, byte_offset) = if Self::is_register(addr) {
             Self::align_addr_4(addr)

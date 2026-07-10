@@ -148,8 +148,8 @@ impl Peripheral for Nvic {
                 let i = ((offset - 0x280) / 4) as usize;
                 self.active[i]
             }
-            0x300..=0x4EF => {
-                let byte_idx = (offset - 0x300) as usize;
+            0x200..=0x2FF => {
+                let byte_idx = (offset - 0x200) as usize;
                 if byte_idx < IRQ_COUNT {
                     self.priority[byte_idx] as u32
                 } else { 0 }
@@ -201,8 +201,8 @@ impl Peripheral for Nvic {
             0x200..=0x21C if offset < 0x200 + 4 * REG_WORDS as u32 => {
                 // IABR - Active Bit Register (read-only by software writes)
             }
-            0x300..=0x4EF => {
-                let byte_idx = (offset - 0x300) as usize;
+            0x200..=0x2FF => {
+                let byte_idx = (offset - 0x200) as usize;
                 if byte_idx < IRQ_COUNT {
                     self.priority[byte_idx] = (value & 0xFF) as u8;
                 }
