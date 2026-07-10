@@ -20,6 +20,8 @@ pub mod fsmc;
 pub mod sw_spi;
 pub mod afio;
 pub mod exti;
+pub mod bkp;
+pub mod dac;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -170,6 +172,8 @@ impl Peripherals {
                 .or_else(|| Fsmc::new(name, ext_devices))
                 .or_else(|| Afio::new(name))
                 .or_else(|| Exti::new(name))
+                .or_else(|| Bkp::new(name))
+                .or_else(|| Dac::new(name))
             ;
 
             if let Some(peri) = peri {
@@ -193,13 +197,16 @@ impl Peripherals {
 
         let mut regs: Vec<(u32, &str)> = vec![
             (0x4000_0000, "TIM2"),  (0x4000_0400, "TIM3"),  (0x4000_0800, "TIM4"),
+            (0x4000_1000, "TIM6"),  (0x4000_1400, "TIM7"),
             (0x4000_2800, "RTC"),  (0x4000_2C00, "WWDG"),  (0x4000_3000, "IWDG"),
             (0x4000_3800, "SPI2"),
             (0x4000_4400, "USART2"), (0x4000_4800, "USART3"),
             (0x4000_5400, "I2C1"), (0x4000_5800, "I2C2"),
             (0x4000_6000, "DMA1"),
             (0x4000_6400, "CAN1"),
+            (0x4000_6C00, "BKP"),
             (0x4000_7000, "PWR"),
+            (0x4000_7400, "DAC"),
             (0x4001_0000, "AFIO"), (0x4001_0400, "EXTI"),
             (0x4001_0800, "GPIOA"), (0x4001_0C00, "GPIOB"),
             (0x4001_1000, "GPIOC"), (0x4001_1400, "GPIOD"),
@@ -241,6 +248,8 @@ impl Peripherals {
                 .or_else(|| Fsmc::new(name, ext_devices))
                 .or_else(|| Afio::new(name))
                 .or_else(|| Exti::new(name))
+                .or_else(|| Bkp::new(name))
+                .or_else(|| Dac::new(name))
             ;
 
             if let Some(p) = p {
@@ -387,3 +396,5 @@ use rcc::Rcc;
 use can::Can;
 use afio::Afio;
 use exti::Exti;
+use bkp::Bkp;
+use dac::Dac;
