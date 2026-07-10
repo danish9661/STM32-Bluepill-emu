@@ -1,0 +1,11 @@
+target/
+node_modules/
+blink_arduino/build/
+blink_standalone/build/
+blink_test/
+package/
+*.bin
+*.o
+*.elf
+alexaltea-unicorn-js-*.tgz
+build_blink.py
