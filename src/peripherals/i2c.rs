@@ -30,7 +30,7 @@ pub struct I2c {
     trise: u32,
     dr: u32,
     state: I2cState,
-    sr1_read_with_addr: bool,
+    sr1_addr_flag: bool,
     irq_ev: i32,
     irq_er: i32,
 }
@@ -40,7 +40,7 @@ impl Default for I2c {
         Self {
             name: String::new(), devices: Vec::new(), active_device: None,
             cr1: 0, cr2: 0, oar1: 0, oar2: 0, sr1: 0, sr2: 0, ccr: 0, trise: 0, dr: 0,
-            state: I2cState::Idle, sr1_read_with_addr: false,
+            state: I2cState::Idle, sr1_addr_flag: false,
             irq_ev: 0, irq_er: 0,
         }
     }
@@ -57,7 +57,7 @@ impl I2c {
     fn reset(&mut self) {
         self.sr1 = 0; self.sr2 = 0; self.dr = 0;
         self.active_device = None; self.state = I2cState::Idle;
-        self.sr1_read_with_addr = false;
+        self.sr1_addr_flag = false;
     }
 
     fn fire_interrupts(&mut self, sys: &System) {
@@ -92,25 +92,26 @@ impl Peripheral for I2c {
             0x20 => self.trise,
             0x10 => {
                 let v = self.dr;
-                self.sr1 &= !(1 << 5);
+                self.sr1 &= !(1 << 6); // Clear TXE on DR read
                 if let Some(idx) = self.active_device {
                     if matches!(self.state, I2cState::Active { is_read: true }) {
                         let mut d = self.devices[idx].device.borrow_mut();
                         self.dr = d.read(sys, ()) as u32;
-                        self.sr1 |= 1 << 5;
+                        self.sr1 |= 1 << 6; // RXNE
                     }
                 }
                 self.fire_interrupts(sys);
                 v
             }
             0x14 => {
-                self.sr1_read_with_addr = (self.sr1 & (1 << 1)) != 0;
+                self.sr1_addr_flag = (self.sr1 & (1 << 1)) != 0;
                 self.sr1
             }
             0x18 => {
-                if self.sr1_read_with_addr {
-                    self.sr1 &= !(1 << 1);
-                    self.sr1_read_with_addr = false;
+                // Reading SR2 clears ADDR flag
+                if self.sr1_addr_flag {
+                    self.sr1 &= !(1 << 1); // Clear ADDR
+                    self.sr1_addr_flag = false;
                     let is_read = match std::mem::replace(&mut self.state, I2cState::Idle) {
                         I2cState::AddrSent { is_read } => {
                             self.state = I2cState::Active { is_read };
@@ -119,9 +120,9 @@ impl Peripheral for I2c {
                         s => { self.state = s; false }
                     };
                     if is_read {
-                        self.sr1 |= 1 << 5;
+                        self.sr1 |= 1 << 6; // RXNE
                     } else {
-                        self.sr1 |= 1 << 6;
+                        self.sr1 |= 1 << 7; // TXE
                     }
                 }
                 self.fire_interrupts(sys);
@@ -138,11 +139,13 @@ impl Peripheral for I2c {
                 let prev_pe = self.cr1 & 1;
                 self.cr1 = value;
 
+                // SW reset (bit 15)
                 if value & (1 << 15) != 0 {
                     self.reset();
                     self.cr1 = value & 1;
                     return;
                 }
+                // Disable (PE=0)
                 if prev_pe != 0 && value & 1 == 0 {
                     self.reset();
                     return;
@@ -151,23 +154,25 @@ impl Peripheral for I2c {
                 let start = value & (1 << 8);
                 let stop = value & (1 << 9);
 
+                // START generation
                 if start != 0 && prev_start == 0 {
                     self.state = I2cState::StartSent;
-                    self.sr1 = 1;
-                    self.sr2 = (1 << 0) | (1 << 1);
+                    self.sr1 = 1; // SB
+                    self.sr2 = (1 << 0) | (1 << 1); // BUSY=1, MSL=1
                     self.active_device = None;
-                    self.cr1 &= !(1 << 8);
+                    self.cr1 &= !(1 << 8); // Clear START
                     self.fire_interrupts(sys);
                 }
 
+                // STOP generation
                 if stop != 0 {
                     if matches!(self.state, I2cState::Active { .. } | I2cState::AddrSent { .. }) {
                         self.reset();
                     }
-                    self.cr1 &= !(1 << 9);
+                    self.cr1 &= !(1 << 9); // Clear STOP
                 }
             }
-                    0x04 => {
+            0x04 => {
                 self.cr2 = value & 0x07FF;
             }
             0x08 => self.oar1 = value & 0x3FFF,
@@ -177,32 +182,33 @@ impl Peripheral for I2c {
                     I2cState::StartSent => {
                         let addr = ((value >> 1) & 0x7F) as u8;
                         let is_read = (value & 1) != 0;
-
                         let found = self.devices.iter().position(|d| d.address == addr);
 
                         if let Some(idx) = found {
                             self.active_device = Some(idx);
                             self.devices[idx].device.borrow_mut().reset();
-                            self.sr1 = 1 << 1;
-                            self.sr2 = (1 << 0) | (1 << 1);
+                            self.sr1 = 1 << 1; // ADDR
+                            self.sr2 = (1 << 0) | (1 << 1); // BUSY=1, MSL=1
                             if is_read {
                                 let mut d = self.devices[idx].device.borrow_mut();
                                 self.dr = d.read(sys, ()) as u32;
                             }
                             self.state = I2cState::AddrSent { is_read };
                         } else {
-                            self.sr1 = 1 << 9;
+                            // NACK: set AF (Acknowledge Failure, bit 10)
+                            self.sr1 = 1 << 10;
                             self.sr2 = (1 << 0) | (1 << 1);
                             self.state = I2cState::Idle;
                         }
                         self.fire_interrupts(sys);
                     }
                     I2cState::Active { is_read: false } => {
+                        // Master transmitter: push byte
                         if let Some(idx) = self.active_device {
                             let mut d = self.devices[idx].device.borrow_mut();
                             d.write(sys, (), value as u8);
                         }
-                        self.sr1 |= 1 << 6;
+                        self.sr1 |= 1 << 7; // TXE
                         self.fire_interrupts(sys);
                     }
                     _ => {}

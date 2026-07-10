@@ -106,6 +106,13 @@ pub fn uart_rx_byte(addr: u32, byte: u8) -> bool {
     sys().p.rx_byte(&*sys(), addr, byte)
 }
 
+/// Inject a CAN message into the CAN peripheral at the given address.
+/// Returns true if the message was accepted (matched a filter and placed in a FIFO).
+#[wasm_bindgen]
+pub fn can_inject_message(addr: u32, tir: u32, tdtr: u32, tdlr: u32, tdhr: u32) -> bool {
+    sys().p.can_inject_message(&*sys(), addr, tir, tdtr, tdlr, tdhr)
+}
+
 /// Collect UART output since last call.
 #[wasm_bindgen]
 pub fn get_uart_output() -> String {
