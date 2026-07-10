@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STM32F407 WASM Emulator</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Courier New', monospace; background: #1a1a2e; color: #e0e0e0; padding: 20px; }
+h1 { color: #00d4ff; font-size: 18px; margin-bottom: 16px; }
+.container { max-width: 1000px; margin: 0 auto; }
+.toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+button { background: #16213e; color: #00d4ff; border: 1px solid #00d4ff; padding: 8px 16px; cursor: pointer; font-family: inherit; font-size: 13px; }
+button:hover { background: #0f3460; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+input[type="file"] { display: none; }
+label.file-btn { background: #16213e; color: #00d4ff; border: 1px solid #00d4ff; padding: 8px 16px; cursor: pointer; font-family: inherit; font-size: 13px; display: inline-block; }
+label.file-btn:hover { background: #0f3460; }
+#status { color: #888; font-size: 12px; margin-left: auto; }
+#log { background: #0d0d1a; border: 1px solid #333; padding: 12px; height: 360px; overflow-y: auto; font-size: 12px; line-height: 1.6; margin-bottom: 16px; }
+#log .error { color: #ff6b6b; }
+#log .warn { color: #ffd93d; }
+#log .info { color: #6bcbff; }
+#registers { background: #0d0d1a; border: 1px solid #333; padding: 12px; font-size: 11px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+#registers .reg { color: #aaa; }
+#registers .reg span { color: #fff; }
+#registers .reg.pc { color: #00d4ff; }
+#registers .reg.sp { color: #ffd93d; }
+#stats { display: flex; gap: 20px; margin-bottom: 16px; font-size: 12px; }
+#stats .stat { color: #aaa; }
+#stats .stat span { color: #00d4ff; }
+</style>
+</head>
+<body>
+<script src="unicorn_arm.js"></script>
+<div class="container">
+<h1>STM32F407 WASM Emulator</h1>
+<div class="toolbar">
+    <label class="file-btn" for="fileInput">Load Firmware (.bin)</label>
+    <input type="file" id="fileInput" accept=".bin">
+    <button id="runBtn" disabled>Run 10M</button>
+    <button id="stepBtn" disabled>Step 10K</button>
+    <button id="stopBtn" disabled>Stop</button>
+    <button id="resetBtn" disabled>Reset</button>
+    <div id="status">Idle</div>
+</div>
+<div id="stats">
+    <div class="stat">Instructions: <span id="instCount">0</span></div>
+    <div class="stat">Steps: <span id="stepCount">0</span></div>
+    <div class="stat">PC: <span id="statPc">--------</span></div>
+    <div class="stat">SP: <span id="statSp">--------</span></div>
+</div>
+<div id="log"></div>
+<div id="registers"></div>
+</div>
+<script type="module">
+import { createEmulator } from './emulator.js';
+
+let emu = null;
+let firmwareData = null;
+
+const logEl = document.getElementById('log');
+const regEl = document.getElementById('registers');
+const statusEl = document.getElementById('status');
+const instCountEl = document.getElementById('instCount');
+const stepCountEl = document.getElementById('stepCount');
+const statPcEl = document.getElementById('statPc');
+const statSpEl = document.getElementById('statSp');
+const runBtn = document.getElementById('runBtn');
+const stepBtn = document.getElementById('stepBtn');
+const stopBtn = document.getElementById('stopBtn');
+const resetBtn = document.getElementById('resetBtn');
+const fileInput = document.getElementById('fileInput');
+
+function log(msg, cls = 'info') {
+    const d = document.createElement('div');
+    d.className = cls;
+    d.textContent = `[${new Date().toISOString().slice(11,19)}] ${msg}`;
+    logEl.appendChild(d);
+    logEl.scrollTop = logEl.scrollHeight;
+}
+
+function updateRegisters() {
+    if (!emu) return;
+    try {
+        const r = emu.getRegisters();
+        let html = '';
+        for (const name of ['R0','R1','R2','R3','R4','R5','R6','R7','R8','R9','R10','R11','R12']) {
+            const val = r[name];
+            html += `<div class="reg">${name}: <span>0x${val.toString(16).padStart(8,'0')}</span></div>`;
+        }
+        html += `<div class="reg sp">SP: <span>0x${r.SP.toString(16).padStart(8,'0')}</span></div>`;
+        html += `<div class="reg">LR: <span>0x${r.LR.toString(16).padStart(8,'0')}</span></div>`;
+        html += `<div class="reg pc">PC: <span>0x${r.PC.toString(16).padStart(8,'0')}</span></div>`;
+        html += `<div class="reg">xPSR: <span>0x${r.xPSR.toString(16).padStart(8,'0')}</span></div>`;
+        regEl.innerHTML = html;
+        statPcEl.textContent = `0x${r.PC.toString(16).padStart(8,'0')}`;
+        statSpEl.textContent = `0x${r.SP.toString(16).padStart(8,'0')}`;
+    } catch (e) { /* ignore */ }
+}
+
+async function initEmulator() {
+    if (!firmwareData) return;
+    statusEl.textContent = 'Initializing...';
+    try {
+        emu = await createEmulator({
+            firmware: firmwareData,
+            flash_size: 0x100000,
+            ram_size: 0x20000,
+            vector_table: 0x08000000,
+        });
+        log(`Emulator initialized - SP=0x${emu.getRegisters().SP.toString(16)}, PC=0x${emu.getRegisters().PC.toString(16)}`, 'info');
+        statusEl.textContent = 'Ready';
+        stopBtn.disabled = false;
+        updateRegisters();
+    } catch (e) {
+        log(`Init failed: ${e.message || e}`, 'error');
+        statusEl.textContent = 'Error';
+        console.error(e);
+    }
+}
+
+fileInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const buf = await file.arrayBuffer();
+    firmwareData = new Uint8Array(buf);
+    log(`Loaded ${file.name} (${firmwareData.length} bytes)`, 'info');
+    runBtn.disabled = false;
+    stepBtn.disabled = false;
+    resetBtn.disabled = false;
+    statusEl.textContent = 'Firmware loaded';
+});
+
+runBtn.addEventListener('click', async () => {
+    if (!emu) await initEmulator();
+    if (!emu) return;
+    runBtn.disabled = true;
+    stepBtn.disabled = true;
+    statusEl.textContent = 'Running...';
+    log('Starting emulation (10M instructions)', 'info');
+    try {
+        const result = emu.run(10000000);
+        const r = emu.getRegisters();
+        log(`Stopped: ${result.totalSteps} steps, ${result.instCount} instructions, PC=0x${r.PC.toString(16)}`, 'info');
+        statusEl.textContent = 'Stopped';
+    } catch (e) {
+        log(`Error: ${e.message || e}`, 'error');
+        statusEl.textContent = 'Error';
+        console.error(e);
+    }
+    runBtn.disabled = false;
+    stepBtn.disabled = false;
+    const r = emu.getRegisters();
+    instCountEl.textContent = emu.instCount.toString();
+    updateRegisters();
+});
+
+stepBtn.addEventListener('click', async () => {
+    if (!emu) await initEmulator();
+    if (!emu) return;
+    try {
+        const result = emu.step(10000);
+        instCountEl.textContent = result.instCount.toString();
+        updateRegisters();
+        if (result.stopped) {
+            log('Emulation stopped', 'warn');
+            statusEl.textContent = 'Stopped';
+        }
+    } catch (e) {
+        log(`Step error: ${e.message || e}`, 'error');
+        console.error(e);
+    }
+});
+
+stopBtn.addEventListener('click', () => {
+    if (emu) {
+        emu.stop();
+        log('Stop requested', 'warn');
+        statusEl.textContent = 'Stopping...';
+    }
+});
+
+resetBtn.addEventListener('click', async () => {
+    if (emu) {
+        emu.close();
+        emu = null;
+    }
+    log('Reset', 'warn');
+    instCountEl.textContent = '0';
+    regEl.innerHTML = '';
+    statusEl.textContent = 'Idle';
+    await initEmulator();
+});
+
+log('Ready. Select a .bin firmware file to begin.', 'info');
+</script>
+</body>
+</html>

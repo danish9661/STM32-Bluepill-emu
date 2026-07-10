@@ -1,0 +1,176 @@
+use std::sync::atomic::{AtomicU64, AtomicBool, AtomicI32, AtomicU8, Ordering};
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::Mutex;
+use crate::peripherals::{Peripherals, gpio::GpioPorts};
+use crate::ext_devices::ExtDevices;
+
+// UART output buffer: USART write_dr pushes chars here, JS reads via get_uart_output()
+use std::sync::OnceLock;
+static UART_OUTPUT: OnceLock<Mutex<String>> = OnceLock::new();
+pub fn get_uart_output() -> &'static Mutex<String> {
+    UART_OUTPUT.get_or_init(|| Mutex::new(String::new()))
+}
+
+// Global ExtDevices: populated by JS add_* calls before init
+static EXT_DEVICES: OnceLock<Mutex<ExtDevices>> = OnceLock::new();
+pub fn get_ext_devices() -> &'static Mutex<ExtDevices> {
+    EXT_DEVICES.get_or_init(|| Mutex::new(ExtDevices::default()))
+}
+
+pub static INSTRUCTION_COUNT: AtomicU64 = AtomicU64::new(0);
+pub fn instruction_count() -> u64 { INSTRUCTION_COUNT.load(Ordering::Relaxed) }
+
+static WATCHDOG_RESET: AtomicBool = AtomicBool::new(false);
+
+// Software SPI configs queued before init, registered after GPIO exists
+static SOFTWARE_SPI_CONFIGS: OnceLock<Mutex<Vec<(String, Option<String>, String, String, String)>>> = OnceLock::new();
+pub fn get_software_spi_configs() -> &'static Mutex<Vec<(String, Option<String>, String, String, String)>> {
+    SOFTWARE_SPI_CONFIGS.get_or_init(|| Mutex::new(Vec::new()))
+}
+pub fn is_watchdog_reset_requested() -> bool { WATCHDOG_RESET.swap(false, Ordering::Acquire) }
+pub fn request_watchdog_reset() { WATCHDOG_RESET.store(true, Ordering::Release); }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DmaDir { Read, Write, MemCopy }
+
+#[derive(Debug, Clone)]
+pub struct DmaTransfer {
+    pub direction: DmaDir,
+    pub stream_idx: usize,
+    pub dma_name: String,
+    pub src: u32,
+    pub dst: u32,
+    pub size: usize,
+    pub peri_addr: u32,
+    pub peripheral: bool,
+}
+
+impl DmaTransfer {
+    pub fn to_u32_vec(&self) -> Vec<u32> {
+        vec![
+            self.direction as u32,
+            self.stream_idx as u32,
+            self.src,
+            self.dst,
+            self.size as u32,
+            self.peri_addr,
+            self.peripheral as u32,
+        ]
+    }
+}
+
+static DMA_COMPLETED: [AtomicBool; 8] = [
+    AtomicBool::new(false), AtomicBool::new(false), AtomicBool::new(false), AtomicBool::new(false),
+    AtomicBool::new(false), AtomicBool::new(false), AtomicBool::new(false), AtomicBool::new(false),
+];
+
+// Per-stream DMA interrupt info: IRQ number (-1 = none) and flags (bit 0=TCIE, 1=HTIE, 2=TEIE)
+static DMA_STREAM_IRQ: [AtomicI32; 8] = [
+    AtomicI32::new(-1), AtomicI32::new(-1), AtomicI32::new(-1), AtomicI32::new(-1),
+    AtomicI32::new(-1), AtomicI32::new(-1), AtomicI32::new(-1), AtomicI32::new(-1),
+];
+static DMA_STREAM_FLAGS: [AtomicU8; 8] = [
+    AtomicU8::new(0), AtomicU8::new(0), AtomicU8::new(0), AtomicU8::new(0),
+    AtomicU8::new(0), AtomicU8::new(0), AtomicU8::new(0), AtomicU8::new(0),
+];
+
+pub fn set_dma_intr_info(stream_idx: usize, irq: i32, flags: u8) {
+    if stream_idx < 8 {
+        DMA_STREAM_IRQ[stream_idx].store(irq, Ordering::Release);
+        DMA_STREAM_FLAGS[stream_idx].store(flags, Ordering::Release);
+    }
+}
+
+pub struct WasmSystem {
+    pub p: Rc<Peripherals>,
+    pending_dma: RefCell<Vec<DmaTransfer>>,
+}
+
+impl WasmSystem {
+    pub fn new() -> Self {
+        let gpio = GpioPorts::default();
+        let ext = get_ext_devices().lock().unwrap();
+        let p = Rc::new(Peripherals::new_wasm(gpio, &*ext));
+        drop(ext);
+        Self::register_software_spis(&p);
+        WasmSystem { p, pending_dma: RefCell::new(Vec::new()) }
+    }
+
+    pub fn new_svd(svd_xml: &str) -> Self {
+        let gpio = GpioPorts::default();
+        let ext = get_ext_devices().lock().unwrap();
+        let p = Rc::new(Peripherals::from_svd(svd_xml, gpio, &*ext));
+        drop(ext);
+        Self::register_software_spis(&p);
+        WasmSystem { p, pending_dma: RefCell::new(Vec::new()) }
+    }
+
+    fn register_software_spis(p: &Peripherals) {
+        use crate::peripherals::sw_spi::{SoftwareSpi, SoftwareSpiConfig};
+        let configs = get_software_spi_configs().lock().unwrap();
+        let ext_devices = get_ext_devices().lock().unwrap();
+        for (name, cs, clk, miso, mosi) in configs.iter() {
+            let config = SoftwareSpiConfig {
+                name: name.clone(),
+                cs: cs.clone(),
+                clk: clk.clone(),
+                miso: miso.clone(),
+                mosi: mosi.clone(),
+            };
+            SoftwareSpi::register(config, &mut p.gpio.borrow_mut(), &ext_devices);
+        }
+    }
+
+    pub fn queue_dma_transfer(&self, t: DmaTransfer) {
+        self.pending_dma.borrow_mut().push(t);
+    }
+
+    pub fn pending_dma_count(&self) -> usize {
+        self.pending_dma.borrow().len()
+    }
+
+    pub fn take_pending_dma_transfer(&self, index: usize) -> Option<DmaTransfer> {
+        let mut pending = self.pending_dma.borrow_mut();
+        if index < pending.len() {
+            Some(pending.remove(index))
+        } else {
+            None
+        }
+    }
+
+    pub fn mark_dma_completed(&self, stream_idx: usize, _success: bool) {
+        DMA_COMPLETED[stream_idx].store(true, Ordering::Release);
+        // Fire NVIC interrupt after transfer completes
+        if stream_idx < 8 {
+            let irq = DMA_STREAM_IRQ[stream_idx].swap(-1, Ordering::Acquire);
+            if irq >= 0 {
+                let flags = DMA_STREAM_FLAGS[stream_idx].swap(0, Ordering::Acquire);
+                if flags & 0x7 != 0 {
+                    self.p.nvic.borrow_mut().set_intr_pending(irq);
+                }
+            }
+        }
+    }
+
+    pub fn dma_check_completion(&self, stream_idx: usize) -> bool {
+        DMA_COMPLETED[stream_idx].swap(false, Ordering::Acquire)
+    }
+
+    pub fn tick(&self) {
+        let p = self.p.clone();
+        for slot in &p.peripherals {
+            slot.peripheral.borrow_mut().tick(self);
+        }
+        p.nvic.borrow_mut().maybe_set_systick_intr_pending();
+    }
+
+    pub fn addr_desc(&self, addr: u32) -> String {
+        self.p.addr_desc(addr)
+    }
+}
+
+pub type System = WasmSystem;
+
+unsafe impl Sync for WasmSystem {}
+unsafe impl Send for WasmSystem {}
