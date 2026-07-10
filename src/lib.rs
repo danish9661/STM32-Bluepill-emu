@@ -1,4 +1,4 @@
-use std::sync::OnceLock;
+use std::sync::atomic::Ordering;
 use wasm_bindgen::prelude::*;
 
 mod system;
@@ -7,18 +7,21 @@ pub mod ext_devices;
 
 use system::WasmSystem;
 
-static SYS: OnceLock<WasmSystem> = OnceLock::new();
+// We use static mut since WASM is single-threaded — this allows re-initialization.
+static mut SYS: Option<WasmSystem> = None;
 
 fn sys() -> &'static WasmSystem {
-    SYS.get().expect("WasmSystem not initialized")
+    unsafe { SYS.as_ref().expect("WasmSystem not initialized") }
 }
 
 /// Initialize the emulator with hardcoded peripheral map.
 /// Must be called after adding all ext devices (add_spi_flash, add_i2c_eeprom).
+/// Can be called multiple times to reset emulator state.
 #[wasm_bindgen]
 pub fn init() {
     console_error_panic_hook::set_once();
-    let _ = SYS.set(WasmSystem::new());
+    system::INSTRUCTION_COUNT.store(0, Ordering::Relaxed);
+    unsafe { SYS = Some(WasmSystem::new()); }
 }
 
 /// Initialize the emulator from an SVD XML string (e.g., STM32F407.svd).
@@ -26,7 +29,8 @@ pub fn init() {
 #[wasm_bindgen]
 pub fn init_svd(svd_xml: &str) {
     console_error_panic_hook::set_once();
-    let _ = SYS.set(WasmSystem::new_svd(svd_xml));
+    system::INSTRUCTION_COUNT.store(0, Ordering::Relaxed);
+    unsafe { SYS = Some(WasmSystem::new_svd(svd_xml)); }
 }
 
 #[wasm_bindgen]

@@ -89,13 +89,19 @@ impl Peripheral for Can {
             0x1B0..=0x1CC => {
                 let i = ((offset - 0x1B0) / 0x10) as usize;
                 if i >= 2 { return 0; }
-                match (offset - 0x1B0) % 0x10 {
+                let val = match (offset - 0x1B0) % 0x10 {
                     0x00 => self.rx[i].tir,
                     0x04 => self.rx[i].tdtr,
                     0x08 => self.rx[i].tdlr,
                     0x0C => self.rx[i].tdhr,
                     _ => 0,
+                };
+                // Decrement FMP on read of first RX mailbox register
+                if (offset - 0x1B0) % 0x10 == 0 && i == 0 && self.rf0r & 0x3 != 0 {
+                    self.rf0r = (self.rf0r & !0x3) | ((self.rf0r & 0x3) - 1);
+                    self.rf0r |= 1 << 3; // RFOM flag
                 }
+                val
             }
             0x200 => self.fmr,
             0x204 => self.fm1r,
@@ -168,10 +174,6 @@ impl Peripheral for Can {
                     0x08 => self.rx[i].tdlr = value,
                     0x0C => self.rx[i].tdhr = value,
                     _ => {}
-                }
-                if (offset - 0x1B0) % 0x10 == 0 && i == 0 && self.rf0r & 0x3 != 0 {
-                    self.rf0r = (self.rf0r & !0x3) | ((self.rf0r & 0x3) - 1);
-                    self.rf0r |= 1 << 3;
                 }
             }
             0x200 => {
