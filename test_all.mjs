@@ -948,6 +948,87 @@ let rtc_irq = get_next_pending_interrupt();
 assert_eq(rtc_irq, 3, 'RTC alarm IRQ number = 3');
 
 // ============================================================
+// BKP Register Test
+// ============================================================
+group('BKP');
+
+reset();
+
+// Enable BKP and PWR clock
+periph_write(0x4002101C, 4, 1 << 28); // PWREN
+periph_write(0x4002101C, 4, (1 << 28) | (1 << 27)); // BKPEN bit 27 + PWREN
+// Write and read BKP data register 1
+periph_write(0x40006C04, 4, 0x1234);
+let bkp_dr1 = periph_read(0x40006C04, 4);
+assert_eq(bkp_dr1, 0x1234, 'BKP DR1 write/read');
+
+// Write and read BKP data register 10
+periph_write(0x40006C28, 4, 0xABCD);
+let bkp_dr10 = periph_read(0x40006C28, 4);
+assert_eq(bkp_dr10, 0xABCD, 'BKP DR10 write/read');
+
+// Write BKP RTCCR
+periph_write(0x40006C00, 4, 0x0100);
+let rtccr = periph_read(0x40006C00, 4);
+assert_eq(rtccr, 0x0100, 'BKP RTCCR write/read');
+
+// ============================================================
+// DAC Register Test
+// ============================================================
+group('DAC');
+
+reset();
+
+// Enable DAC clock
+periph_write(0x4002101C, 4, 1 << 29); // DACEN
+
+// Write DAC channel 1 12-bit right-aligned data
+periph_write(0x40007408, 4, 0x7FF);
+let dhr1 = periph_read(0x40007408, 4);
+assert_eq(dhr1, 0x7FF, 'DAC DHR12R1 write/read');
+
+// Check DOR1 updated
+let dor1 = periph_read(0x4000742C, 4);
+assert_eq(dor1, 0x7FF, 'DAC DOR1 reflects DHR12R1');
+
+// Write DAC channel 1 8-bit right-aligned data
+periph_write(0x40007410, 4, 0xAB);
+let dhr8r1 = periph_read(0x40007410, 4);
+assert_eq(dhr8r1, 0xAB, 'DAC DHR8R1 write/read');
+dor1 = periph_read(0x4000742C, 4);
+assert_eq(dor1, 0xAB0, 'DAC DOR1 = DHR8R1 << 4');
+
+// Read DAC SR
+let sr_dac = periph_read(0x40007434, 4);
+assert_eq(sr_dac, 0, 'DAC SR default = 0');
+
+// ============================================================
+// TIM6 Basic Timer Test
+// ============================================================
+group('TIM6');
+
+reset();
+const T6 = 0x40001000;
+
+// Enable TIM6 clock (APB1, bit 4)
+periph_write(0x4002101C, 4, 1 << 4);
+
+// Set PSC=0, ARR=49 (wrap every 50 ticks)
+periph_write(T6 + 0x28, 4, 0);
+periph_write(T6 + 0x2C, 4, 49);
+periph_write(T6 + 0x00, 4, 1); // CEN=1
+
+// Run 30 ticks → CNT should be 30
+for (let i = 0; i < 30; i++) tick();
+let cnt6 = periph_read(T6 + 0x24, 4);
+assert_eq(cnt6, 30, 'TIM6 CNT = 30 after 30 ticks');
+
+// Run 30 more ticks → should wrap (60 % 50 = 10)
+for (let i = 0; i < 30; i++) tick();
+cnt6 = periph_read(T6 + 0x24, 4);
+assert_eq(cnt6, 10, 'TIM6 CNT wrapped to 10');
+
+// ============================================================
 // Summary
 // ============================================================
 console.log(`\n${'='.repeat(50)}`);
