@@ -18,6 +18,8 @@ pub mod crc;
 pub mod can;
 pub mod fsmc;
 pub mod sw_spi;
+pub mod afio;
+pub mod exti;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -32,6 +34,7 @@ pub trait Peripheral {
     fn write(&mut self, sys: &System, offset: u32, value: u32);
     fn tick(&mut self, _sys: &System) {}
     fn rx_byte(&mut self, _sys: &System, _byte: u8) {}
+    fn can_inject_message(&mut self, _sys: &System, _tir: u32, _tdtr: u32, _tdlr: u32, _tdhr: u32) -> bool { false }
 }
 
 pub struct PeripheralSlot<T> {
@@ -165,6 +168,8 @@ impl Peripherals {
                 .or_else(|| Adc::new(name))
                 .or_else(|| Can::new(name))
                 .or_else(|| Fsmc::new(name, ext_devices))
+                .or_else(|| Afio::new(name))
+                .or_else(|| Exti::new(name))
             ;
 
             if let Some(peri) = peri {
@@ -195,6 +200,7 @@ impl Peripherals {
             (0x4000_6000, "DMA1"),
             (0x4000_6400, "CAN1"),
             (0x4000_7000, "PWR"),
+            (0x4001_0000, "AFIO"), (0x4001_0400, "EXTI"),
             (0x4001_0800, "GPIOA"), (0x4001_0C00, "GPIOB"),
             (0x4001_1000, "GPIOC"), (0x4001_1400, "GPIOD"),
             (0x4001_2400, "ADC1"), (0x4001_2800, "ADC2"),
@@ -233,6 +239,8 @@ impl Peripherals {
                 .or_else(|| Adc::new(name))
                 .or_else(|| Can::new(name))
                 .or_else(|| Fsmc::new(name, ext_devices))
+                .or_else(|| Afio::new(name))
+                .or_else(|| Exti::new(name))
             ;
 
             if let Some(p) = p {
@@ -342,6 +350,12 @@ impl Peripherals {
         }
     }
 
+    pub fn can_inject_message(&self, sys: &System, addr: u32, tir: u32, tdtr: u32, tdlr: u32, tdhr: u32) -> bool {
+        if let Some(p) = Self::get_peripheral(&self.peripherals, addr) {
+            p.peripheral.borrow_mut().can_inject_message(sys, tir, tdtr, tdlr, tdhr)
+        } else { false }
+    }
+
     pub fn rx_byte(&self, sys: &System, addr: u32, byte: u8) -> bool {
         if let Some(p) = Self::get_peripheral(&self.peripherals, addr) {
             p.peripheral.borrow_mut().rx_byte(sys, byte);
@@ -371,3 +385,5 @@ use rtc::Rtc;
 use crc::Crc;
 use rcc::Rcc;
 use can::Can;
+use afio::Afio;
+use exti::Exti;

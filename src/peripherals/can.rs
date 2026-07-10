@@ -30,6 +30,69 @@ impl Can {
         }))
     }
 
+    /// Inject a received message into the CAN peripheral, matching filters.
+    /// Returns true if the message was accepted into a FIFO.
+    pub fn inject_message(&mut self, sys: &System, tir: u32, tdtr: u32, tdlr: u32, tdhr: u32) -> bool {
+        let fifo = self.match_filter(tir);
+        if let Some(fifo_idx) = fifo {
+            let (rfxr, fifo) = if fifo_idx == 0 {
+                (&mut self.rf0r, &mut self.rx[0])
+            } else {
+                (&mut self.rf1r, &mut self.rx[1])
+            };
+            let fmp = *rfxr & 0x3;
+            if fmp < 2 {
+                fifo.tir = tir;
+                fifo.tdtr = tdtr;
+                fifo.tdlr = tdlr;
+                fifo.tdhr = tdhr;
+                *rfxr = (*rfxr & !0x3) | (fmp + 1);
+                self.fire_interrupts(sys);
+                true
+            } else {
+                *rfxr |= 1 << 4; // FOVR
+                true
+            }
+        } else {
+            false
+        }
+    }
+
+    fn match_filter(&self, tir: u32) -> Option<usize> {
+        if self.fmr & 1 != 0 { return None; } // FINIT=1 means filter init mode, no matching
+        let ide = (tir >> 2) & 1; // 0=standard, 1=extended
+        let mut best = None;
+        for bank in 0..14 {
+            let enabled = (self.fa1r >> bank) & 1;
+            if enabled == 0 { continue; }
+            let scale = (self.fm1r >> bank) & 1; // 0=16-bit x 2, 1=32-bit
+            let mode = (self.fs1r >> bank) & 1; // 0=ID mask, 1=ID list
+            let identifier = tir >> 21; // STDID[10:0] for standard, EXTID[28:0] for extended
+            let f0 = self.filter[bank * 2];
+            let f1 = self.filter[bank * 2 + 1];
+            let matched = if scale == 0 && mode == 0 {
+                    let id1 = f0 >> 16; let mask1 = f0 & 0xFFFF;
+                    let id2 = f1 >> 16; let mask2 = f1 & 0xFFFF;
+                    let id = identifier & 0x7FF;
+                    ((id & mask1) == (id1 & mask1)) || ((id & mask2) == (id2 & mask2))
+                } else if scale == 0 && mode == 1 {
+                    let id1 = f0 >> 16; let id2 = f0 & 0xFFFF;
+                    let id3 = f1 >> 16; let id4 = f1 & 0xFFFF;
+                    let id = identifier & 0x7FF;
+                    id == id1 || id == id2 || id == id3 || id == id4
+                } else if scale == 1 && mode == 0 {
+                    let mask = f1; let id = f0;
+                    (identifier & mask) == (id & mask)
+                } else {
+                    identifier == f0
+                };
+            if matched {
+                best = Some((self.ffa1r >> bank) as usize & 1);
+            }
+        }
+        best
+    }
+
     fn fire_interrupts(&mut self, sys: &System) {
         let base = self.irq_base;
         // TX (TMEIE bit 0)
@@ -114,6 +177,10 @@ impl Peripheral for Can {
             }
             _ => 0,
         }
+    }
+
+    fn can_inject_message(&mut self, sys: &System, tir: u32, tdtr: u32, tdlr: u32, tdhr: u32) -> bool {
+        self.inject_message(sys, tir, tdtr, tdlr, tdhr)
     }
 
     fn write(&mut self, sys: &System, offset: u32, value: u32) {

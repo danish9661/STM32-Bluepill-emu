@@ -2,6 +2,8 @@ use crate::system::{System, INSTRUCTION_COUNT};
 use super::Peripheral;
 use std::sync::atomic::Ordering;
 
+const RTC_IRQ: i32 = 3;
+
 pub struct Rtc {
     crh: u32,
     crl: u32,
@@ -14,6 +16,7 @@ pub struct Rtc {
     cnt: u32,
     div_counter: u32,
     last_tick: u64,
+    last_cnt: u32,
 }
 
 impl Rtc {
@@ -31,6 +34,7 @@ impl Rtc {
                 cnt: 0,
                 div_counter: 0,
                 last_tick: INSTRUCTION_COUNT.load(Ordering::Relaxed),
+                last_cnt: 0,
             }))
         } else {
             None
@@ -49,7 +53,7 @@ impl Rtc {
 }
 
 impl Peripheral for Rtc {
-    fn tick(&mut self, _sys: &System) {
+    fn tick(&mut self, sys: &System) {
         if self.crl & 1 == 0 { return; } // RTOFF — not enabled
 
         let now = INSTRUCTION_COUNT.load(Ordering::Relaxed);
@@ -66,16 +70,17 @@ impl Peripheral for Rtc {
             self.div_counter %= prl;
             self.cnt = self.cnt.wrapping_add(inc);
             self.sync_cnt_regs();
+
             // Check alarm
             let alarm = ((self.alrh as u32) << 16) | self.alrl as u32;
-            if self.cnt == alarm {
-                if self.crh & 1 != 0 { // ALRIE
-                    // Would fire alarm interrupt via NVIC
-                }
-                if self.crh & 2 != 0 { // OWIE
-                    // Overflow interrupt
-                }
+            if self.crh & 1 != 0 && self.last_cnt != alarm && self.cnt == alarm {
+                sys.p.nvic.borrow_mut().set_intr_pending(RTC_IRQ);
             }
+            // Check overflow
+            if self.cnt < self.last_cnt && self.crh & 2 != 0 {
+                sys.p.nvic.borrow_mut().set_intr_pending(RTC_IRQ);
+            }
+            self.last_cnt = self.cnt;
         }
     }
 
@@ -93,7 +98,7 @@ impl Peripheral for Rtc {
         }
     }
 
-    fn write(&mut self, sys: &System, offset: u32, value: u32) {
+    fn write(&mut self, _sys: &System, offset: u32, value: u32) {
         match offset {
             0x00 => self.crh = value & 0x03,
             0x04 => {
@@ -117,10 +122,12 @@ impl Peripheral for Rtc {
             0x10 => {
                 self.cnth = value & 0xFFFF;
                 self.cnt = ((self.cnth as u32) << 16) | (self.cntl as u32);
+                self.last_cnt = self.cnt;
             }
             0x14 => {
                 self.cntl = value & 0xFFFF;
                 self.cnt = ((self.cnth as u32) << 16) | (self.cntl as u32);
+                self.last_cnt = self.cnt;
             }
             0x18 => self.alrh = value & 0xFFFF,
             0x1C => self.alrl = value & 0xFFFF,

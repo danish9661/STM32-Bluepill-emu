@@ -3,7 +3,7 @@ import * as periph from './pkg/stm32_bluepill_wasm.js';
 const { init, periph_read, periph_write, tick, has_pending_interrupt,
         get_next_pending_interrupt, gpio_read_output, gpio_set_input,
         gpio_read_input, get_uart_output, uart_rx_byte, adc_set_sim_value,
-        is_watchdog_reset_requested } = periph;
+        is_watchdog_reset_requested, can_inject_message } = periph;
 
 let passed = 0, failed = 0;
 
@@ -782,6 +782,170 @@ let can_rx_tir = periph_read(0x40006400 + 0x1B0, 4);
 assert_eq(can_rx_tir, 0x1230001, 'CAN RX mailbox TIR');
 can_rf0r = periph_read(0x40006400 + 0x0C, 4);
 assert_eq(can_rf0r & 0x3, 0, 'CAN RF0R FMP = 0 after reading RX mailbox');
+
+// ============================================================
+// CAN Filter Bank & RX Injection Test
+// ============================================================
+group('CAN Filter');
+
+reset();
+// Configure filter bank 0 as 32-bit identifier list mode
+periph_write(0x40006400 + 0x200, 4, 0); // FMR: FINIT=0 (leave init mode)
+// Enter init mode
+periph_write(0x40006400 + 0x200, 4, 1); // FMR: FINIT=1
+periph_write(0x40006400 + 0x204, 4, 0); // FM1R: all 16-bit dual, bank 0 = 0 (16-bit x2)
+periph_write(0x40006400 + 0x20C, 4, 0xFFFFFFFF); // FS1R: all ID list mode
+periph_write(0x40006400 + 0x214, 4, 0); // FFA1R: all FIFO 0
+periph_write(0x40006400 + 0x21C, 4, 1); // FA1R: enable filter bank 0
+// Set filter bank 0: in 16-bit list mode, store two 16-bit IDs per filter word
+// Filter 0 word 0: 0x0555XXXX where 0x0555 = ID1(match 0x555), 0xXXXX = ID2
+periph_write(0x40006400 + 0x240, 4, (0x555 << 16) | 0x321); // ID1=0x555, ID2=0x321
+periph_write(0x40006400 + 0x244, 4, (0x123 << 16) | 0x456); // ID3=0x123, ID4=0x456
+// Exit init mode
+periph_write(0x40006400 + 0x200, 4, 0); // FMR: FINIT=0
+
+// Now inject a message with STDID=0x555 (should match)
+let msg_tir = ((0x555 << 21) | 1) >>> 0; // TXRQ + STDID=0x555 (unsigned)
+let matched = can_inject_message(0x40006400, msg_tir, 8, 0xDEADBEEF, 0x12345678);
+assert_eq(matched, true, 'CAN message with STDID=0x555 matched filter');
+
+let rf0r = periph_read(0x40006400 + 0x0C, 4);
+assert_eq(rf0r & 0x3, 1, 'CAN RF0R FMP=1 after filter match');
+
+// Read the message back
+let rx_tir = periph_read(0x40006400 + 0x1B0, 4);
+assert_eq(rx_tir, msg_tir, 'CAN RX TIR matches injected message');
+let rx_tdtr = periph_read(0x40006400 + 0x1B4, 4);
+assert_eq(rx_tdtr, 8, 'CAN RX TDTR DLC=8');
+
+// Inject a message that should NOT match (STDID=0x999)
+let unmatched = can_inject_message(0x40006400, (0x999 << 21) | 1, 4, 0, 0);
+assert_eq(unmatched, false, 'CAN message STDID=0x999 rejected by filter');
+
+// ============================================================
+// AFIO Register Test
+// ============================================================
+group('AFIO');
+
+reset();
+
+// Read default AFIO MAPR
+let mapr = periph_read(0x40010004, 4);
+assert_eq(mapr, 0, 'AFIO MAPR default = 0');
+
+// Write MAPR (remap USART1 to PB6/PB7)
+periph_write(0x40010004, 4, 0x40000004);
+mapr = periph_read(0x40010004, 4);
+assert_eq(mapr, 0x40000004, 'AFIO MAPR write preserves value');
+
+// Write MAPR2 (remap SPI1)
+periph_write(0x4001001C, 4, 0x01);
+let mapr2 = periph_read(0x4001001C, 4);
+assert_eq(mapr2, 0x01, 'AFIO MAPR2 write/read');
+
+// ============================================================
+// EXTI Register Test
+// ============================================================
+group('EXTI');
+
+reset();
+
+// Configure EXTI line 0 for rising edge
+periph_write(0x40010400, 4, 1); // IMR: unmask line 0
+periph_write(0x40010408, 4, 1); // RTSR: rising edge trigger line 0
+
+// Software trigger line 0
+periph_write(0x40010410, 4, 1); // SWIER: set line 0
+let swier = periph_read(0x40010410, 4);
+assert_eq(swier & 1, 1, 'EXTI SWIER line 0 pending');
+let pr = periph_read(0x40010414, 4);
+assert_eq(pr & 1, 1, 'EXTI PR line 0 set');
+
+// Clear pending by writing 1 to PR
+periph_write(0x40010414, 4, 1);
+pr = periph_read(0x40010414, 4);
+assert_eq(pr & 1, 0, 'EXTI PR cleared');
+
+// ============================================================
+// I2C NACK Test
+// ============================================================
+group('I2C NACK');
+
+reset();
+
+// Enable I2C1 clock and configure
+periph_write(0x4002101C, 4, 1 << 22); // I2C1 clock enable
+periph_write(0x40005400, 4, 1); // CR1: PE=1 (enable)
+
+// Generate START condition
+periph_write(0x40005400, 4, 0x101); // CR1: PE=1, START=1
+
+// Check SB flag set
+let sr1 = periph_read(0x40005414, 4);
+assert_eq(sr1 & 1, 1, 'I2C SR1 SB set after START');
+
+// Send address to non-existent device (0x50, write)
+periph_write(0x40005410, 4, (0x50 << 1) | 0); // DR = (addr << 1) | R/W
+
+// Should get AF (Acknowledge Failure) in SR1
+sr1 = periph_read(0x40005414, 4);
+assert_eq(sr1 & (1 << 10), 1 << 10, 'I2C SR1 AF set on missing address');
+
+// ============================================================
+// UART RX Interrupt Test
+// ============================================================
+group('UART RX');
+
+reset();
+
+// Enable USART1 (CR1: UE=1, RE=1, TE=1, RXNEIE=1) and set BRR
+periph_write(0x40021018, 4, 1 << 14); // USART1 clock enable
+periph_write(0x4001380C, 4, 0x202D); // CR1: UE=1, RE=1, RXNEIE=1, TE=1... actually UE=0
+// UE is bit 13, RE is bit 2, TE is bit 3, RXNEIE is bit 5
+// CR1 = (1<<13) | (1<<3) | (1<<2) | (1<<5) = 0x202C
+periph_write(0x4001380C, 4, (1<<13) | (1<<3) | (1<<2) | (1<<5));
+
+// Inject a byte via RX
+uart_rx_byte(0x40013800, 0x42);
+
+// Check RXNE is set
+let uart_sr = periph_read(0x40013800, 4);
+assert_eq(uart_sr & (1 << 5), 1 << 5, 'UART SR RXNE set after rx_byte');
+
+// Check interrupt is pending (RXNEIE enabled, RXNE set)
+assert_eq(has_pending_interrupt(), true, 'UART RX interrupt pending after byte');
+
+// Read the byte from DR
+let rx_dr = periph_read(0x40013804, 4);
+assert_eq(rx_dr, 0x42, 'UART DR contains injected byte');
+
+// ============================================================
+// RTC Alarm Interrupt Test
+// ============================================================
+group('RTC Alarm');
+
+reset();
+
+// Enable RTC IRQ (3) in NVIC ISER0
+periph_write(0xE000E100, 4, 1 << 3);
+
+// Configure RTC: enable, set PRL=99, set ALR=5, enable ALRIE
+periph_write(0x40002818, 4, 0);   // ALRH = 0
+periph_write(0x4000281C, 4, 5);   // ALRL = 5 (alarm = 0x00000005)
+periph_write(0x4000280C, 4, 99);  // PRLL = 99 (count every 100 ticks)
+periph_write(0x40002800, 4, 1);   // CRH: ALRIE=1
+periph_write(0x40002804, 4, 1);   // CRL: RTOFF=1 (enable)
+
+// No interrupt should be pending yet
+assert_eq(has_pending_interrupt(), false, 'RTC no IRQ before alarm');
+
+// Run 600 ticks — RTC should count to 6, passing alarm at 5
+for (let i = 0; i < 600; i++) tick();
+
+// Alarm should have fired (IRQ 3)
+assert_eq(has_pending_interrupt(), true, 'RTC alarm IRQ pending');
+let rtc_irq = get_next_pending_interrupt();
+assert_eq(rtc_irq, 3, 'RTC alarm IRQ number = 3');
 
 // ============================================================
 // Summary
