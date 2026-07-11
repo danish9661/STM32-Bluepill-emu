@@ -1,4 +1,4 @@
-use crate::system::{System, INSTRUCTION_COUNT};
+use crate::system::{System, INSTRUCTION_COUNT, INTR_MASK_PRIMASK, INTR_MASK_BASEPRI};
 use std::sync::atomic::Ordering;
 use super::Peripheral;
 
@@ -7,6 +7,12 @@ const IRQ_OFFSET: i32 = 16;
 const REG_WORDS: usize = (IRQ_COUNT + 31) / 32;
 
 pub mod irq {
+    pub const NMI: i32 = -14;
+    pub const HARD_FAULT: i32 = -13;
+    pub const MEM_MANAGE: i32 = -12;
+    pub const BUS_FAULT: i32 = -11;
+    pub const USAGE_FAULT: i32 = -10;
+    pub const SVCALL: i32 = -5;
     pub const PENDSV: i32 = -2;
     pub const SYSTICK: i32 = -1;
 }
@@ -16,11 +22,12 @@ pub struct Nvic {
     pub systick_period: Option<u32>,
     pub last_systick_trigger: u64,
     pending: u128,
-    in_interrupt: bool,
     enable: [u32; REG_WORDS],
     pending_reg: [u32; REG_WORDS],
     active: [u32; REG_WORDS],
     priority: [u8; IRQ_COUNT],
+    /// Active exception priorities stack (top = current priority)
+    active_prio_stack: Vec<u8>,
 }
 
 impl Default for Nvic {
@@ -29,17 +36,16 @@ impl Default for Nvic {
             systick_period: None,
             last_systick_trigger: 0,
             pending: 0,
-            in_interrupt: false,
             enable: [0; REG_WORDS],
             pending_reg: [0; REG_WORDS],
             active: [0; REG_WORDS],
             priority: [0; IRQ_COUNT],
+            active_prio_stack: Vec::new(),
         }
     }
 }
 
 impl Nvic {
-    /// Map irq to pending_reg index (IRQ-based, no offset)
     fn irq_reg_idx(irq: i32) -> Option<(usize, u32)> {
         if irq < 0 { return None; }
         let idx = (irq as usize) / 32;
@@ -49,7 +55,6 @@ impl Nvic {
 
     pub fn set_intr_pending(&mut self, irq: i32) {
         if irq < 0 {
-            // System exception
             self.pending |= 1u128 << (IRQ_OFFSET + irq);
         } else if let Some((idx, mask)) = Self::irq_reg_idx(irq) {
             self.pending |= 1u128 << (IRQ_OFFSET + irq);
@@ -64,7 +69,75 @@ impl Nvic {
         }
     }
 
+    fn fixed_exception_priority(irq: i32) -> Option<u8> {
+        match irq {
+            -14 => Some(0),    // NMI
+            -13 => Some(1),    // HardFault
+            _ => None,
+        }
+    }
+
+    pub fn exception_priority(&self, irq: i32) -> u8 {
+        if let Some(p) = Self::fixed_exception_priority(irq) {
+            return p;
+        }
+        // System exceptions with programmable priority default to 0x80
+        if irq < 0 {
+            return 0x80;
+        }
+        self.priority.get(irq as usize).copied().unwrap_or(0xFF)
+    }
+
+    pub fn current_priority(&self, basepri: u32) -> u8 {
+        if let Some(&prio) = self.active_prio_stack.last() {
+            prio
+        } else if basepri & 0xFF != 0 {
+            (basepri & 0xFF) as u8
+        } else {
+            0xFF
+        }
+    }
+
+    fn can_fire(&self, irq: i32, primask: u32, basepri: u32) -> bool {
+        if primask & 1 != 0 {
+            return irq == irq::NMI || irq == irq::HARD_FAULT;
+        }
+        if irq >= 0 {
+            let idx = (irq as usize) / 32;
+            let mask = 1u32 << (irq as usize % 32);
+            if idx >= REG_WORDS || self.enable[idx] & mask == 0 {
+                return false;
+            }
+        }
+        let prio = self.exception_priority(irq);
+        let current = self.current_priority(basepri);
+        prio < current
+    }
+
+    fn find_highest_pending(&self, primask: u32, basepri: u32) -> Option<i32> {
+        let mut best: Option<i32> = None;
+        let mut best_prio: u8 = 0xFF;
+        let pending = self.pending;
+        if pending == 0 { return None; }
+        for irq in -14..(IRQ_COUNT as i32) {
+            let bit = (IRQ_OFFSET + irq) as u128;
+            if bit >= 128 { break; }
+            if pending & (1u128 << bit) == 0 { continue; }
+            if !self.can_fire(irq, primask, basepri) { continue; }
+            let prio = self.exception_priority(irq);
+            if best.is_none() || prio < best_prio {
+                best = Some(irq);
+                best_prio = prio;
+            }
+        }
+        best
+    }
+
     pub fn has_pending(&self) -> bool { self.pending != 0 }
+
+    pub fn has_pending_masked(&self, primask: u32, basepri: u32) -> bool {
+        self.find_highest_pending(primask, basepri).is_some()
+    }
 
     pub fn get_pending_vector(&self) -> u32 {
         if self.pending != 0 {
@@ -75,32 +148,25 @@ impl Nvic {
         }
     }
 
-    pub fn get_and_clear_next_intr_pending(&mut self) -> Option<i32> {
-        if self.pending != 0 {
-            let bit = self.pending.trailing_zeros();
-            let irq = (bit as i32) - IRQ_OFFSET;
-            // External IRQs (bit >= 16) need ISER enable; system exceptions always fire
-            if bit >= 16 {
-                let irq_num = irq as usize;
-                let idx = irq_num / 32;
-                let mask = 1u32 << (irq_num % 32);
-                if self.enable[idx] & mask == 0 {
-                    self.pending &= !(1u128 << bit);
-                    self.pending_reg[idx] &= !mask;
-                    return None;
-                }
-            }
-            self.pending &= !(1u128 << bit);
-            if irq >= 0 {
-                let idx = (irq as usize) / 32;
-                let mask = 1u32 << (irq as usize % 32);
-                self.pending_reg[idx] &= !mask;
-                self.active[idx] |= mask;
-            }
-            Some(irq)
-        } else {
-            None
+    pub fn get_next_pending_intr(&mut self) -> Option<i32> {
+        let primask = INTR_MASK_PRIMASK.load(Ordering::Relaxed);
+        let basepri = INTR_MASK_BASEPRI.load(Ordering::Relaxed);
+        let irq = self.find_highest_pending(primask, basepri)?;
+        let bit = (IRQ_OFFSET + irq) as u128;
+        self.pending &= !(1u128 << bit);
+        if irq >= 0 {
+            let idx = (irq as usize) / 32;
+            let mask = 1u32 << (irq as usize % 32);
+            self.pending_reg[idx] &= !mask;
+            self.active[idx] |= mask;
         }
+        let prio = self.exception_priority(irq);
+        self.active_prio_stack.push(prio);
+        Some(irq)
+    }
+
+    pub fn clear_current_interrupt(&mut self) {
+        self.active_prio_stack.pop();
     }
 
     pub fn maybe_set_systick_intr_pending(&mut self) {
@@ -114,13 +180,7 @@ impl Nvic {
         }
     }
 
-    pub fn is_in_interrupt(&self) -> bool {
-        self.in_interrupt
-    }
-
-    pub fn set_in_interrupt(&mut self, v: bool) {
-        self.in_interrupt = v;
-    }
+    pub fn is_in_interrupt(&self) -> bool { !self.active_prio_stack.is_empty() }
 }
 
 impl Peripheral for Nvic {
@@ -139,20 +199,29 @@ impl Peripheral for Nvic {
                 self.pending_reg[i]
             }
             0x200..=0x21C if offset < 0x200 + 4 * REG_WORDS as u32 => {
-                // IABR - Active Bit Register
                 let i = ((offset - 0x200) / 4) as usize;
                 self.active[i]
             }
             0x280..=0x29C if offset < 0x280 + 4 * REG_WORDS as u32 => {
-                // IABR alternate alias
                 let i = ((offset - 0x280) / 4) as usize;
                 self.active[i]
             }
+            // Byte-level priority access (via priority path addr 0xE000E300+, offset 0x200-0x2FF)
             0x200..=0x2FF => {
                 let byte_idx = (offset - 0x200) as usize;
-                if byte_idx < IRQ_COUNT {
-                    self.priority[byte_idx] as u32
-                } else { 0 }
+                if byte_idx < IRQ_COUNT { self.priority[byte_idx] as u32 } else { 0 }
+            }
+            // Word-level IPR access (ARM correct offset 0x300 from NVIC base)
+            0x300..=0x3EF => {
+                let reg_idx = ((offset - 0x300) / 4) as usize;
+                let mut v = 0u32;
+                for b in 0..4 {
+                    let idx = reg_idx * 4 + b;
+                    if idx < IRQ_COUNT {
+                        v |= (self.priority[idx] as u32) << (b * 8);
+                    }
+                }
+                v
             }
             _ => 0,
         }
@@ -177,7 +246,6 @@ impl Peripheral for Nvic {
                 self.enable[i] &= !value;
             }
              0x100..=0x11C if offset < 0x100 + 4 * REG_WORDS as u32 => {
-                // ISPR - Set Pending Register
                 let i = ((offset - 0x100) / 4) as usize;
                 let new_pending = value & !self.pending_reg[i];
                 self.pending_reg[i] |= value;
@@ -188,7 +256,6 @@ impl Peripheral for Nvic {
                 }
             }
             0x180..=0x19C if offset < 0x180 + 4 * REG_WORDS as u32 => {
-                // ICPR - Clear Pending Register
                 let i = ((offset - 0x180) / 4) as usize;
                 let cleared = self.pending_reg[i] & value;
                 self.pending_reg[i] &= !value;
@@ -198,13 +265,23 @@ impl Peripheral for Nvic {
                     }
                 }
             }
-            0x200..=0x21C if offset < 0x200 + 4 * REG_WORDS as u32 => {
-                // IABR - Active Bit Register (read-only by software writes)
-            }
+            // IABR is read-only by software
+            0x200..=0x21C if offset < 0x200 + 4 * REG_WORDS as u32 => {}
+            // Byte-level priority access (backward compat, via priority path addr 0xE000E300+)
             0x200..=0x2FF => {
                 let byte_idx = (offset - 0x200) as usize;
                 if byte_idx < IRQ_COUNT {
                     self.priority[byte_idx] = (value & 0xFF) as u8;
+                }
+            }
+            // Word-level IPR access (ARM correct offset 0x300 from NVIC base)
+            0x300..=0x3EF => {
+                let reg_idx = ((offset - 0x300) / 4) as usize;
+                for b in 0..4 {
+                    let idx = reg_idx * 4 + b;
+                    if idx < IRQ_COUNT {
+                        self.priority[idx] = ((value >> (b * 8)) & 0xFF) as u8;
+                    }
                 }
             }
             _ => {}

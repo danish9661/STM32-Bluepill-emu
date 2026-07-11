@@ -5,7 +5,8 @@ import * as periph from './stm32_bluepill_wasm.js';
 const { periph_read, periph_write, tick, get_next_pending_interrupt, dma_get_pending_count, 
 dma_get_pending, dma_set_completed, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen,
 add_lcd, add_i2c_oled,
-init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, gpio_read_output, initSync } = periph;
+init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, gpio_read_output, initSync,
+set_intr_masks, clear_current_interrupt } = periph;
 
 const parseHex = (v) => typeof v === 'number' ? v : parseInt(v, 16);
 
@@ -206,9 +207,14 @@ async function main() {
     let instCount = 0n;
     let stopRequested = false;
 
+    const readIntrMask = (reg) => {
+        try { return uc.reg_read_i32(Module[reg]) >>> 0; } catch (_) { return 0; }
+    };
+
     const codeHook = (handle, address, size, user_data) => {
         instCount++;
         tick();
+        set_intr_masks(readIntrMask('ARM_REG_PRIMASK'), readIntrMask('ARM_REG_BASEPRI'));
         if (is_watchdog_reset_requested()) {
             stopRequested = true;
             uc.emu_stop();
@@ -330,6 +336,7 @@ async function main() {
             } catch (e) {
                 // Handler crashed on BX LR (EXC_RETURN not supported)
             }
+            clear_current_interrupt();
             const savedFrame = uc.mem_read(BigInt(savedAt - 32), 32);
             const savedSv = new DataView(savedFrame.buffer, savedFrame.byteOffset, savedFrame.byteLength);
             uc.reg_write_i32(Module.ARM_REG_R0, savedSv.getUint32(28, true));

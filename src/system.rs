@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64, AtomicBool, AtomicI32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicBool, AtomicI32, AtomicU8, Ordering};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Mutex;
@@ -20,6 +20,10 @@ pub fn get_ext_devices() -> &'static Mutex<ExtDevices> {
 
 pub static INSTRUCTION_COUNT: AtomicU64 = AtomicU64::new(0);
 pub fn instruction_count() -> u64 { INSTRUCTION_COUNT.load(Ordering::Relaxed) }
+
+// Interrupt masks set by JS from Unicorn CPU state on each instruction.
+pub static INTR_MASK_PRIMASK: AtomicU32 = AtomicU32::new(0);
+pub static INTR_MASK_BASEPRI: AtomicU32 = AtomicU32::new(0);
 
 static WATCHDOG_RESET: AtomicBool = AtomicBool::new(false);
 
