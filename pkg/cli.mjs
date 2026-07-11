@@ -2,20 +2,28 @@ import { readFileSync } from 'fs';
 import path from 'path';
 import * as yaml from 'js-yaml';
 import * as periph from './stm32_bluepill_wasm.js';
-const { periph_read, periph_write, tick, get_next_pending_interrupt, dma_get_pending_count, dma_get_pending, dma_set_completed, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, gpio_read_output } = periph;
+const { periph_read, periph_write, tick, get_next_pending_interrupt, dma_get_pending_count, 
+dma_get_pending, dma_set_completed, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen,
+init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, gpio_read_output, initSync } = periph;
 
 const parseHex = (v) => typeof v === 'number' ? v : parseInt(v, 16);
 
 async function getMUnicorn() {
-    const unicorn = await import('./unicorn_arm.js');
-    return unicorn.default;
+    const { createRequire } = await import('module');
+    const require = createRequire(import.meta.url);
+    return require('./unicorn_arm.cjs');
 }
 
 async function main() {
+    const wasmBytes = readFileSync(new URL('stm32_bluepill_wasm_bg.wasm', import.meta.url));
+    initSync({ module: wasmBytes });
     const args = process.argv.slice(2);
     const configPaths = args.filter(a => a.startsWith('--config=')).map(a => a.split('=')[1]);
     const posArgs = args.filter(a => !a.startsWith('--'));
-    const maxInst = parseInt(posArgs[1] || process.env.MAX_INST || '1000000', 10);
+    const maxInst = parseInt(
+        args.find(a => a.startsWith('--max='))?.split('=')[1]
+        || (configPaths.length > 0 ? posArgs[0] : posArgs[1])
+        || process.env.MAX_INST || '1000000', 10);
     const showRegs = args.includes('--regs') || process.env.SHOW_REGS === '1';
     let uartAddr = parseInt(args.find(a => a.startsWith('--uart='))?.split('=')[1] || process.env.UART_ADDR || '0x40013800', 16);
 
@@ -48,6 +56,25 @@ async function main() {
         firmware = readFileSync(romFile);
         console.log(`Loading firmware: ${romFile} (${firmware.length} bytes)`);
 
+        // Register external devices from config BEFORE init()
+        if (config.devices) {
+            for (const [type, devs] of Object.entries(config.devices)) {
+                for (const d of devs || []) {
+                    if (type === 'i2c_eeprom') {
+                        const data = d.file ? readFileSync(path.resolve(config._devices_dir, d.file)) : new Uint8Array(d.size || 0);
+                        add_i2c_eeprom(d.peripheral, parseHex(d.addr), data);
+                    } else if (type === 'spi_flash') {
+                        const data = d.file ? readFileSync(path.resolve(config._devices_dir, d.file)) : new Uint8Array(d.size || 0);
+                        add_spi_flash(d.peripheral, parseHex(d.jedec_id), data, null);
+                    } else if (type === 'usart_probe') {
+                        uartAddr = parseHex(d.peripheral.match(/[0-9a-fA-F]+/)?.[0]) ? parseInt(d.peripheral, 16) : (PERIPH_ADDR[d.peripheral] || uartAddr);
+                    } else if (type === 'touchscreen') {
+                        add_touchscreen(d.peripheral, d.touch_detected_pin || null, d.cs || null);
+                    }
+                }
+            }
+        }
+
         if (config.cpu?.use_hardcoded) {
             init();
         } else {
@@ -71,7 +98,7 @@ async function main() {
     } else {
         const firmwarePath = posArgs[0] || process.env.FIRMWARE;
         if (!firmwarePath) {
-            console.error('Usage: node cli.mjs <firmware.bin> [max_instructions] [--config=path]');
+            console.error('Usage: node cli.mjs <firmware.bin> [max_instructions] [--config=path] [--max=N]');
             console.error('  or set FIRMWARE env var');
             process.exit(1);
         }
@@ -119,22 +146,6 @@ async function main() {
     ];
     for (const [start, end] of periphRanges) {
         uc.mem_map(start, end - start, Module.PROT_READ | Module.PROT_WRITE);
-    }
-
-    if (config.devices) {
-        for (const [type, devs] of Object.entries(config.devices)) {
-            for (const d of devs || []) {
-                if (type === 'i2c_eeprom') {
-                    const data = d.file ? readFileSync(path.resolve(config._devices_dir, d.file)) : new Uint8Array(d.size || 0);
-                    add_i2c_eeprom(d.peripheral, parseHex(d.addr), data);
-                } else if (type === 'spi_flash') {
-                    const data = d.file ? readFileSync(path.resolve(config._devices_dir, d.file)) : new Uint8Array(d.size || 0);
-                    add_spi_flash(d.peripheral, parseHex(d.jedec_id), data, null);
-                } else if (type === 'usart_probe') {
-                    uartAddr = parseHex(d.peripheral.match(/[0-9a-fA-F]+/)?.[0]) ? parseInt(d.peripheral, 16) : (PERIPH_ADDR[d.peripheral] || uartAddr);
-                }
-            }
-        }
     }
 
     const read32 = (addr) => {

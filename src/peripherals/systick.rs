@@ -6,13 +6,12 @@ pub struct SysTick {
     rvr: u32,
     cvr: u32,
     calib: u32,
-    val_toggle: bool,
 }
 
 impl SysTick {
     pub fn new(name: &str) -> Option<Box<dyn Peripheral>> {
         if name == "SysTick" || name == "STK" {
-            Some(Box::new(Self { csr: 0, rvr: 0, cvr: 0, calib: 0, val_toggle: false }))
+            Some(Box::new(Self { csr: 0, rvr: 0, cvr: 0, calib: 0 }))
         } else {
             None
         }
@@ -24,10 +23,7 @@ impl Peripheral for SysTick {
         match offset {
             0x00 => self.csr,
             0x04 => self.rvr,
-            0x08 => {
-                self.val_toggle = !self.val_toggle;
-                if self.val_toggle { self.cvr } else { self.rvr }
-            }
+            0x08 => self.cvr,
             0x0C => self.calib,
             _ => 0,
         }

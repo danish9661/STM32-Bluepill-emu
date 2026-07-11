@@ -29,7 +29,6 @@ struct Channel {
     ndtr: u32,
     par: u32,
     mar: u32,
-    status: u8,
 }
 
 impl Channel {
@@ -57,6 +56,17 @@ impl Channel {
 }
 
 impl Peripheral for Dma {
+    fn tick(&mut self, sys: &System) {
+        for ch in 0..7 {
+            if sys.dma_check_completion(ch) {
+                let shift = ch * 4;
+                self.isr |= (1 << 4) << shift; // TCIF
+                self.channels[ch].cr &= !1;    // clear EN
+                self.channels[ch].ndtr = 0;
+            }
+        }
+    }
+
     fn read(&mut self, _sys: &System, offset: u32) -> u32 {
         match offset {
             0x00 => self.isr,
@@ -101,8 +111,6 @@ impl Peripheral for Dma {
                                 self.channels[ch].cr = value & 0x7F7F;
                                 if value & 1 != 0 {
                                     self.channels[ch].do_xfer(&self.name, sys, ch);
-                                    self.isr |= (1 << 4) << (ch * 4);
-                                    self.isr |= (1 << 3) << (ch * 4);
                                     let irq = self.channel_irq(ch);
                                     let cr = self.channels[ch].cr;
                                     let tcie = ((cr >> 4) & 1) as u8;
@@ -110,11 +118,6 @@ impl Peripheral for Dma {
                                     let teie = ((cr >> 2) & 1) as u8;
                                     let flags = tcie | (htie << 1) | (teie << 2);
                                     set_dma_intr_info(ch, irq, flags);
-                                    if tcie != 0 || htie != 0 || teie != 0 {
-                                        sys.p.nvic.borrow_mut().set_intr_pending(irq);
-                                    }
-                                    self.channels[ch].cr &= !1;
-                                    self.channels[ch].ndtr = 0;
                                 }
                             }
                             0x04 => self.channels[ch].ndtr = value & 0xFFFF,

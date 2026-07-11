@@ -10,6 +10,7 @@ use system::WasmSystem;
 // We use static mut since WASM is single-threaded — this allows re-initialization.
 static mut SYS: Option<WasmSystem> = None;
 
+#[allow(static_mut_refs)]
 fn sys() -> &'static WasmSystem {
     unsafe { SYS.as_ref().expect("WasmSystem not initialized") }
 }
@@ -161,4 +162,35 @@ pub fn adc_set_sim_value(val: u16) {
 pub fn add_software_spi(name: &str, cs: Option<String>, clk: &str, miso: &str, mosi: &str) {
     system::get_software_spi_configs().lock().unwrap()
         .push((name.to_string(), cs, clk.to_string(), miso.to_string(), mosi.to_string()));
+}
+
+/// Register a touchscreen device. Must be called before init().
+#[wasm_bindgen]
+pub fn add_touchscreen(peripheral: &str, touch_detected_pin: Option<String>, cs: Option<String>) {
+    use crate::ext_devices::touchscreen::{Touchscreen, TouchscreenConfig};
+    let config = TouchscreenConfig {
+        peripheral: peripheral.to_string(),
+        framebuffer: String::new(),
+        flip_x: None,
+        flip_y: None,
+        swap_x_y: None,
+        touch_detected_pin,
+        scale_down: None,
+        cs,
+    };
+    let ts = Touchscreen::new(config);
+    system::get_ext_devices().lock().unwrap().touchscreens
+        .push(std::rc::Rc::new(std::cell::RefCell::new(ts)));
+}
+
+/// Set touch coordinates on a touchscreen device. Must be called after init().
+#[wasm_bindgen]
+pub fn touchscreen_set_touch(peripheral: &str, x: u16, y: u16, pressure: u16) {
+    let et = system::get_ext_devices().lock().unwrap();
+    for ts in &et.touchscreens {
+        if ts.borrow().config.peripheral == peripheral {
+            ts.borrow_mut().set_touch(x, y, pressure);
+            break;
+        }
+    }
 }

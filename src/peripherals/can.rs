@@ -60,7 +60,7 @@ impl Can {
 
     fn match_filter(&self, tir: u32) -> Option<usize> {
         if self.fmr & 1 != 0 { return None; } // FINIT=1 means filter init mode, no matching
-        let ide = (tir >> 2) & 1; // 0=standard, 1=extended
+        let _ide = (tir >> 2) & 1; // 0=standard, 1=extended
         let mut best = None;
         for bank in 0..14 {
             let enabled = (self.fa1r >> bank) & 1;

@@ -2,6 +2,8 @@ use crate::system::System;
 use super::Peripheral;
 use std::sync::atomic::{AtomicU16, Ordering};
 
+const ADC_IRQ: i32 = 18;
+
 static ADC_SIM_VALUE: AtomicU16 = AtomicU16::new(0x3FF);
 
 pub fn set_adc_value(val: u16) {
@@ -24,6 +26,7 @@ pub struct Adc {
     jsqr: u32,
     jdata: [u32; 4],
     dr: u32,
+    #[allow(dead_code)]
     ofr: [u32; 4],
 }
 
@@ -35,10 +38,26 @@ impl Adc {
             None
         }
     }
+
+    fn fire_interrupts(&self, sys: &System) {
+        if self.sr & 1 != 0 && self.cr1 & (1 << 6) != 0 { // AWD + AWDIE
+            sys.p.nvic.borrow_mut().set_intr_pending(ADC_IRQ);
+        }
+        if self.sr & (1 << 1) != 0 && self.cr1 & (1 << 5) != 0 { // EOC + EOCIE
+            sys.p.nvic.borrow_mut().set_intr_pending(ADC_IRQ);
+        }
+        if self.sr & (1 << 2) != 0 && self.cr1 & (1 << 7) != 0 { // JEOC + JEOCIE
+            sys.p.nvic.borrow_mut().set_intr_pending(ADC_IRQ);
+        }
+    }
 }
 
 impl Peripheral for Adc {
-    fn read(&mut self, _sys: &System, offset: u32) -> u32 {
+    fn tick(&mut self, sys: &System) {
+        self.fire_interrupts(sys);
+    }
+
+    fn read(&mut self, sys: &System, offset: u32) -> u32 {
         match offset {
             0x00 => self.sr,
             0x04 => self.cr1,
@@ -61,22 +80,23 @@ impl Peripheral for Adc {
             0x48 => self.jdata[3],
             0x4C => {
                 self.sr &= !(1 << 1); // clear EOC on DR read
+                self.fire_interrupts(sys);
                 self.dr
             }
             _ => 0,
         }
     }
 
-    fn write(&mut self, _sys: &System, offset: u32, value: u32) {
+    fn write(&mut self, sys: &System, offset: u32, value: u32) {
         match offset {
             0x00 => self.sr = value & 0x3F,
-            0x04 => self.cr1 = value,
+            0x04 => { self.cr1 = value; self.fire_interrupts(sys); }
             0x08 => {
                 self.cr2 = value;
                 if value & (1 << 22) != 0 {
-                    // SWSTART: simulate a conversion
                     self.dr = ADC_SIM_VALUE.load(Ordering::Relaxed) as u32;
                     self.sr |= 1 << 1; // EOC
+                    self.fire_interrupts(sys);
                 }
             }
             0x0C => self.smpr1 = value,

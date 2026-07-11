@@ -2,8 +2,6 @@ use crate::system::{System, get_uart_output};
 use crate::ext_devices::ExtDevices;
 use super::Peripheral;
 
-const USART_IRQ_OFFSET: i32 = 37;
-
 fn usart_irq(name: &str) -> Option<i32> {
     match name {
         "USART1" => Some(37),
@@ -74,12 +72,31 @@ impl Usart {
         dr
     }
 
+    fn is_loopback(&self) -> bool {
+        self.cr3 & (1 << 2) != 0 // HDSEL = half-duplex -> software loopback
+    }
+
+    fn rx_push(&mut self, byte: u8, sys: &System) {
+        if self.rx_buf.len() < 16 {
+            self.rx_buf.push(byte);
+            self.sr |= 1 << 5; // RXNE
+        } else {
+            self.sr |= 1 << 3; // ORE
+        }
+        self.sr |= 0x00C0; // TXE, TC
+        self.update_interrupt(sys);
+    }
+
     fn write_dr(&mut self, value: u32, sys: &System) {
         let ch = (value & 0xFF) as u8;
         self.tx_data.push(ch);
         get_uart_output().lock().unwrap().push(ch as char);
         self.sr |= 0x00C0; // TXE=1, TC=1
-        self.update_interrupt(sys);
+        if self.is_loopback() {
+            self.rx_push(ch, sys);
+        } else {
+            self.update_interrupt(sys);
+        }
     }
 }
 
@@ -118,13 +135,6 @@ impl Peripheral for Usart {
     }
 
     fn rx_byte(&mut self, sys: &System, byte: u8) {
-        if self.rx_buf.len() < 16 {
-            self.rx_buf.push(byte);
-            self.sr |= 1 << 5; // RXNE
-        } else {
-            self.sr |= 1 << 3; // ORE
-        }
-        self.sr |= 0x00C0; // TXE, TC
-        self.update_interrupt(sys);
+        self.rx_push(byte, sys);
     }
 }

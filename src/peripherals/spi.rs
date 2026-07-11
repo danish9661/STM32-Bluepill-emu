@@ -8,11 +8,13 @@ pub struct Spi {
     pub cr1: u32,
     pub cr2: u32,
     pub srm: u32,
-    pub dr: u32,
+    pub crcpr: u32,
     pub rxcrcr: u32,
     pub txcrcr: u32,
     pub rx_buffer: u32,
-    pub ready_toggle: bool,
+    pub txe: bool,
+    pub rxne: bool,
+    pub i2s_sr_toggle: bool,
     pub i2scfgr: u32,
     pub i2spr: u32,
     wave_counter: u16,
@@ -33,7 +35,7 @@ impl Spi {
                     d.name = d.device.borrow_mut().connect_peripheral(&d.name);
                 }
             }
-            Some(Box::new(Self { name: name.to_string(), devices, ..Default::default() }))
+            Some(Box::new(Self { name: name.to_string(), devices, txe: true, ..Default::default() }))
         } else { None }
     }
 
@@ -63,7 +65,6 @@ impl Spi {
 
     fn fire_interrupts(&mut self, sys: &System) {
         if self.name.starts_with("SPI") && !self.is_i2s() {
-            // SPI mode: fire when TXEIE or RXNEIE enabled and ready
             let irq = match self.name.as_str() {
                 "SPI1" | "SPI4" => Some(35),
                 "SPI2" | "SPI5" => Some(36),
@@ -73,7 +74,7 @@ impl Spi {
             if let Some(irq) = irq {
                 let txeie = (self.cr2 >> 1) & 1;
                 let rxneie = self.cr2 & 1;
-                if (txeie != 0 || rxneie != 0) && self.ready_toggle {
+                if (txeie != 0 && self.txe) || (rxneie != 0 && self.rxne) {
                     sys.p.nvic.borrow_mut().set_intr_pending(irq);
                 }
             }
@@ -87,27 +88,26 @@ impl Peripheral for Spi {
             0x0000 => self.cr1,
             0x0004 => self.cr2,
             0x0008 => {
-                self.ready_toggle = !self.ready_toggle;
                 if self.is_i2s() {
-                    // I2S SR: RXNE, TXE, etc
-                    (if self.ready_toggle { 0b11 } else { 0 })
+                    self.i2s_sr_toggle = !self.i2s_sr_toggle;
+                    if self.i2s_sr_toggle { 0b11 } else { 0 }
                 } else {
-                    let sr = if self.ready_toggle { 0b11 } else { 0 };
+                    let sr = (if self.txe { 2 } else { 0 }) | (if self.rxne { 1 } else { 0 });
                     self.fire_interrupts(sys);
                     sr
                 }
             }
             0x000C => {
-                let v = if self.is_i2s() {
-                    // I2S mode: generate received audio data
+                if self.is_i2s() {
                     self.generate_i2s_audio()
                 } else {
-                    self.rx_buffer
-                };
-                self.rx_buffer = 0;
-                v
+                    let v = self.rx_buffer;
+                    self.rx_buffer = 0;
+                    self.rxne = false;
+                    v
+                }
             }
-             0x0010 => self.dr,
+             0x0010 => self.crcpr,
              0x0014 => self.rxcrcr,
              0x0018 => self.txcrcr,
              0x001C => self.i2scfgr,
@@ -125,9 +125,9 @@ impl Peripheral for Spi {
             }
             0x000C => {
                 if self.is_i2s() {
-                    // I2S mode: write data generates receive data
                     self.rx_buffer = self.generate_i2s_audio();
                 } else {
+                    self.txe = false;
                     let device = self.active_device(sys);
                     if let Some(ref d) = device {
                         let mut d = d.borrow_mut();
@@ -144,9 +144,11 @@ impl Peripheral for Spi {
                     } else {
                         self.rx_buffer = 0xFF;
                     }
+                    self.txe = true;
+                    self.rxne = true;
                 }
             }
-             0x0010 => self.dr = value,
+             0x0010 => self.crcpr = value,
              0x0014 => self.rxcrcr = value,
              0x0018 => self.txcrcr = value,
              0x001C => self.i2scfgr = value & 0xFFF,
