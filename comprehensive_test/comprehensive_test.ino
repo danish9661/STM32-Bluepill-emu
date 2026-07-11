@@ -580,6 +580,138 @@ void oled_test(void) {
   uart_write_line("   Sent 128 bytes of OLED pixel data via I2C");
 }
 
+// 19. CAN Test
+void can_test(void) {
+  volatile uint32_t *RCC_APB1ENR = (uint32_t *)0x4002101C;
+  volatile uint32_t *GPIOB_CRH = (uint32_t *)0x40010C04;
+  volatile uint32_t *CAN_MCR = (uint32_t *)0x40006400;
+  volatile uint32_t *CAN_MSR = (uint32_t *)0x40006404;
+  volatile uint32_t *CAN_BTR = (uint32_t *)0x4000641C;
+  volatile uint32_t *CAN_TI0R = (uint32_t *)0x40006580;
+  volatile uint32_t *CAN_TDT0R = (uint32_t *)0x40006584;
+  volatile uint32_t *CAN_TDL0R = (uint32_t *)0x40006588;
+  volatile uint32_t *CAN_TDH0R = (uint32_t *)0x4000658C;
+  volatile uint32_t *CAN_TSR = (uint32_t *)0x40006408;
+  volatile uint32_t *CAN_FMR = (uint32_t *)0x40006600;
+  volatile uint32_t *CAN_FM1R = (uint32_t *)0x40006604;
+  volatile uint32_t *CAN_FS1R = (uint32_t *)0x4000660C;
+  volatile uint32_t *CAN_FA1R = (uint32_t *)0x4000661C;
+  volatile uint32_t *CAN_F0R1 = (uint32_t *)0x40006640;
+  volatile uint32_t *RCC_APB1ENR2 = (uint32_t *)0x4002101C;
+  volatile uint32_t *RCC_APB2ENR2 = (uint32_t *)0x40021018;
+
+  *RCC_APB1ENR2 |= (1 << 25); // CAN1EN
+  *RCC_APB2ENR2 |= (1 << 3);  // GPIOBEN
+
+  uint32_t crh = *GPIOB_CRH;
+  crh = (crh & ~(0xF << 0)) | (0x8 << 0);  // PB8 RX input pull-up
+  crh = (crh & ~(0xF << 4)) | (0xB << 4);  // PB9 TX AFPP
+  *GPIOB_CRH = crh;
+
+  // Request leave init mode
+  *CAN_MCR = *CAN_MCR & ~1;
+  uint32_t t = 10000;
+  while (*CAN_MSR & 1) { if (--t == 0) break; }
+  uart_write_str("   CAN MSR after leave init: ");
+  uart_write_hex(*CAN_MSR);
+  uart_write_line("");
+
+  // Bit timing: 8MHz → 500kbps (BS1=4, BS2=3, SJW=1, prescaler=2)
+  *CAN_BTR = (1 << 24) | (3 << 20) | (4 << 16) | (2 - 1);
+  uart_write_str("   CAN BTR: ");
+  uart_write_hex(*CAN_BTR);
+  uart_write_line("");
+
+  // Filter init mode
+  *CAN_FMR = 1;
+  // 32-bit mask mode (FM1R bit 0 = 0)
+  *CAN_FM1R = 0;
+  // Single 32-bit filter (FS1R bit 0 = 1)
+  *CAN_FS1R = (1 << 0);
+  // ID = 0, mask = 0 (accept all)
+  *CAN_F0R1 = 0;
+  // Activate filter 0
+  *CAN_FA1R = (1 << 0);
+  // Exit filter init mode
+  *CAN_FMR = 0;
+  uart_write_str("   CAN FA1R (filters active): ");
+  uart_write_hex(*CAN_FA1R);
+  uart_write_line("");
+
+  // Send a CAN frame via TX mailbox 0
+  *CAN_TI0R = (0x123 << 21) | 1; // STDID=0x123, TXRQ=1
+  *CAN_TDT0R = 2; // DLC=2
+  *CAN_TDL0R = 0xDEAD;
+  *CAN_TDH0R = 0;
+  uart_write_str("   CAN TI0R: ");
+  uart_write_hex(*CAN_TI0R);
+  uart_write_line("");
+
+  t = 10000;
+  while (!(*CAN_TSR & (1 << 0))) { if (--t == 0) break; } // TXOK
+  uart_write_str("   CAN TSR: ");
+  uart_write_hex(*CAN_TSR);
+  uart_write_line(t > 0 ? " (TXOK)" : " (TX timeout)");
+}
+
+// 20. IWDG Test (no reset)
+void iwdg_test(void) {
+  volatile uint32_t *IWDG_KR = (uint32_t *)0x40003000;
+  volatile uint32_t *IWDG_PR = (uint32_t *)0x40003004;
+  volatile uint32_t *IWDG_RLR = (uint32_t *)0x40003008;
+  volatile uint32_t *IWDG_SR = (uint32_t *)0x4000300C;
+
+  // Unlock register access
+  *IWDG_KR = 0x5555;
+
+  // Write PR and RLR
+  *IWDG_PR = 0; // /4
+  *IWDG_RLR = 0xFFF;
+
+  // Read back
+  uint32_t pr = *IWDG_PR;
+  uint32_t rlr = *IWDG_RLR;
+  uint32_t sr = *IWDG_SR;
+  uart_write_str("   IWDG PR: ");
+  uart_write_hex(pr);
+  uart_write_str(", RLR: ");
+  uart_write_hex(rlr);
+  uart_write_str(", SR: ");
+  uart_write_hex(sr);
+  uart_write_line(pr == 0 && rlr == 0xFFF ? " (MATCH)" : " (MISMATCH)");
+
+  // DO NOT write 0xCCCC to KR (would start watchdog)
+}
+
+// 21. WWDG Test
+void wwdg_test(void) {
+  volatile uint32_t *RCC_APB1ENR3 = (uint32_t *)0x4002101C;
+  volatile uint32_t *WWDG_CR = (uint32_t *)0x40002C00;
+  volatile uint32_t *WWDG_CFR = (uint32_t *)0x40002C04;
+  volatile uint32_t *WWDG_SR = (uint32_t *)0x40002C08;
+
+  *RCC_APB1ENR3 |= (1 << 11); // WWDGEN
+
+  *WWDG_CFR = 0x3FF;
+  uint32_t cfr = *WWDG_CFR;
+  uart_write_str("   WWDG CFR: ");
+  uart_write_hex(cfr);
+  uart_write_str(cfr == 0x3FF ? " (MATCH)" : " (MISMATCH)");
+  uart_write_line("");
+
+  *WWDG_CR = 0x50;
+  uint32_t cr = *WWDG_CR;
+  uart_write_str("   WWDG CR: ");
+  uart_write_hex(cr);
+  uart_write_str(cr > 0 ? " (non-zero)" : " (ZERO)");
+  uart_write_line("");
+
+  uint32_t sr = *WWDG_SR;
+  uart_write_str("   WWDG SR: ");
+  uart_write_hex(sr);
+  uart_write_line("");
+}
+
 void setup(void) {
   gpio_init();
   gpio_write(13, 1);
@@ -785,8 +917,26 @@ void setup(void) {
   uart_write_line("   PASS");
   uart_write_line("");
 
+  // 19. CAN
+  uart_write_line("19. CAN Test");
+  can_test();
+  uart_write_line("   PASS");
+  uart_write_line("");
+
+  // 20. IWDG
+  uart_write_line("20. IWDG Test");
+  iwdg_test();
+  uart_write_line("   PASS");
+  uart_write_line("");
+
+  // 21. WWDG
+  uart_write_line("21. WWDG Test");
+  wwdg_test();
+  uart_write_line("   PASS");
+  uart_write_line("");
+
   uart_write_line("============================================");
-  uart_write_str("All 18 peripheral tests completed!");
+  uart_write_str("All 21 peripheral tests completed!");
   uart_write_line("");
   uart_write_line("============================================");
 }
