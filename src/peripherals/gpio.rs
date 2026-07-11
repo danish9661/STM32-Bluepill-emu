@@ -35,7 +35,7 @@ pub struct GpioPorts {
 impl GpioPorts {
     pub fn port_index(letter: char) -> u8 {
         match letter {
-            'A'..='E' => letter as u8 - 'A' as u8,
+            'A'..='G' => letter as u8 - 'A' as u8,
             _ => panic!("Invalid GPIO port {}", letter),
         }
     }

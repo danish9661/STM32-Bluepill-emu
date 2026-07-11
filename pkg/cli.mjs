@@ -110,7 +110,7 @@ async function main() {
         firmware = readFileSync(firmwarePath);
         console.log(`Loading firmware: ${firmwarePath} (${firmware.length} bytes)`);
 
-        const fwDir = firmwarePath.replace(/\\/g, '/').replace(/\/[^/]+$/, '');
+        const fwDir = path.dirname(path.resolve(firmwarePath));
         for (const fn of ['eeprom.bin', 'spi_flash.bin']) {
             try {
                 const data = readFileSync(`${fwDir}/${fn}`);
@@ -120,7 +120,24 @@ async function main() {
             } catch (_) {}
         }
 
-        init();
+        // Try SVD file, fall back to hardcoded
+        const svdFallbackPaths = [
+            path.resolve(fwDir, 'STM32F103.svd'),
+            path.resolve(process.cwd(), 'STM32F103.svd'),
+        ];
+        let svdLoaded = false;
+        for (const svdPath of svdFallbackPaths) {
+            try {
+                const svdXml = readFileSync(svdPath, 'utf8');
+                init_svd(svdXml);
+                console.log(`Using SVD: ${svdPath}`);
+                svdLoaded = true;
+                break;
+            } catch (_) {}
+        }
+        if (!svdLoaded) {
+            init();
+        }
         vector_table = 0x08000000;
         memRegions = [
             { start: 0x08000000, size: 0x10000 },
