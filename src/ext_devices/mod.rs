@@ -4,6 +4,7 @@ pub mod usart_probe;
 pub mod lcd;
 pub mod touchscreen;
 pub mod display;
+pub mod i2c_oled;
 
 pub use spi_flash::SpiFlash;
 pub use i2c_eeprom::I2cEeprom;
@@ -11,6 +12,7 @@ pub use usart_probe::UsartProbe;
 pub use lcd::Lcd;
 pub use touchscreen::Touchscreen;
 pub use display::Display;
+pub use i2c_oled::I2cOled;
 
 use std::{rc::Rc, cell::RefCell};
 
@@ -35,6 +37,7 @@ pub struct ExtDevices {
     pub lcds: Vec<Rc<RefCell<Lcd>>>,
     pub touchscreens: Vec<Rc<RefCell<Touchscreen>>>,
     pub displays: Vec<Rc<RefCell<Display>>>,
+    pub i2c_oleds: Vec<Rc<RefCell<I2cOled>>>,
 }
 
 impl ExtDevices {
@@ -102,14 +105,26 @@ impl ExtDevices {
     }
 
     pub fn find_i2c_devices(&self, peri_name: &str) -> Vec<I2cDeviceEntry> {
-        self.i2c_eeproms.iter()
-            .filter(|d| d.borrow().config.peripheral == peri_name)
-            .map(|d| I2cDeviceEntry {
-                address: d.borrow().config.address,
-                device: d.clone() as Rc<RefCell<dyn ExtDevice<(), u8>>>,
-                name: format!("{} i2c-eeprom", peri_name),
-            })
-            .collect()
+        let mut result: Vec<I2cDeviceEntry> = Vec::new();
+        for d in &self.i2c_eeproms {
+            if d.borrow().config.peripheral == peri_name {
+                result.push(I2cDeviceEntry {
+                    address: d.borrow().config.address,
+                    device: d.clone() as Rc<RefCell<dyn ExtDevice<(), u8>>>,
+                    name: format!("{} i2c-eeprom", peri_name),
+                });
+            }
+        }
+        for d in &self.i2c_oleds {
+            if d.borrow().config.peripheral == peri_name {
+                result.push(I2cDeviceEntry {
+                    address: d.borrow().config.address,
+                    device: d.clone() as Rc<RefCell<dyn ExtDevice<(), u8>>>,
+                    name: format!("{} i2c-oled", peri_name),
+                });
+            }
+        }
+        result
     }
 
     pub fn find_mem_device(&self, peri_name: &str) -> Option<Rc<RefCell<dyn ExtDevice<u32, u32>>>> {

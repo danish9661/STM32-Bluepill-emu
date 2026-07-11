@@ -3883,7 +3883,7 @@ LOAD C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/x
                 0x08000000                g_pfnVectors
                 0x0800010c                        . = ALIGN (0x4)
 
-.text           0x0800010c     0x18fc
+.text           0x0800010c     0x1ab4
                 0x0800010c                        . = ALIGN (0x4)
  *(.text)
  *(.text*)
@@ -3990,346 +3990,359 @@ LOAD C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/x
  .text._Z8bkp_testv
                 0x08000948       0x78 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
                 0x08000948                bkp_test()
- .text.setup    0x080009c0      0x478 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
-                0x080009c0                setup
- .text.loop     0x08000e38       0x34 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
-                0x08000e38                loop
+ .text._Z8lcd_testv
+                0x080009c0       0x38 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+                0x080009c0                lcd_test()
+ .text._Z14oled_write_cmdh
+                0x080009f8       0x84 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+                0x080009f8                oled_write_cmd(unsigned char)
+ .text._Z9oled_testv
+                0x08000a7c       0xbc C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+                0x08000a7c                oled_test()
+ .text.setup    0x08000b38      0x4b8 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+                0x08000b38                setup
+ .text.loop     0x08000ff0       0x34 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+                0x08000ff0                loop
  .text.startup.main
-                0x08000e6c        0xc C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
-                0x08000e6c                main
+                0x08001024        0xc C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+                0x08001024                main
  .text.HAL_IncTick
-                0x08000e78       0x18 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal.c.o
-                0x08000e78                HAL_IncTick
+                0x08001030       0x18 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal.c.o
+                0x08001030                HAL_IncTick
  .text.HAL_NVIC_ClearPendingIRQ
-                0x08000e90       0x1c C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_cortex.c.o
-                0x08000e90                HAL_NVIC_ClearPendingIRQ
+                0x08001048       0x1c C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_cortex.c.o
+                0x08001048                HAL_NVIC_ClearPendingIRQ
  .text.HAL_SYSTICK_Callback
-                0x08000eac        0x2 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_cortex.c.o
-                0x08000eac                HAL_SYSTICK_Callback
+                0x08001064        0x2 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_cortex.c.o
+                0x08001064                HAL_SYSTICK_Callback
  .text.HAL_SYSTICK_IRQHandler
-                0x08000eae        0x8 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_cortex.c.o
-                0x08000eae                HAL_SYSTICK_IRQHandler
+                0x08001066        0x8 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_cortex.c.o
+                0x08001066                HAL_SYSTICK_IRQHandler
  .text.HAL_DMA_Abort
-                0x08000eb6       0x3e C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_dma.c.o
-                0x08000eb6                HAL_DMA_Abort
+                0x0800106e       0x3e C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_dma.c.o
+                0x0800106e                HAL_DMA_Abort
  .text.HAL_DMA_Abort_IT
-                0x08000ef4       0x8c C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_dma.c.o
-                0x08000ef4                HAL_DMA_Abort_IT
+                0x080010ac       0x8c C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_dma.c.o
+                0x080010ac                HAL_DMA_Abort_IT
  .text.HAL_GPIO_EXTI_IRQHandler
-                0x08000f80       0x18 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_gpio.c.o
-                0x08000f80                HAL_GPIO_EXTI_IRQHandler
+                0x08001138       0x18 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_gpio.c.o
+                0x08001138                HAL_GPIO_EXTI_IRQHandler
  .text.HAL_TIM_PWM_PulseFinishedCallback
-                0x08000f98        0x2 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_tim.c.o
-                0x08000f98                HAL_TIM_PWM_PulseFinishedCallback
+                0x08001150        0x2 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_tim.c.o
+                0x08001150                HAL_TIM_PWM_PulseFinishedCallback
  .text.HAL_TIM_TriggerCallback
-                0x08000f9a        0x2 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_tim.c.o
-                0x08000f9a                HAL_TIM_TriggerCallback
+                0x08001152        0x2 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_tim.c.o
+                0x08001152                HAL_TIM_TriggerCallback
  .text.HAL_TIM_IRQHandler
-                0x08000f9c      0x128 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_tim.c.o
-                0x08000f9c                HAL_TIM_IRQHandler
+                0x08001154      0x128 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_tim.c.o
+                0x08001154                HAL_TIM_IRQHandler
  .text.HAL_TIMEx_CommutCallback
-                0x080010c4        0x2 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_tim_ex.c.o
-                0x080010c4                HAL_TIMEx_CommutCallback
+                0x0800127c        0x2 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_tim_ex.c.o
+                0x0800127c                HAL_TIMEx_CommutCallback
  .text.HAL_TIMEx_BreakCallback
-                0x080010c6        0x2 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_tim_ex.c.o
-                0x080010c6                HAL_TIMEx_BreakCallback
+                0x0800127e        0x2 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_tim_ex.c.o
+                0x0800127e                HAL_TIMEx_BreakCallback
  .text.UART_EndRxTransfer
-                0x080010c8       0x5c C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_uart.c.o
+                0x08001280       0x5c C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_uart.c.o
  .text.UART_DMAAbortOnError
-                0x08001124       0x10 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_uart.c.o
+                0x080012dc       0x10 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_uart.c.o
  .text.HAL_UARTEx_RxEventCallback
-                0x08001134        0x2 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_uart.c.o
-                0x08001134                HAL_UARTEx_RxEventCallback
+                0x080012ec        0x2 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_uart.c.o
+                0x080012ec                HAL_UARTEx_RxEventCallback
  .text.UART_Receive_IT.isra.0
-                0x08001136       0xb6 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_uart.c.o
+                0x080012ee       0xb6 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_uart.c.o
  .text.HAL_UART_IRQHandler
-                0x080011ec      0x294 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_uart.c.o
-                0x080011ec                HAL_UART_IRQHandler
+                0x080013a4      0x294 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_uart.c.o
+                0x080013a4                HAL_UART_IRQHandler
  .text.HAL_UART_GetState
-                0x08001480        0xc C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_uart.c.o
-                0x08001480                HAL_UART_GetState
+                0x08001638        0xc C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_uart.c.o
+                0x08001638                HAL_UART_GetState
  .text.UART_Start_Receive_IT
-                0x0800148c       0x32 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_uart.c.o
-                0x0800148c                UART_Start_Receive_IT
+                0x08001644       0x32 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_uart.c.o
+                0x08001644                UART_Start_Receive_IT
  .text.HAL_UART_Receive_IT
-                0x080014be       0x22 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_uart.c.o
-                0x080014be                HAL_UART_Receive_IT
+                0x08001676       0x22 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_uart.c.o
+                0x08001676                HAL_UART_Receive_IT
  .text._ZNSt14_Function_baseD2Ev
-                0x080014e0       0x12 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
-                0x080014e0                std::_Function_base::~_Function_base()
-                0x080014e0                std::_Function_base::~_Function_base()
- *fill*         0x080014f2        0x2 
+                0x08001698       0x12 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
+                0x08001698                std::_Function_base::~_Function_base()
+                0x08001698                std::_Function_base::~_Function_base()
+ *fill*         0x080016aa        0x2 
  .text.TIM1_UP_IRQHandler
-                0x080014f4       0x14 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
-                0x080014f4                TIM1_UP_IRQHandler
+                0x080016ac       0x14 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
+                0x080016ac                TIM1_UP_IRQHandler
  .text.TIM1_CC_IRQHandler
-                0x08001508        0x4 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
-                0x08001508                TIM1_CC_IRQHandler
+                0x080016c0        0x4 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
+                0x080016c0                TIM1_CC_IRQHandler
  .text.TIM2_IRQHandler
-                0x0800150c       0x14 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
-                0x0800150c                TIM2_IRQHandler
+                0x080016c4       0x14 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
+                0x080016c4                TIM2_IRQHandler
  .text.TIM3_IRQHandler
-                0x08001520       0x14 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
-                0x08001520                TIM3_IRQHandler
+                0x080016d8       0x14 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
+                0x080016d8                TIM3_IRQHandler
  .text.TIM4_IRQHandler
-                0x08001534       0x14 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
-                0x08001534                TIM4_IRQHandler
+                0x080016ec       0x14 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
+                0x080016ec                TIM4_IRQHandler
  .text._ZNKSt8functionIFvvEEclEv
-                0x08001548       0x12 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
-                0x08001548                std::function<void ()>::operator()() const
+                0x08001700       0x12 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
+                0x08001700                std::function<void ()>::operator()() const
  .text._ZN13HardwareTimer14updateCallbackEP17TIM_HandleTypeDef
-                0x0800155a       0x18 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
-                0x0800155a                HardwareTimer::updateCallback(TIM_HandleTypeDef*)
+                0x08001712       0x18 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
+                0x08001712                HardwareTimer::updateCallback(TIM_HandleTypeDef*)
  .text.HAL_TIM_PeriodElapsedCallback
-                0x08001572        0x4 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
-                0x08001572                HAL_TIM_PeriodElapsedCallback
+                0x0800172a        0x4 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
+                0x0800172a                HAL_TIM_PeriodElapsedCallback
  .text._ZN13HardwareTimer22captureCompareCallbackEP17TIM_HandleTypeDef
-                0x08001576       0x3e C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
-                0x08001576                HardwareTimer::captureCompareCallback(TIM_HandleTypeDef*)
+                0x0800172e       0x3e C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
+                0x0800172e                HardwareTimer::captureCompareCallback(TIM_HandleTypeDef*)
  .text.HAL_TIM_OC_DelayElapsedCallback
-                0x080015b4        0x4 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
-                0x080015b4                HAL_TIM_OC_DelayElapsedCallback
+                0x0800176c        0x4 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
+                0x0800176c                HAL_TIM_OC_DelayElapsedCallback
  .text.HAL_TIM_IC_CaptureCallback
-                0x080015b8        0x4 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
-                0x080015b8                HAL_TIM_IC_CaptureCallback
+                0x08001770        0x4 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
+                0x08001770                HAL_TIM_IC_CaptureCallback
  .text.noOsSystickHandler
-                0x080015bc        0x2 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\clock.c.o
-                0x080015bc                osSystickHandler
-                0x080015bc                noOsSystickHandler
+                0x08001774        0x2 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\clock.c.o
+                0x08001774                osSystickHandler
+                0x08001774                noOsSystickHandler
  .text.SysTick_Handler
-                0x080015be       0x10 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\clock.c.o
-                0x080015be                SysTick_Handler
+                0x08001776       0x10 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\clock.c.o
+                0x08001776                SysTick_Handler
  .text.startup._ZNSt8functionIFvvEEC2EDn.constprop.0.isra.0
-                0x080015ce        0xc C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
- *fill*         0x080015da        0x2 
+                0x08001786        0xc C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
+ *fill*         0x08001792        0x2 
  .text.HAL_GPIO_EXTI_Callback
-                0x080015dc       0x2c C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
-                0x080015dc                HAL_GPIO_EXTI_Callback
+                0x08001794       0x2c C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
+                0x08001794                HAL_GPIO_EXTI_Callback
  .text.EXTI0_IRQHandler
-                0x08001608        0x6 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
-                0x08001608                EXTI0_IRQHandler
+                0x080017c0        0x6 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
+                0x080017c0                EXTI0_IRQHandler
  .text.EXTI1_IRQHandler
-                0x0800160e        0x6 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
-                0x0800160e                EXTI1_IRQHandler
+                0x080017c6        0x6 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
+                0x080017c6                EXTI1_IRQHandler
  .text.EXTI2_IRQHandler
-                0x08001614        0x6 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
-                0x08001614                EXTI2_IRQHandler
+                0x080017cc        0x6 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
+                0x080017cc                EXTI2_IRQHandler
  .text.EXTI3_IRQHandler
-                0x0800161a        0x6 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
-                0x0800161a                EXTI3_IRQHandler
+                0x080017d2        0x6 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
+                0x080017d2                EXTI3_IRQHandler
  .text.EXTI4_IRQHandler
-                0x08001620        0x6 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
-                0x08001620                EXTI4_IRQHandler
+                0x080017d8        0x6 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
+                0x080017d8                EXTI4_IRQHandler
  .text.EXTI9_5_IRQHandler
-                0x08001626       0x28 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
-                0x08001626                EXTI9_5_IRQHandler
+                0x080017de       0x28 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
+                0x080017de                EXTI9_5_IRQHandler
  .text.EXTI15_10_IRQHandler
-                0x0800164e       0x18 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
-                0x0800164e                EXTI15_10_IRQHandler
- *fill*         0x08001666        0x2 
+                0x08001806       0x18 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
+                0x08001806                EXTI15_10_IRQHandler
+ *fill*         0x0800181e        0x2 
  .text.startup._GLOBAL__sub_I__Z22stm32_interrupt_enable7PinNameSt8functionIFvvEEm
-                0x08001668       0xd8 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
+                0x08001820       0xd8 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
  .text.exit._GLOBAL__sub_D__Z22stm32_interrupt_enable7PinNameSt8functionIFvvEEm
-                0x08001740       0x1c C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
+                0x080018f8       0x1c C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
  .text.SystemInit
-                0x0800175c       0x4c C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\system_stm32yyxx.c.o
-                0x0800175c                SystemInit
+                0x08001914       0x4c C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\system_stm32yyxx.c.o
+                0x08001914                SystemInit
  .text.get_timer_obj
-                0x080017a8        0x4 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\timer.c.o
-                0x080017a8                get_timer_obj
+                0x08001960        0x4 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\timer.c.o
+                0x08001960                get_timer_obj
  .text.serial_rx_active
-                0x080017ac       0x24 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\uart.c.o
-                0x080017ac                serial_rx_active
+                0x08001964       0x24 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\uart.c.o
+                0x08001964                serial_rx_active
  .text.HAL_UART_RxCpltCallback
-                0x080017d0        0x6 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\uart.c.o
-                0x080017d0                HAL_UART_RxCpltCallback
+                0x08001988        0x6 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\uart.c.o
+                0x08001988                HAL_UART_RxCpltCallback
  .text.HAL_UART_TxCpltCallback
-                0x080017d6        0x6 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\uart.c.o
-                0x080017d6                HAL_UART_TxCpltCallback
+                0x0800198e        0x6 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\uart.c.o
+                0x0800198e                HAL_UART_TxCpltCallback
  .text.HAL_UART_ErrorCallback
-                0x080017dc       0x7c C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\uart.c.o
-                0x080017dc                HAL_UART_ErrorCallback
+                0x08001994       0x7c C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\uart.c.o
+                0x08001994                HAL_UART_ErrorCallback
  .text.USART1_IRQHandler
-                0x08001858       0x18 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\uart.c.o
-                0x08001858                USART1_IRQHandler
+                0x08001a10       0x18 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\uart.c.o
+                0x08001a10                USART1_IRQHandler
  .text.USART2_IRQHandler
-                0x08001870       0x1c C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\uart.c.o
-                0x08001870                USART2_IRQHandler
+                0x08001a28       0x1c C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\uart.c.o
+                0x08001a28                USART2_IRQHandler
  .text.USART3_IRQHandler
-                0x0800188c       0x1c C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\uart.c.o
-                0x0800188c                USART3_IRQHandler
- .text._exit    0x080018a8        0x2 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\syscalls.c.o
-                0x080018a8                _exit
- *fill*         0x080018aa        0x2 
- .text._kill    0x080018ac       0x10 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\syscalls.c.o
-                0x080018ac                _kill
- .text._getpid  0x080018bc        0x4 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\syscalls.c.o
-                0x080018bc                _getpid
+                0x08001a44       0x1c C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\uart.c.o
+                0x08001a44                USART3_IRQHandler
+ .text._exit    0x08001a60        0x2 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\syscalls.c.o
+                0x08001a60                _exit
+ *fill*         0x08001a62        0x2 
+ .text._kill    0x08001a64       0x10 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\syscalls.c.o
+                0x08001a64                _kill
+ .text._getpid  0x08001a74        0x4 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\syscalls.c.o
+                0x08001a74                _getpid
  .text.Reset_Handler
-                0x080018c0       0x48 C:\Users\Danish\AppData\Local\arduino\cores\STMicroelectronics_stm32_GenF1_pnum_BLUEPILL_F103C8_f31267b17cf20b1f13fdcee9ccd5d123\core.a(startup_stm32yyxx.S.o)
-                0x080018c0                Reset_Handler
+                0x08001a78       0x48 C:\Users\Danish\AppData\Local\arduino\cores\STMicroelectronics_stm32_GenF1_pnum_BLUEPILL_F103C8_f31267b17cf20b1f13fdcee9ccd5d123\core.a(startup_stm32yyxx.S.o)
+                0x08001a78                Reset_Handler
  .text.Default_Handler
-                0x08001908        0x2 C:\Users\Danish\AppData\Local\arduino\cores\STMicroelectronics_stm32_GenF1_pnum_BLUEPILL_F103C8_f31267b17cf20b1f13fdcee9ccd5d123\core.a(startup_stm32yyxx.S.o)
-                0x08001908                RTC_Alarm_IRQHandler
-                0x08001908                DebugMon_Handler
-                0x08001908                HardFault_Handler
-                0x08001908                PVD_IRQHandler
-                0x08001908                PendSV_Handler
-                0x08001908                NMI_Handler
-                0x08001908                I2C2_EV_IRQHandler
-                0x08001908                UsageFault_Handler
-                0x08001908                ADC1_2_IRQHandler
-                0x08001908                SPI1_IRQHandler
-                0x08001908                TAMPER_IRQHandler
-                0x08001908                DMA1_Channel4_IRQHandler
-                0x08001908                RTC_IRQHandler
-                0x08001908                DMA1_Channel7_IRQHandler
-                0x08001908                CAN1_RX1_IRQHandler
-                0x08001908                I2C1_EV_IRQHandler
-                0x08001908                DMA1_Channel6_IRQHandler
-                0x08001908                RCC_IRQHandler
-                0x08001908                TIM1_TRG_COM_IRQHandler
-                0x08001908                DMA1_Channel1_IRQHandler
-                0x08001908                Default_Handler
-                0x08001908                SPI2_IRQHandler
-                0x08001908                MemManage_Handler
-                0x08001908                SVC_Handler
-                0x08001908                DMA1_Channel5_IRQHandler
-                0x08001908                USB_LP_CAN1_RX0_IRQHandler
-                0x08001908                USB_HP_CAN1_TX_IRQHandler
-                0x08001908                DMA1_Channel3_IRQHandler
-                0x08001908                WWDG_IRQHandler
-                0x08001908                TIM1_BRK_IRQHandler
-                0x08001908                I2C2_ER_IRQHandler
-                0x08001908                DMA1_Channel2_IRQHandler
-                0x08001908                CAN1_SCE_IRQHandler
-                0x08001908                FLASH_IRQHandler
-                0x08001908                BusFault_Handler
-                0x08001908                I2C1_ER_IRQHandler
-                0x08001908                USBWakeUp_IRQHandler
- *fill*         0x0800190a        0x2 
+                0x08001ac0        0x2 C:\Users\Danish\AppData\Local\arduino\cores\STMicroelectronics_stm32_GenF1_pnum_BLUEPILL_F103C8_f31267b17cf20b1f13fdcee9ccd5d123\core.a(startup_stm32yyxx.S.o)
+                0x08001ac0                RTC_Alarm_IRQHandler
+                0x08001ac0                DebugMon_Handler
+                0x08001ac0                HardFault_Handler
+                0x08001ac0                PVD_IRQHandler
+                0x08001ac0                PendSV_Handler
+                0x08001ac0                NMI_Handler
+                0x08001ac0                I2C2_EV_IRQHandler
+                0x08001ac0                UsageFault_Handler
+                0x08001ac0                ADC1_2_IRQHandler
+                0x08001ac0                SPI1_IRQHandler
+                0x08001ac0                TAMPER_IRQHandler
+                0x08001ac0                DMA1_Channel4_IRQHandler
+                0x08001ac0                RTC_IRQHandler
+                0x08001ac0                DMA1_Channel7_IRQHandler
+                0x08001ac0                CAN1_RX1_IRQHandler
+                0x08001ac0                I2C1_EV_IRQHandler
+                0x08001ac0                DMA1_Channel6_IRQHandler
+                0x08001ac0                RCC_IRQHandler
+                0x08001ac0                TIM1_TRG_COM_IRQHandler
+                0x08001ac0                DMA1_Channel1_IRQHandler
+                0x08001ac0                Default_Handler
+                0x08001ac0                SPI2_IRQHandler
+                0x08001ac0                MemManage_Handler
+                0x08001ac0                SVC_Handler
+                0x08001ac0                DMA1_Channel5_IRQHandler
+                0x08001ac0                USB_LP_CAN1_RX0_IRQHandler
+                0x08001ac0                USB_HP_CAN1_TX_IRQHandler
+                0x08001ac0                DMA1_Channel3_IRQHandler
+                0x08001ac0                WWDG_IRQHandler
+                0x08001ac0                TIM1_BRK_IRQHandler
+                0x08001ac0                I2C2_ER_IRQHandler
+                0x08001ac0                DMA1_Channel2_IRQHandler
+                0x08001ac0                CAN1_SCE_IRQHandler
+                0x08001ac0                FLASH_IRQHandler
+                0x08001ac0                BusFault_Handler
+                0x08001ac0                I2C1_ER_IRQHandler
+                0x08001ac0                USBWakeUp_IRQHandler
+ *fill*         0x08001ac2        0x2 
  .text.__libc_init_array
-                0x0800190c       0x48 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libc_nano.a(libc_a-init.o)
-                0x0800190c                __libc_init_array
+                0x08001ac4       0x48 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libc_nano.a(libc_a-init.o)
+                0x08001ac4                __libc_init_array
  .text.unlikely._ZSt25__throw_bad_function_callv
-                0x08001954        0x6 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(functional.o)
-                0x08001954                std::__throw_bad_function_call()
- .text.abort    0x0800195a        0xe C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libc_nano.a(libc_a-abort.o)
-                0x0800195a                abort
+                0x08001b0c        0x6 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(functional.o)
+                0x08001b0c                std::__throw_bad_function_call()
+ .text.abort    0x08001b12        0xe C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libc_nano.a(libc_a-abort.o)
+                0x08001b12                abort
  .text._raise_r
-                0x08001968       0x50 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libc_nano.a(libc_a-signal.o)
-                0x08001968                _raise_r
- .text.raise    0x080019b8       0x10 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libc_nano.a(libc_a-signal.o)
-                0x080019b8                raise
- .text._kill_r  0x080019c8       0x24 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libc_nano.a(libc_a-signalr.o)
-                0x080019c8                _kill_r
+                0x08001b20       0x50 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libc_nano.a(libc_a-signal.o)
+                0x08001b20                _raise_r
+ .text.raise    0x08001b70       0x10 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libc_nano.a(libc_a-signal.o)
+                0x08001b70                raise
+ .text._kill_r  0x08001b80       0x24 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libc_nano.a(libc_a-signalr.o)
+                0x08001b80                _kill_r
  .text._getpid_r
-                0x080019ec        0x4 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libc_nano.a(libc_a-signalr.o)
-                0x080019ec                _getpid_r
+                0x08001ba4        0x4 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libc_nano.a(libc_a-signalr.o)
+                0x08001ba4                _getpid_r
  *(.glue_7)
- .glue_7        0x080019f0        0x0 linker stubs
+ .glue_7        0x08001ba8        0x0 linker stubs
  *(.glue_7t)
- .glue_7t       0x080019f0        0x0 linker stubs
+ .glue_7t       0x08001ba8        0x0 linker stubs
  *(.eh_frame)
- .eh_frame      0x080019f0        0x0 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
+ .eh_frame      0x08001ba8        0x0 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
  *(.init)
- .init          0x080019f0        0x4 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crti.o
-                0x080019f0                _init
- .init          0x080019f4        0x8 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtn.o
+ .init          0x08001ba8        0x4 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crti.o
+                0x08001ba8                _init
+ .init          0x08001bac        0x8 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtn.o
  *(.fini)
- .fini          0x080019fc        0x4 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crti.o
-                0x080019fc                _fini
- .fini          0x08001a00        0x8 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtn.o
-                0x08001a08                        . = ALIGN (0x4)
-                0x08001a08                        _etext = .
+ .fini          0x08001bb4        0x4 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crti.o
+                0x08001bb4                _fini
+ .fini          0x08001bb8        0x8 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtn.o
+                0x08001bc0                        . = ALIGN (0x4)
+                0x08001bc0                        _etext = .
 
-.vfp11_veneer   0x08001a08        0x0
- .vfp11_veneer  0x08001a08        0x0 linker stubs
+.vfp11_veneer   0x08001bc0        0x0
+ .vfp11_veneer  0x08001bc0        0x0 linker stubs
 
-.v4_bx          0x08001a08        0x0
- .v4_bx         0x08001a08        0x0 linker stubs
+.v4_bx          0x08001bc0        0x0
+ .v4_bx         0x08001bc0        0x0 linker stubs
 
-.iplt           0x08001a08        0x0
- .iplt          0x08001a08        0x0 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
+.iplt           0x08001bc0        0x0
+ .iplt          0x08001bc0        0x0 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
 
-.rodata         0x08001a08      0x5a4
-                0x08001a08                        . = ALIGN (0x4)
+.rodata         0x08001bc0      0x64c
+                0x08001bc0                        . = ALIGN (0x4)
  *(.rodata)
  *(.rodata*)
  .rodata._Z15uart_write_linePKc.str1.1
-                0x08001a08      0x597 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+                0x08001bc0      0x63d C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
                                   0x3 (size before relaxing)
  .rodata._Z12exti_triggerv.str1.1
-                0x08001f9f       0x26 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+                0x080021fd       0x26 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
  .rodata._Z14rcc_print_infov.str1.1
-                0x08001f9f       0x32 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+                0x080021fd       0x32 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
  .rodata._Z8crc_testv.str1.1
-                0x08001f9f       0x42 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+                0x080021fd       0x42 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
  .rodata._Z8dac_testv.str1.1
-                0x08001f9f       0x24 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+                0x080021fd       0x24 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
  .rodata._Z8rtc_testv.str1.1
-                0x08001f9f       0x3a C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+                0x080021fd       0x3a C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
  .rodata._Z8pwr_testv.str1.1
-                0x08001f9f       0x29 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+                0x080021fd       0x29 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
  .rodata._Z10flash_testv.str1.1
-                0x08001f9f       0x39 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+                0x080021fd       0x39 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
  .rodata._Z8bkp_testv.str1.1
-                0x08001f9f       0x17 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+                0x080021fd       0x17 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+ .rodata._Z8lcd_testv.str1.1
+                0x080021fd       0x27 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+ .rodata._Z9oled_testv.str1.1
+                0x080021fd       0x58 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
  .rodata.setup.str1.1
-                0x08001f9f      0x415 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+                0x080021fd      0x43c C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
  .rodata.loop.str1.1
-                0x08001f9f        0x5 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+                0x080021fd        0x5 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
  .rodata.str1.1
-                0x08001f9f        0xc C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
- *fill*         0x08001f9f        0x1 
- .rodata.CSWTCH.93
-                0x08001fa0        0xc C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
-                0x08001fac                        . = ALIGN (0x4)
+                0x080021fd        0xc C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+ *fill*         0x080021fd        0x3 
+ .rodata.CSWTCH.111
+                0x08002200        0xc C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+                0x0800220c                        . = ALIGN (0x4)
 
-.ARM.extab      0x08001fac        0x0
-                0x08001fac                        . = ALIGN (0x4)
+.ARM.extab      0x0800220c        0x0
+                0x0800220c                        . = ALIGN (0x4)
  *(.ARM.extab* .gnu.linkonce.armextab.*)
-                0x08001fac                        . = ALIGN (0x4)
+                0x0800220c                        . = ALIGN (0x4)
 
-.ARM            0x08001fac        0x0
-                0x08001fac                        . = ALIGN (0x4)
-                0x08001fac                        __exidx_start = .
+.ARM            0x0800220c        0x0
+                0x0800220c                        . = ALIGN (0x4)
+                0x0800220c                        __exidx_start = .
  *(.ARM.exidx*)
-                0x08001fac                        __exidx_end = .
-                0x08001fac                        . = ALIGN (0x4)
+                0x0800220c                        __exidx_end = .
+                0x0800220c                        . = ALIGN (0x4)
 
-.preinit_array  0x08001fac        0x0
-                0x08001fac                        . = ALIGN (0x4)
-                0x08001fac                        PROVIDE (__preinit_array_start = .)
+.preinit_array  0x0800220c        0x0
+                0x0800220c                        . = ALIGN (0x4)
+                0x0800220c                        PROVIDE (__preinit_array_start = .)
  *(.preinit_array*)
-                0x08001fac                        PROVIDE (__preinit_array_end = .)
-                0x08001fac                        . = ALIGN (0x4)
+                0x0800220c                        PROVIDE (__preinit_array_end = .)
+                0x0800220c                        . = ALIGN (0x4)
 
-.init_array     0x08001fac        0x8
-                0x08001fac                        . = ALIGN (0x4)
-                0x08001fac                        PROVIDE (__init_array_start = .)
+.init_array     0x0800220c        0x8
+                0x0800220c                        . = ALIGN (0x4)
+                0x0800220c                        PROVIDE (__init_array_start = .)
  *(SORT_BY_NAME(.init_array.*))
  *(.init_array*)
- .init_array    0x08001fac        0x4 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
- .init_array    0x08001fb0        0x4 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
-                0x08001fb4                        PROVIDE (__init_array_end = .)
-                0x08001fb4                        . = ALIGN (0x4)
+ .init_array    0x0800220c        0x4 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
+ .init_array    0x08002210        0x4 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
+                0x08002214                        PROVIDE (__init_array_end = .)
+                0x08002214                        . = ALIGN (0x4)
 
-.fini_array     0x08001fb4        0x8
-                0x08001fb4                        . = ALIGN (0x4)
-                0x08001fb4                        PROVIDE (__fini_array_start = .)
+.fini_array     0x08002214        0x8
+                0x08002214                        . = ALIGN (0x4)
+                0x08002214                        PROVIDE (__fini_array_start = .)
  *(SORT_BY_NAME(.fini_array.*))
  *(.fini_array*)
- .fini_array    0x08001fb4        0x4 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
- .fini_array    0x08001fb8        0x4 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
-                0x08001fbc                        PROVIDE (__fini_array_end = .)
-                0x08001fbc                        . = ALIGN (0x4)
-                0x08001fbc                        _sidata = LOADADDR (.data)
+ .fini_array    0x08002214        0x4 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
+ .fini_array    0x08002218        0x4 C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
+                0x0800221c                        PROVIDE (__fini_array_end = .)
+                0x0800221c                        . = ALIGN (0x4)
+                0x0800221c                        _sidata = LOADADDR (.data)
 
-.rel.dyn        0x08001fbc        0x0
- .rel.iplt      0x08001fbc        0x0 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
+.rel.dyn        0x0800221c        0x0
+ .rel.iplt      0x0800221c        0x0 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
 
-.data           0x20000000       0x54 load address 0x08001fbc
+.data           0x20000000       0x54 load address 0x0800221c
                 0x20000000                        . = ALIGN (0x4)
                 0x20000000                        _sdata = .
  *(.data)
@@ -4349,11 +4362,11 @@ LOAD C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/x
                 0x20000054                        . = ALIGN (0x4)
                 0x20000054                        _edata = .
 
-.igot.plt       0x20000054        0x0 load address 0x08002010
+.igot.plt       0x20000054        0x0 load address 0x08002270
  .igot.plt      0x20000054        0x0 C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
                 0x20000054                        . = ALIGN (0x4)
 
-.bss            0x20000054      0x2bc load address 0x08002010
+.bss            0x20000054      0x2bc load address 0x08002270
                 0x20000054                        _sbss = .
                 0x20000054                        __bss_start__ = _sbss
  *(.bss)
@@ -5118,8 +5131,8 @@ HardFault_Handler                                 C:\Users\Danish\AppData\Local\
 HardwareTimer::HardwareTimer()                    C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
 HardwareTimer::HardwareTimer()                    C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
 HardwareTimer::HardwareTimer(TIM_TypeDef*)        C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
-HardwareTimer::HardwareTimer(TIM_TypeDef*)        C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
                                                   C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\analog.cpp.o
+HardwareTimer::HardwareTimer(TIM_TypeDef*)        C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
 HardwareTimer::attachInterrupt(std::function<void ()>) C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
 HardwareTimer::attachInterrupt(unsigned long, std::function<void ()>) C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
 HardwareTimer::captureCompareCallback(TIM_HandleTypeDef*) C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
@@ -5471,8 +5484,8 @@ __cxxabiv1::__class_type_info::__do_upcast(__cxxabiv1::__class_type_info const*,
                                                   C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(si_class_type_info.o)
 __cxxabiv1::__class_type_info::~__class_type_info() C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(class_type_info.o)
 __cxxabiv1::__class_type_info::~__class_type_info() C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(class_type_info.o)
-__cxxabiv1::__class_type_info::~__class_type_info() C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(class_type_info.o)
                                                   C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(si_class_type_info.o)
+__cxxabiv1::__class_type_info::~__class_type_info() C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(class_type_info.o)
 __cxxabiv1::__forced_unwind::~__forced_unwind()   C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(eh_exception.o)
 __cxxabiv1::__forced_unwind::~__forced_unwind()   C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(eh_exception.o)
 __cxxabiv1::__forced_unwind::~__forced_unwind()   C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(eh_exception.o)
@@ -5817,6 +5830,7 @@ i2c_init()                                        C:\Users\Danish\AppData\Local\
 i2c_read_byte(unsigned char, unsigned char, unsigned char) C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
 i2c_scan(unsigned char)                           C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
 i2c_write_byte(unsigned char, unsigned char, unsigned char, unsigned char) C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+lcd_test()                                        C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
 loop                                              C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
 main                                              C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
                                                   C:\Users\Danish\AppData\Local\arduino\cores\STMicroelectronics_stm32_GenF1_pnum_BLUEPILL_F103C8_f31267b17cf20b1f13fdcee9ccd5d123\core.a(startup_stm32yyxx.S.o)
@@ -5841,6 +5855,8 @@ memset                                            C:/Users/Danish/AppData/Local/
                                                   C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HAL\stm32yyxx_hal_adc_ex.c.o
                                                   C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/crt0.o
 noOsSystickHandler                                C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\clock.c.o
+oled_test()                                       C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
+oled_write_cmd(unsigned char)                     C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\sketch\comprehensive_test.ino.cpp.o
 operator delete(void*)                            C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\new.cpp.o
                                                   C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(functional.o)
 operator delete(void*, unsigned int)              C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\new.cpp.o
@@ -5927,9 +5943,9 @@ std::bad_function_call::~bad_function_call()      C:/Users/Danish/AppData/Local/
 std::bad_function_call::~bad_function_call()      C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(functional.o)
 std::exception::what() const                      C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(eh_exception.o)
 std::exception::~exception()                      C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(eh_exception.o)
+std::exception::~exception()                      C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(eh_exception.o)
+std::exception::~exception()                      C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(eh_exception.o)
                                                   C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(functional.o)
-std::exception::~exception()                      C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(eh_exception.o)
-std::exception::~exception()                      C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(eh_exception.o)
 std::function<void ()>::function()                C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
 std::function<void ()>::function()                C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
 std::function<void ()>::function(std::function<void ()> const&) C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\HardwareTimer.cpp.o
@@ -5948,9 +5964,9 @@ std::type_info::operator==(std::type_info const&) const C:/Users/Danish/AppData/
                                                   C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(class_type_info.o)
                                                   C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(si_class_type_info.o)
 std::type_info::~type_info()                      C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(tinfo.o)
-std::type_info::~type_info()                      C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(tinfo.o)
-std::type_info::~type_info()                      C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(tinfo.o)
                                                   C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(class_type_info.o)
+std::type_info::~type_info()                      C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(tinfo.o)
+std::type_info::~type_info()                      C:/Users/Danish/AppData/Local/Arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp\libstdc++_nano.a(tinfo.o)
 stm32_interrupt_disable(GPIO_TypeDef*, unsigned short) C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
 stm32_interrupt_enable(PinName, std::function<void ()>, unsigned long) C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
 stm32_interrupt_enable(PinName, void (*)(), unsigned long) C:\Users\Danish\AppData\Local\arduino\sketches\D27A856DF86570A41B28FFA0CD5F73A3\libraries\SrcWrapper\stm32\interrupt.cpp.o
