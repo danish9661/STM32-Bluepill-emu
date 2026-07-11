@@ -164,6 +164,35 @@ pub fn add_software_spi(name: &str, cs: Option<String>, clk: &str, miso: &str, m
         .push((name.to_string(), cs, clk.to_string(), miso.to_string(), mosi.to_string()));
 }
 
+/// Add an SPI LCD display device (e.g. ST7789, ILI9341). Must be called before init().
+#[wasm_bindgen]
+pub fn add_lcd(peripheral: &str, cs: Option<String>) {
+    use crate::ext_devices::lcd::{Lcd, LcdConfig};
+    let config = LcdConfig {
+        peripheral: peripheral.to_string(),
+        framebuffer: String::new(),
+        cs,
+    };
+    let lcd = Lcd::new(config);
+    system::get_ext_devices().lock().unwrap().lcds
+        .push(std::rc::Rc::new(std::cell::RefCell::new(lcd)));
+}
+
+/// Add an I2C OLED display device (e.g. SSD1306). Must be called before init().
+#[wasm_bindgen]
+pub fn add_i2c_oled(peripheral: &str, address: u8, width: u16, height: u16) {
+    use crate::ext_devices::i2c_oled::{I2cOled, I2cOledConfig};
+    let config = I2cOledConfig {
+        peripheral: peripheral.to_string(),
+        address,
+        width,
+        height,
+    };
+    let oled = I2cOled::new(config);
+    system::get_ext_devices().lock().unwrap().i2c_oleds
+        .push(std::rc::Rc::new(std::cell::RefCell::new(oled)));
+}
+
 /// Register a touchscreen device. Must be called before init().
 #[wasm_bindgen]
 pub fn add_touchscreen(peripheral: &str, touch_detected_pin: Option<String>, cs: Option<String>) {

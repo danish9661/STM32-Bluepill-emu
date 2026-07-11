@@ -12,7 +12,15 @@ devices:
     - peripheral: "I2C1"
       addr: "0x50"
       file: "build/eeprom.bin"
+  i2c_oled:
+    - peripheral: "I2C1"
+      addr: "0x3C"
+      width: 128
+      height: 64
   spi_flash:
     - peripheral: "SPI1"
       jedec_id: "0xEF4016"
       file: "build/spi_flash.bin"
+  lcd:
+    - peripheral: "SPI1"
+      cs: "PA4"

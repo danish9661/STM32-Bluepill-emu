@@ -4,6 +4,7 @@ import * as yaml from 'js-yaml';
 import * as periph from './stm32_bluepill_wasm.js';
 const { periph_read, periph_write, tick, get_next_pending_interrupt, dma_get_pending_count, 
 dma_get_pending, dma_set_completed, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen,
+add_lcd, add_i2c_oled,
 init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, gpio_read_output, initSync } = periph;
 
 const parseHex = (v) => typeof v === 'number' ? v : parseInt(v, 16);
@@ -70,6 +71,10 @@ async function main() {
                         uartAddr = parseHex(d.peripheral.match(/[0-9a-fA-F]+/)?.[0]) ? parseInt(d.peripheral, 16) : (PERIPH_ADDR[d.peripheral] || uartAddr);
                     } else if (type === 'touchscreen') {
                         add_touchscreen(d.peripheral, d.touch_detected_pin || null, d.cs || null);
+                    } else if (type === 'lcd') {
+                        add_lcd(d.peripheral, d.cs || null);
+                    } else if (type === 'i2c_oled') {
+                        add_i2c_oled(d.peripheral, parseInt(d.addr || '0x3C', 16), parseInt(d.width || '128', 10), parseInt(d.height || '64', 10));
                     }
                 }
             }

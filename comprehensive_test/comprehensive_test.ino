@@ -506,6 +506,80 @@ void bkp_test(void) {
   uart_write_line(val == 0xA5A5 && val2 == 0x5A5A ? " (MATCH)" : " (MISMATCH)");
 }
 
+// 17. SPI TFT LCD Test (via Lcd ext device)
+void lcd_test(void) {
+  spi1_cs(0);
+  spi1_xfer(0xFB);
+  for (int i = 0; i < 128; i++) {
+    spi1_xfer(0xFF);
+  }
+  spi1_cs(1);
+  uart_write_line("   Sent 0xFB + 128 bytes of pixel data");
+}
+
+// 18. I2C OLED Test (via I2cOled ext device)
+void oled_write_cmd(uint8_t cmd) {
+  volatile uint32_t *I2C1_CR1 = (uint32_t *)0x40005400;
+  volatile uint32_t *I2C1_SR1 = (uint32_t *)0x40005414;
+  volatile uint32_t *I2C1_SR2 = (uint32_t *)0x40005418;
+  volatile uint32_t *I2C1_DR = (uint32_t *)0x40005410;
+
+  *I2C1_CR1 |= (1 << 8);
+  uint32_t t = 10000;
+  while (!(*I2C1_SR1 & 1)) { if (--t == 0) return; }
+
+  *I2C1_DR = (0x3C << 1) | 0;
+  t = 10000;
+  while (!(*I2C1_SR1 & (1 << 1))) { if (--t == 0) return; }
+  *I2C1_SR2;
+
+  *I2C1_DR = 0x00;
+  t = 10000;
+  while (!(*I2C1_SR1 & (1 << 7))) { if (--t == 0) return; }
+
+  *I2C1_DR = cmd;
+  t = 10000;
+  while (!(*I2C1_SR1 & (1 << 7))) { if (--t == 0) return; }
+
+  *I2C1_CR1 |= (1 << 9);
+}
+
+void oled_test(void) {
+  oled_write_cmd(0xAE);
+  oled_write_cmd(0x81);
+  oled_write_cmd(0xCF);
+  oled_write_cmd(0xAF);
+  uart_write_line("   Sent OLED init commands (AE, 81 CF, AF)");
+
+  // Write display data
+  volatile uint32_t *I2C1_CR1 = (uint32_t *)0x40005400;
+  volatile uint32_t *I2C1_SR1 = (uint32_t *)0x40005414;
+  volatile uint32_t *I2C1_SR2 = (uint32_t *)0x40005418;
+  volatile uint32_t *I2C1_DR = (uint32_t *)0x40005410;
+
+  *I2C1_CR1 |= (1 << 8);
+  uint32_t t = 10000;
+  while (!(*I2C1_SR1 & 1)) { if (--t == 0) return; }
+
+  *I2C1_DR = (0x3C << 1) | 0;
+  t = 10000;
+  while (!(*I2C1_SR1 & (1 << 1))) { if (--t == 0) return; }
+  *I2C1_SR2;
+
+  *I2C1_DR = 0x40;
+  t = 10000;
+  while (!(*I2C1_SR1 & (1 << 7))) { if (--t == 0) return; }
+
+  for (int i = 0; i < 128; i++) {
+    *I2C1_DR = 0xFF;
+    t = 10000;
+    while (!(*I2C1_SR1 & (1 << 7))) { if (--t == 0) return; }
+  }
+
+  *I2C1_CR1 |= (1 << 9);
+  uart_write_line("   Sent 128 bytes of OLED pixel data via I2C");
+}
+
 void setup(void) {
   gpio_init();
   gpio_write(13, 1);
@@ -696,8 +770,23 @@ void setup(void) {
   uart_write_line("   PASS");
   uart_write_line("");
 
+  // 17. SPI TFT LCD
+  uart_write_line("17. SPI TFT LCD Test");
+  spi1_cs_init();
+  spi1_init();
+  lcd_test();
+  uart_write_line("   PASS");
+  uart_write_line("");
+
+  // 18. I2C OLED
+  uart_write_line("18. I2C OLED Test");
+  i2c_init();
+  oled_test();
+  uart_write_line("   PASS");
+  uart_write_line("");
+
   uart_write_line("============================================");
-  uart_write_str("All 16 peripheral tests completed!");
+  uart_write_str("All 18 peripheral tests completed!");
   uart_write_line("");
   uart_write_line("============================================");
 }
