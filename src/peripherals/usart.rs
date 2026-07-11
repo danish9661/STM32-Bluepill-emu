@@ -17,6 +17,7 @@ fn usart_irq(name: &str) -> Option<i32> {
 }
 
 pub struct Usart {
+    name: String,
     sr: u32,
     dr: u32,
     brr: u32,
@@ -33,6 +34,7 @@ impl Usart {
     pub fn new(name: &str, _ext: &ExtDevices) -> Option<Box<dyn Peripheral>> {
         usart_irq(name).map(|irq| {
             Box::new(Self {
+                name: name.to_string(),
                 sr: 0x00C0,
                 dr: 0, brr: 0, cr1: 0, cr2: 0, cr3: 0, gtp: 0,
                 tx_data: Vec::new(),
@@ -101,6 +103,10 @@ impl Usart {
 }
 
 impl Peripheral for Usart {
+    fn periph_remap(&self, sys: &System) -> Option<u32> {
+        sys.p.afio_remap_status(&self.name)
+    }
+
     fn read(&mut self, sys: &System, offset: u32) -> u32 {
         match offset {
             0x00 => {

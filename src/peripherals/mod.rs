@@ -41,6 +41,10 @@ pub trait Peripheral {
     fn exti_port(&self, _line: u32) -> Option<char> { None }
     /// Called by GPIO when a pin changes state. Returns true if handled.
     fn gpio_pin_changed(&mut self, _sys: &System, _port: u8, _pin: u8, _rising: bool) -> bool { false }
+    /// Returns AFIO MAPR remap bits for this peripheral, if applicable.
+    fn periph_remap(&self, _sys: &System) -> Option<u32> { None }
+    /// Returns the MAPR remap bits for a named peripheral (only AFIO implements meaningfully).
+    fn remap_status(&self, _name: &str) -> Option<u32> { None }
 }
 
 pub struct PeripheralSlot<T> {
@@ -442,6 +446,17 @@ impl Peripherals {
         for slot in &self.peripherals {
             if slot.start == 0x4001_0000 {
                 return slot.peripheral.borrow().exti_port(line);
+            }
+        }
+        None
+    }
+
+    /// Queries AFIO MAPR remap bits for a given peripheral name.
+    /// Returns None if the peripheral has no remap bits or AFIO is unavailable.
+    pub fn afio_remap_status(&self, name: &str) -> Option<u32> {
+        for slot in &self.peripherals {
+            if slot.start == 0x4001_0000 {
+                return slot.peripheral.borrow().remap_status(name);
             }
         }
         None
