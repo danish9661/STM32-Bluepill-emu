@@ -205,7 +205,6 @@ async function main() {
 
     let instCount = 0n;
     let stopRequested = false;
-    const tickInterval = 100000;
 
     const codeHook = (handle, address, size, user_data) => {
         instCount++;
@@ -219,10 +218,8 @@ async function main() {
             uc.emu_stop();
             return;
         }
-        if (instCount % BigInt(tickInterval) === 0n) {
-            if (has_pending_interrupt()) {
-                uc.emu_stop();
-            }
+        if (has_pending_interrupt()) {
+            uc.emu_stop();
         }
     };
     uc.hook_add(Module.HOOK_CODE, codeHook, null);
