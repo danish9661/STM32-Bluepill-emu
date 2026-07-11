@@ -161,6 +161,10 @@ impl Timer {
 }
 
 impl Peripheral for Timer {
+    fn periph_remap(&self, sys: &System) -> Option<u32> {
+        sys.p.afio_remap_status(&self.name)
+    }
+
     fn tick(&mut self, sys: &System) {
         self.advance(sys);
     }

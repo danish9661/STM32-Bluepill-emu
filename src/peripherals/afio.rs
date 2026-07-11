@@ -18,9 +18,28 @@ impl Afio {
             None
         }
     }
+
+    /// Returns the MAPR register value.
+    pub fn mapr_value(&self) -> u32 { self.mapr }
 }
 
 impl Peripheral for Afio {
+    fn remap_status(&self, name: &str) -> Option<u32> {
+        let bits = match name {
+            "SPI1" => (self.mapr >> 0) & 0x1,
+            "I2C1" => (self.mapr >> 1) & 0x1,
+            "USART1" => (self.mapr >> 2) & 0x1,
+            "USART2" => (self.mapr >> 3) & 0x1,
+            "TIM1" => (self.mapr >> 4) & 0x3,
+            "TIM2" => (self.mapr >> 24) & 0x3,
+            "TIM3" => (self.mapr >> 9) & 0x1,
+            "TIM4" => (self.mapr >> 10) & 0x1,
+            "CAN" | "CAN1" => (self.mapr >> 11) & 0x1,
+            _ => return None,
+        };
+        Some(bits)
+    }
+
     fn exti_port(&self, line: u32) -> Option<char> {
         if line >= 16 { return None; }
         let idx = (line / 4) as usize;
