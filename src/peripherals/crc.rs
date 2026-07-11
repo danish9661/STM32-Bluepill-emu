@@ -1,18 +1,19 @@
 use crate::system::System;
 use super::Peripheral;
 
-const CRC32_POLY: u32 = 0x04C1_1DB7;
-
-fn crc32_byte(crc: u32, byte: u8) -> u32 {
-    let mut crc = crc ^ (byte as u32) << 24;
-    for _ in 0..8 { if crc & 0x8000_0000 != 0 { crc = (crc << 1) ^ CRC32_POLY; } else { crc <<= 1; } }
-    crc
+fn reflect_32(v: u32) -> u32 {
+    let mut r = 0u32;
+    for i in 0..32 { if v & (1 << i) != 0 { r |= 1 << (31 - i); } }
+    r
 }
 
-fn crc32_word(crc: u32, word: u32) -> u32 {
-    let mut crc = crc;
-    for i in (0..4).rev() { crc = crc32_byte(crc, (word >> (i * 8)) as u8); }
-    crc
+fn stm32_crc32(crc: u32, data: u32) -> u32 {
+    let rev = reflect_32(data);
+    let mut c = crc ^ rev;
+    for _ in 0..32 {
+        if c & 0x8000_0000 != 0 { c = (c << 1) ^ 0x04C1_1DB7; } else { c <<= 1; }
+    }
+    reflect_32(c)
 }
 
 pub struct Crc { dr: u32, idr: u32, cr: u32 }
@@ -30,7 +31,7 @@ impl Peripheral for Crc {
 
     fn write(&mut self, _sys: &System, offset: u32, value: u32) {
         match offset {
-            0x00 => self.dr = crc32_word(self.dr, value),
+            0x00 => self.dr = stm32_crc32(self.dr, value),
             0x04 => self.idr = value & 0xFF,
             0x08 => { self.cr = value & 0xFFFFFFFE; if value & 1 != 0 { self.dr = 0xFFFF_FFFF; } }
             _ => {}

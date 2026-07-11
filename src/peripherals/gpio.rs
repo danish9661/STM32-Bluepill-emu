@@ -100,11 +100,11 @@ impl GpioPorts {
 
 #[derive(Default)]
 pub struct Gpio {
+    #[allow(dead_code)]
     port_letter: char,
     port: u8,
     crl: u32,
     crh: u32,
-    idr: u32,
     odr: u32,
     bsrr: u32,
     brr: u32,
@@ -122,6 +122,30 @@ impl Gpio {
         }
     }
 
+    fn pin_mode(&self, pin: u8) -> u8 {
+        if pin < 8 {
+            ((self.crl >> (pin * 4)) & 0b11) as u8
+        } else {
+            ((self.crh >> ((pin - 8) * 4)) & 0b11) as u8
+        }
+    }
+
+    fn pin_cnf(&self, pin: u8) -> u8 {
+        if pin < 8 {
+            ((self.crl >> (pin * 4 + 2)) & 0b11) as u8
+        } else {
+            ((self.crh >> ((pin - 8) * 4 + 2)) & 0b11) as u8
+        }
+    }
+
+    fn pin_is_output(&self, pin: u8) -> bool {
+        self.pin_mode(pin) != 0
+    }
+
+    fn pin_is_analog(&self, pin: u8) -> bool {
+        self.pin_mode(pin) == 0 && self.pin_cnf(pin) == 0
+    }
+
     fn iter_port_reg_changes(old_value: u32, new_value: u32, stride: u8, mut f: impl FnMut(u8, u8)) {
         let mut changes = old_value ^ new_value;
         let stride_mask = 0xFF >> (8 - stride);
@@ -136,6 +160,7 @@ impl Gpio {
         }
     }
 
+    #[allow(dead_code)]
     fn port_str(&self, pin: u8) -> String {
         format!("GPIO{} P{}{}", self.port_letter, self.port_letter, pin)
     }
@@ -147,7 +172,18 @@ impl Peripheral for Gpio {
             0x00 => self.crl,
             0x04 => self.crh,
             0x08 => {
-                let v = sys.p.gpio.borrow_mut().read_port(sys, self.port) as u32;
+                let mut gpio = sys.p.gpio.borrow_mut();
+                let mut v = gpio.read_port(sys, self.port) as u32;
+                for pin in 0..16 {
+                    if self.pin_is_analog(pin) {
+                        v &= !(1 << pin);
+                    } else if !self.pin_is_output(pin) {
+                        // input mode: keep callback value
+                    } else {
+                        // output mode: read ODR instead
+                        if (self.odr >> pin) & 1 != 0 { v |= 1 << pin; } else { v &= !(1 << pin); }
+                    }
+                }
                 v
             }
             0x0C => self.odr,
@@ -164,30 +200,44 @@ impl Peripheral for Gpio {
             0x04 => self.crh = value,
             0x08 => {}
             0x0C => {
+                let old_odr = self.odr;
                 let mut gpio = sys.p.gpio.borrow_mut();
-                Self::iter_port_reg_changes(self.odr, value, 1, |pin, v| {
-                    gpio.write_port(sys, self.port, pin, v != 0);
+                Self::iter_port_reg_changes(old_odr, value, 1, |pin, v| {
+                    if self.pin_is_output(pin) {
+                        gpio.write_port(sys, self.port, pin, v != 0);
+                        sys.p.gpio_exti_trigger(sys, self.port, pin, v != 0);
+                    }
                 });
-                self.odr = value;
+                let output_mask = (0..16).filter(|p| self.pin_is_output(*p)).fold(0, |m, p| m | (1 << p));
+                self.odr = (self.odr & !output_mask) | (value & output_mask);
             }
             0x10 => {
                 let reset = value >> 16;
                 let set = value & 0xFFFF;
                 let mut gpio = sys.p.gpio.borrow_mut();
                 Self::iter_port_reg_changes(0, set, 1, |pin, _| {
-                    gpio.write_port(sys, self.port, pin, true);
+                    if self.pin_is_output(pin) {
+                        gpio.write_port(sys, self.port, pin, true);
+                        sys.p.gpio_exti_trigger(sys, self.port, pin, true);
+                    }
                 });
                 Self::iter_port_reg_changes(0, reset, 1, |pin, _| {
-                    gpio.write_port(sys, self.port, pin, false);
+                    if self.pin_is_output(pin) {
+                        gpio.write_port(sys, self.port, pin, false);
+                        sys.p.gpio_exti_trigger(sys, self.port, pin, false);
+                    }
                 });
-                self.odr &= !reset;
-                self.odr |= set;
+                let output_mask = (0..16).filter(|p| self.pin_is_output(*p)).fold(0, |m, p| m | (1 << p));
+                self.odr = (self.odr & !reset) | (set & output_mask);
                 self.bsrr = value;
             }
             0x14 => {
                 let mut gpio = sys.p.gpio.borrow_mut();
                 Self::iter_port_reg_changes(0, value, 1, |pin, _| {
-                    gpio.write_port(sys, self.port, pin, false);
+                    if self.pin_is_output(pin) {
+                        gpio.write_port(sys, self.port, pin, false);
+                        sys.p.gpio_exti_trigger(sys, self.port, pin, false);
+                    }
                 });
                 self.odr &= !value;
                 self.brr = value;

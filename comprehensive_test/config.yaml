@@ -1,0 +1,18 @@
+cpu:
+  vector_table: 0x08000000
+  use_hardcoded: true
+regions:
+  - start: 0x08000000
+    size: 0x20000
+    load: "build/comprehensive_test.ino.bin"
+  - start: 0x20000000
+    size: 0x5000
+devices:
+  i2c_eeprom:
+    - peripheral: "I2C1"
+      addr: "0x50"
+      file: "build/eeprom.bin"
+  spi_flash:
+    - peripheral: "SPI1"
+      jedec_id: "0xEF4016"
+      file: "build/spi_flash.bin"

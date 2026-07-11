@@ -21,6 +21,18 @@ impl Afio {
 }
 
 impl Peripheral for Afio {
+    fn exti_port(&self, line: u32) -> Option<char> {
+        if line >= 16 { return None; }
+        let idx = (line / 4) as usize;
+        let shift = (line % 4) * 4;
+        let port_code = (self.exticr[idx] >> shift) & 0x7;
+        match port_code {
+            0 => Some('A'), 1 => Some('B'), 2 => Some('C'),
+            3 => Some('D'), 4 => Some('E'),
+            _ => None,
+        }
+    }
+
     fn read(&mut self, _sys: &System, offset: u32) -> u32 {
         match offset {
             0x00 => self.evcr,

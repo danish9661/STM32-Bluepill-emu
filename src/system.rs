@@ -94,6 +94,7 @@ impl WasmSystem {
         let p = Rc::new(Peripherals::new_wasm(gpio, &*ext));
         drop(ext);
         Self::register_software_spis(&p);
+        Self::register_touchscreen_gpios(&p);
         WasmSystem { p, pending_dma: RefCell::new(Vec::new()) }
     }
 
@@ -103,6 +104,7 @@ impl WasmSystem {
         let p = Rc::new(Peripherals::from_svd(svd_xml, gpio, &*ext));
         drop(ext);
         Self::register_software_spis(&p);
+        Self::register_touchscreen_gpios(&p);
         WasmSystem { p, pending_dma: RefCell::new(Vec::new()) }
     }
 
@@ -119,6 +121,13 @@ impl WasmSystem {
                 mosi: mosi.clone(),
             };
             SoftwareSpi::register(config, &mut p.gpio.borrow_mut(), &ext_devices);
+        }
+    }
+
+    fn register_touchscreen_gpios(p: &Peripherals) {
+        let ext_devices = get_ext_devices().lock().unwrap();
+        for ts in &ext_devices.touchscreens {
+            ts.borrow_mut().setup_gpio(&mut p.gpio.borrow_mut());
         }
     }
 

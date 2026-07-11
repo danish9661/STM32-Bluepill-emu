@@ -37,6 +37,10 @@ pub trait Peripheral {
     fn tick(&mut self, _sys: &System) {}
     fn rx_byte(&mut self, _sys: &System, _byte: u8) {}
     fn can_inject_message(&mut self, _sys: &System, _tir: u32, _tdtr: u32, _tdlr: u32, _tdhr: u32) -> bool { false }
+    /// Returns the GPIO port letter for the given EXTI line, if this is AFIO.
+    fn exti_port(&self, _line: u32) -> Option<char> { None }
+    /// Called by GPIO when a pin changes state. Returns true if handled.
+    fn gpio_pin_changed(&mut self, _sys: &System, _port: u8, _pin: u8, _rising: bool) -> bool { false }
 }
 
 pub struct PeripheralSlot<T> {
@@ -49,6 +53,7 @@ pub struct Peripherals {
     pub peripherals: Vec<PeripheralSlot<RefCell<Box<dyn Peripheral>>>>,
     pub nvic: RefCell<nvic::Nvic>,
     pub gpio: RefCell<GpioPorts>,
+    rcc_enrs: RefCell<(u32, u32, u32)>,
 }
 
 fn extract_svd_max_offset(p: &PeripheralInfo) -> u32 {
@@ -120,10 +125,12 @@ impl Peripherals {
 
         device.peripherals.sort_by_key(|p| p.base_address);
 
+        let rcc_enrs = RefCell::new((0x0000_0014, 0x0000_0000, 0x0000_0000));
         let mut peripherals = Peripherals {
             peripherals: Vec::new(),
             nvic: RefCell::new(nvic::Nvic::default()),
             gpio: RefCell::new(gpio),
+            rcc_enrs,
         };
 
         let svd_map: HashMap<&str, &PeripheralInfo> = device.peripherals.iter()
@@ -189,10 +196,12 @@ impl Peripherals {
     }
 
     pub fn new_wasm(gpio: GpioPorts, ext_devices: &ExtDevices) -> Self {
+        let rcc_enrs = RefCell::new((0x0000_0014, 0x0000_0000, 0x0000_0000));
         let mut peripherals = Peripherals {
             peripherals: Vec::new(),
             nvic: RefCell::new(nvic::Nvic::default()),
             gpio: RefCell::new(gpio),
+            rcc_enrs,
         };
 
         let mut regs: Vec<(u32, &str)> = vec![
@@ -313,7 +322,55 @@ impl Peripherals {
         addr >= NVIC_PRIO_BASE && addr < NVIC_PRIO_BASE + 0x100
     }
 
-    pub fn read(&self, sys: &System, addr: u32, size: u8) -> u32 {
+    fn clock_enabled(&self, base_addr: u32) -> bool {
+        let (ahbenr, apb2enr, apb1enr) = *self.rcc_enrs.borrow();
+        if base_addr >= 0xE000_0000 { return true; }
+        if base_addr >= 0x4002_1000 && base_addr < 0x4002_2000 { return true; }
+        match base_addr {
+            0x4002_0000 => (ahbenr & 1) != 0,
+            0x4002_2000 => (ahbenr & (1 << 4)) != 0,
+            0x4002_3000 => (ahbenr & (1 << 6)) != 0,
+            0x4001_0000 | 0x4001_0400 => (apb2enr & 1) != 0,
+            0x4001_0800 => (apb2enr & (1 << 2)) != 0,
+            0x4001_0C00 => (apb2enr & (1 << 3)) != 0,
+            0x4001_1000 => (apb2enr & (1 << 4)) != 0,
+            0x4001_1400 => (apb2enr & (1 << 5)) != 0,
+            0x4001_2400 => (apb2enr & (1 << 9)) != 0,
+            0x4001_2800 => (apb2enr & (1 << 10)) != 0,
+            0x4001_2C00 => (apb2enr & (1 << 11)) != 0,
+            0x4001_3000 => (apb2enr & (1 << 12)) != 0,
+            0x4001_3800 => (apb2enr & (1 << 14)) != 0,
+            0x4000_0000 => (apb1enr & 1) != 0,
+            0x4000_0400 => (apb1enr & (1 << 1)) != 0,
+            0x4000_0800 => (apb1enr & (1 << 2)) != 0,
+            0x4000_1000 | 0x4000_1400 => true,
+            0x4000_2800 => (apb1enr & (1 << 9)) != 0,
+            0x4000_2C00 => (apb1enr & (1 << 11)) != 0,
+            0x4000_3000 => true,
+            0x4000_3800 => (apb1enr & (1 << 14)) != 0,
+            0x4000_4400 => (apb1enr & (1 << 17)) != 0,
+            0x4000_4800 => (apb1enr & (1 << 18)) != 0,
+            0x4000_5400 => (apb1enr & (1 << 21)) != 0,
+            0x4000_5800 => (apb1enr & (1 << 22)) != 0,
+            0x4000_6400 => (apb1enr & (1 << 25)) != 0,
+            0x4000_6C00 => (apb1enr & (1 << 27)) != 0,
+            0x4000_7000 => (apb1enr & (1 << 28)) != 0,
+            0x4000_7400 => (apb1enr & (1 << 29)) != 0,
+            _ => true,
+        }
+    }
+
+    fn update_rcc_enrs(&self, offset: u32, value: u32) {
+        let mut enrs = self.rcc_enrs.borrow_mut();
+        match offset {
+            0x14 => { enrs.0 = value; }
+            0x18 => { enrs.1 = value; }
+            0x1C => { enrs.2 = value; }
+            _ => {},
+        }
+    }
+
+    pub fn read(&self, sys: &System, addr: u32, _size: u8) -> u32 {
         if let Some((addr, bit_number)) = Self::bitbanding(addr) {
             return (self.read(sys, addr, 1) >> bit_number) & 1;
         }
@@ -328,12 +385,14 @@ impl Peripherals {
         let value = if Self::NVIC_REGS_BASE <= addr && addr < Self::NVIC_REGS_END {
             self.nvic.borrow_mut().read(sys, addr - Self::NVIC_REGS_BASE)
         } else if let Some(p) = Self::get_peripheral(&self.peripherals, addr) {
-            p.peripheral.borrow_mut().read(sys, addr - p.start)
+            if self.clock_enabled(p.start) {
+                p.peripheral.borrow_mut().read(sys, addr - p.start)
+            } else { 0 }
         } else { 0 };
         if is_reg { value << (8 * byte_offset) } else { value }
     }
 
-    pub fn write(&self, sys: &System, addr: u32, size: u8, mut value: u32) {
+    pub fn write(&self, sys: &System, addr: u32, _size: u8, mut value: u32) {
         if let Some((addr, bit_number)) = Self::bitbanding(addr) {
             let mut v = self.read(sys, addr, 1);
             v &= !(1 << bit_number);
@@ -352,10 +411,16 @@ impl Peripherals {
             let v = self.read(sys, addr, 4);
             value = (value << 8 * byte_offset) | (v & (0xFFFF_FFFF >> (32 - 8 * byte_offset)));
         }
+        // Always allow writes to RCC (0x40021000-0x40021FFF)
+        if addr >= 0x4002_1000 && addr < 0x4002_2000 {
+            self.update_rcc_enrs(addr - 0x4002_1000, value);
+        }
         if Self::NVIC_REGS_BASE <= addr && addr < Self::NVIC_REGS_END {
             self.nvic.borrow_mut().write(sys, addr - Self::NVIC_REGS_BASE, value);
         } else if let Some(p) = Self::get_peripheral(&self.peripherals, addr) {
-            p.peripheral.borrow_mut().write(sys, addr - p.start, value);
+            if self.clock_enabled(p.start) {
+                p.peripheral.borrow_mut().write(sys, addr - p.start, value);
+            }
         }
     }
 
@@ -370,6 +435,27 @@ impl Peripherals {
             p.peripheral.borrow_mut().rx_byte(sys, byte);
             true
         } else { false }
+    }
+
+    /// Queries the AFIO peripheral for the GPIO port mapped to a given EXTI line (0-15).
+    pub fn exti_port_for_line(&self, line: u32) -> Option<char> {
+        for slot in &self.peripherals {
+            if slot.start == 0x4001_0000 {
+                return slot.peripheral.borrow().exti_port(line);
+            }
+        }
+        None
+    }
+
+    /// Called from GPIO when a pin changes state. Triggers EXTI if the port/pin
+    /// matches the AFIO EXTICR mapping and EXTI edge configuration.
+    pub fn gpio_exti_trigger(&self, sys: &System, port: u8, pin: u8, rising: bool) {
+        for slot in &self.peripherals {
+            if slot.start == 0x4001_0400 {
+                slot.peripheral.borrow_mut().gpio_pin_changed(sys, port, pin, rising);
+                return;
+            }
+        }
     }
 
     pub fn addr_desc(&self, addr: u32) -> String {

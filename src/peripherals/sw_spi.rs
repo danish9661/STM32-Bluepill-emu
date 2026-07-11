@@ -16,6 +16,7 @@ pub struct SoftwareSpiConfig {
 #[derive(Default)]
 pub struct SoftwareSpi {
     pub config: SoftwareSpiConfig,
+    #[allow(dead_code)]
     name: String,
     data_mosi: u8,
     data_miso: u8,

@@ -17,6 +17,7 @@ fn i2c_irqs(name: &str) -> Option<(i32, i32)> {
 
 #[derive(Clone)]
 pub struct I2c {
+    #[allow(dead_code)]
     name: String,
     devices: Vec<I2cDeviceEntry>,
     active_device: Option<usize>,
@@ -55,7 +56,7 @@ impl I2c {
     }
 
     fn reset(&mut self) {
-        self.sr1 = 0; self.sr2 = 0; self.dr = 0;
+        self.sr1 = 0; self.sr2 = 0;
         self.active_device = None; self.state = I2cState::Idle;
         self.sr1_addr_flag = false;
     }

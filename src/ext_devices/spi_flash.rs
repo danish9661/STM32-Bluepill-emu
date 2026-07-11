@@ -127,6 +127,7 @@ impl SpiFlash {
         }
     }
 
+    #[allow(dead_code)]
     fn write_enabled(&self) -> bool { false }
 }
 

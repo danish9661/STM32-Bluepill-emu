@@ -22,7 +22,9 @@ pub struct Display {
     reply: VecDeque<u16>,
     drawing: bool,
     current_x: u16, current_y: u16,
-    width: u16, height: u16,
+    #[allow(dead_code)]
+    width: u16, #[allow(dead_code)]
+    height: u16,
     draw_left: u16, draw_right: u16, draw_top: u16, draw_bottom: u16,
 }
 

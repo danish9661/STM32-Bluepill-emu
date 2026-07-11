@@ -9,6 +9,8 @@ pub struct Rtc {
     crl: u32,
     prlh: u32,
     prll: u32,
+    divh: u32,
+    divl: u32,
     cnth: u32,
     cntl: u32,
     alrh: u32,
@@ -27,6 +29,8 @@ impl Rtc {
                 crl: 0x0020,
                 prlh: 0,
                 prll: 0x7FFF,
+                divh: 0,
+                divl: 0,
                 cnth: 0,
                 cntl: 0,
                 alrh: 0xFFFF,
@@ -50,11 +54,18 @@ impl Rtc {
         self.cnth = (self.cnt >> 16) as u32;
         self.cntl = self.cnt as u32;
     }
+
+    fn sync_div_regs(&mut self) {
+        let prl = self.prescaler();
+        let rem = if prl > 0 { prl - self.div_counter % prl } else { 0 };
+        self.divh = (rem >> 16) as u32;
+        self.divl = rem as u32;
+    }
 }
 
 impl Peripheral for Rtc {
     fn tick(&mut self, sys: &System) {
-        if self.crl & 1 == 0 { return; } // RTOFF — not enabled
+        if self.crl & (1 << 5) == 0 { return; } // RTOFF — not enabled
 
         let now = INSTRUCTION_COUNT.load(Ordering::Relaxed);
         let delta = now.wrapping_sub(self.last_tick);
@@ -70,13 +81,12 @@ impl Peripheral for Rtc {
             self.div_counter %= prl;
             self.cnt = self.cnt.wrapping_add(inc);
             self.sync_cnt_regs();
+            self.sync_div_regs();
 
-            // Check alarm
             let alarm = ((self.alrh as u32) << 16) | self.alrl as u32;
             if self.crh & 1 != 0 && self.last_cnt != alarm && self.cnt == alarm {
                 sys.p.nvic.borrow_mut().set_intr_pending(RTC_IRQ);
             }
-            // Check overflow
             if self.cnt < self.last_cnt && self.crh & 2 != 0 {
                 sys.p.nvic.borrow_mut().set_intr_pending(RTC_IRQ);
             }
@@ -90,10 +100,12 @@ impl Peripheral for Rtc {
             0x04 => self.crl,
             0x08 => self.prlh,
             0x0C => self.prll,
-            0x10 => self.cnth,
-            0x14 => self.cntl,
-            0x18 => self.alrh,
-            0x1C => self.alrl,
+            0x10 => self.divh,
+            0x14 => self.divl,
+            0x18 => self.cnth,
+            0x1C => self.cntl,
+            0x20 => self.alrh,
+            0x24 => self.alrl,
             _ => 0,
         }
     }
@@ -110,27 +122,29 @@ impl Peripheral for Rtc {
                     self.crl = (self.crl & !(1 << 5) & !(1 << 4)) | (value & (1 << 5));
                 }
                 if value & (1 << 3) != 0 { self.crl |= 1 << 3; }
-                let was_enabled = self.crl & 1;
+                let was_enabled = self.crl & (1 << 5);
                 self.crl = (self.crl & !0x07) | (value & 0x07);
-                if (self.crl & 1) != 0 && was_enabled == 0 {
+                if (self.crl & (1 << 5)) != 0 && was_enabled == 0 {
                     self.last_tick = INSTRUCTION_COUNT.load(Ordering::Relaxed);
                     self.div_counter = 0;
                 }
             }
             0x08 => self.prlh = value & 0xFFFF,
             0x0C => self.prll = value & 0xFFFF,
-            0x10 => {
+            0x10 => self.divh = value & 0xFFFF,
+            0x14 => self.divl = value & 0xFFFF,
+            0x18 => {
                 self.cnth = value & 0xFFFF;
                 self.cnt = ((self.cnth as u32) << 16) | (self.cntl as u32);
                 self.last_cnt = self.cnt;
             }
-            0x14 => {
+            0x1C => {
                 self.cntl = value & 0xFFFF;
                 self.cnt = ((self.cnth as u32) << 16) | (self.cntl as u32);
                 self.last_cnt = self.cnt;
             }
-            0x18 => self.alrh = value & 0xFFFF,
-            0x1C => self.alrl = value & 0xFFFF,
+            0x20 => self.alrh = value & 0xFFFF,
+            0x24 => self.alrl = value & 0xFFFF,
             _ => {}
         }
     }

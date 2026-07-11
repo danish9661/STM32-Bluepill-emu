@@ -19,6 +19,7 @@ impl Iwdg {
     }
     fn tick_instructions(&self) -> u64 { 128 * self.prescaler_div() }
 
+    #[allow(dead_code)]
     fn elapsed_ticks(&mut self) -> u32 {
         let now = INSTRUCTION_COUNT.load(Ordering::Relaxed);
         let elapsed = now.saturating_sub(self.last_tick);

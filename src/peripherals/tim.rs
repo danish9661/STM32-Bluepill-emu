@@ -37,7 +37,9 @@ pub struct Timer {
     pwm_duty: [u32; 4],
     last_tick: u64,
     irq_num: i32,
+    #[allow(dead_code)]
     name: String,
+    #[allow(dead_code)]
     one_pulse_active: bool,
 }
 
@@ -79,7 +81,8 @@ impl Timer {
         let dir = (self.cr1 >> 4) & 1;
         let cms = (self.cr1 >> 5) & 0x3;
 
-        for _ in 0..ticks.min(100) {
+        for _ in 0..ticks.min(1000) {
+            let old_cnt = self.cnt;
             match (cms, dir) {
                 (0, 0) => { // Up-counting
                     if self.cnt < self.arr { self.cnt += 1; }
@@ -92,7 +95,6 @@ impl Timer {
                         if self.dier & (1 << 8) != 0 { //UDE - DMA request
                             // would trigger DMA
                         }
-                        // Update interrupt on overflow
                     }
                 }
                 (0, 1) => { // Down-counting
@@ -106,7 +108,6 @@ impl Timer {
                     }
                 }
                 _ => { // Center-aligned modes
-                    // Simplified: just up-count
                     if self.cnt < self.arr { self.cnt += 1; }
                     else {
                         self.cnt = 0;
@@ -122,8 +123,10 @@ impl Timer {
             for ch in 0..4 {
                 if self.ccer & (1 << (ch * 4)) != 0 { // CCxE
                     let ccr_val = self.ccr[ch];
-                    if self.cnt == ccr_val {
-                        // Capture/Compare match
+                    let match_up = dir == 0 && old_cnt <= ccr_val && self.cnt >= ccr_val;
+                    let match_down = dir == 1 && old_cnt >= ccr_val && self.cnt <= ccr_val;
+                    let match_overflow = (old_cnt > self.cnt) && (old_cnt <= ccr_val || self.cnt >= ccr_val);
+                    if match_up || match_down || match_overflow {
                         self.sr |= 1 << (1 + ch); // CC1IF-CC4IF
                         let cc_irq_enable = (self.dier >> (1 + ch)) & 1;
                         if cc_irq_enable != 0 {
@@ -144,7 +147,7 @@ impl Timer {
         self.update_interrupt(sys);
     }
 
-    fn update_interrupt(&self, sys: &System) {
+    fn update_interrupt(&self, _sys: &System) {
         // UIF, CCxIF, TIF, etc. already trigger during advance
     }
 

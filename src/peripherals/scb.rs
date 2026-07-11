@@ -73,11 +73,11 @@ impl Peripheral for Scb {
     fn read(&mut self, _sys: &System, offset: u32) -> u32 {
         match offset {
             0x00 => {
-                // CPUID - r0p1 of Cortex-M4
+                // CPUID - r1p0 of Cortex-M3
                 let implementer = 0x41; // ARM
-                let variant = 0;
-                let part = 0xC24; // Cortex-M4
-                let revision = 1;
+                let variant = 1;
+                let part = 0xC23; // Cortex-M3
+                let revision = 0;
                 (implementer << 24) | (variant << 20) | (part << 4) | revision
             }
             0x04 => {

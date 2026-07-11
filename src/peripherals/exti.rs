@@ -22,7 +22,6 @@ impl Exti {
     pub fn set_pending(&mut self, sys: &System, line: u32) {
         let mask = 1 << line;
         if line > 31 { return; }
-        // Check if the line is unmasked (IMR bit = 1) and trigger matches config
         if self.imr & mask == 0 { return; }
         self.pr |= mask;
         sys.p.nvic.borrow_mut().set_intr_pending(exti_irq(line));
@@ -36,8 +35,7 @@ fn exti_irq(line: u32) -> i32 {
         10..=15 => 40,
         16 => 1,
         17 => 3,
-        18 => 3,
-        19..=31 => 3,
+        18 => 42,
         _ => -1,
     }
 }
@@ -55,6 +53,23 @@ impl Peripheral for Exti {
         }
     }
 
+    fn gpio_pin_changed(&mut self, sys: &System, port: u8, pin: u8, rising: bool) -> bool {
+        let line = pin as u32;
+        let mask = 1 << line;
+        if line > 31 { return false; }
+        if self.imr & mask == 0 { return false; }
+        let edge_ok = if rising { self.rtsr & mask != 0 } else { self.ftsr & mask != 0 };
+        if !edge_ok { return false; }
+        if line < 16 {
+            if let Some(expected) = sys.p.exti_port_for_line(line) {
+                if (b'A' + port) as char != expected { return false; }
+            }
+        }
+        self.pr |= mask;
+        sys.p.nvic.borrow_mut().set_intr_pending(exti_irq(line));
+        true
+    }
+
     fn write(&mut self, sys: &System, offset: u32, value: u32) {
         match offset {
             0x00 => self.imr = value,
@@ -62,7 +77,6 @@ impl Peripheral for Exti {
             0x08 => self.rtsr = value,
             0x0C => self.ftsr = value,
             0x10 => {
-                // Software interrupt event register: writing 1 triggers the interrupt
                 let new_sw = value & !self.swier;
                 self.swier |= value;
                 for line in 0..32 {
@@ -72,7 +86,6 @@ impl Peripheral for Exti {
                 }
             }
             0x14 => {
-                // PR is write-1-to-clear
                 self.pr &= !value;
             }
             _ => {}
