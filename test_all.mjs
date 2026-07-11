@@ -1,7 +1,7 @@
 import * as periph from './pkg/stm32_bluepill_wasm.js';
 
 const { init, periph_read, periph_write, tick, has_pending_interrupt,
-        get_next_pending_interrupt, gpio_read_output, gpio_set_input,
+        get_next_pending_interrupt, clear_current_interrupt, gpio_read_output, gpio_set_input,
         gpio_read_input, get_uart_output, uart_rx_byte, adc_set_sim_value,
         is_watchdog_reset_requested, can_inject_message } = periph;
 
@@ -259,6 +259,7 @@ assert_eq(has_pending_interrupt(), true, 'SysTick pending after >1000 ticks');
 let irq = get_next_pending_interrupt();
 assert_eq(irq, -1, 'SysTick IRQ number = -1');
 assert_eq(has_pending_interrupt(), false, 'SysTick pending cleared after get');
+clear_current_interrupt();
 
 // Second fire: tick another 1000+
 for (let i = 0; i < 1000; i++) tick();
@@ -904,6 +905,8 @@ periph_write(0x4001380C, 4, 0x202D); // CR1: UE=1, RE=1, RXNEIE=1, TE=1... actua
 // UE is bit 13, RE is bit 2, TE is bit 3, RXNEIE is bit 5
 // CR1 = (1<<13) | (1<<3) | (1<<2) | (1<<5) = 0x202C
 periph_write(0x4001380C, 4, (1<<13) | (1<<3) | (1<<2) | (1<<5));
+// Enable USART1 IRQ (37) in NVIC
+periph_write(0xE000E104, 4, 1 << 5); // ISER1 bit 5
 
 // Inject a byte via RX
 uart_rx_byte(0x40013800, 0x42);

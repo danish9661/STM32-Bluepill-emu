@@ -51,16 +51,31 @@ pub fn tick() {
     sys().tick();
 }
 
-/// Check if any interrupt is pending (non-consuming).
+/// Check if any interrupt is pending, respecting PRIMASK/BASEPRI.
 #[wasm_bindgen]
 pub fn has_pending_interrupt() -> bool {
-    sys().p.nvic.borrow().has_pending()
+    let primask = system::INTR_MASK_PRIMASK.load(Ordering::Relaxed);
+    let basepri = system::INTR_MASK_BASEPRI.load(Ordering::Relaxed);
+    sys().p.nvic.borrow().has_pending_masked(primask, basepri)
 }
 
 #[wasm_bindgen]
 pub fn get_next_pending_interrupt() -> i32 {
-    sys().p.nvic.borrow_mut().get_and_clear_next_intr_pending()
+    sys().p.nvic.borrow_mut().get_next_pending_intr()
         .unwrap_or(-255)
+}
+
+/// Set PRIMASK and BASEPRI values from Unicorn CPU state.
+#[wasm_bindgen]
+pub fn set_intr_masks(primask: u32, basepri: u32) {
+    system::INTR_MASK_PRIMASK.store(primask, Ordering::Relaxed);
+    system::INTR_MASK_BASEPRI.store(basepri, Ordering::Relaxed);
+}
+
+/// Call after an ISR returns to pop the active priority stack.
+#[wasm_bindgen]
+pub fn clear_current_interrupt() {
+    sys().p.nvic.borrow_mut().clear_current_interrupt();
 }
 
 #[wasm_bindgen]

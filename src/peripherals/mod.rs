@@ -22,6 +22,7 @@ pub mod afio;
 pub mod exti;
 pub mod bkp;
 pub mod dac;
+pub mod usb;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -180,6 +181,7 @@ impl Peripherals {
                 .or_else(|| Timer::new(name))
                 .or_else(|| Adc::new(name))
                 .or_else(|| Can::new(name))
+                .or_else(|| Usb::new(name))
                 .or_else(|| Fsmc::new(name, ext_devices))
                 .or_else(|| Afio::new(name))
                 .or_else(|| Exti::new(name))
@@ -217,6 +219,7 @@ impl Peripherals {
             (0x4000_5400, "I2C1"), (0x4000_5800, "I2C2"),
             (0x4000_6000, "DMA1"),
             (0x4000_6400, "CAN1"),
+            (0x4000_5C00, "USB"),
             (0x4000_6C00, "BKP"),
             (0x4000_7000, "PWR"),
             (0x4000_7400, "DAC"),
@@ -258,6 +261,7 @@ impl Peripherals {
                 .or_else(|| Timer::new(name))
                 .or_else(|| Adc::new(name))
                 .or_else(|| Can::new(name))
+                .or_else(|| Usb::new(name))
                 .or_else(|| Fsmc::new(name, ext_devices))
                 .or_else(|| Afio::new(name))
                 .or_else(|| Exti::new(name))
@@ -499,3 +503,4 @@ use afio::Afio;
 use exti::Exti;
 use bkp::Bkp;
 use dac::Dac;
+use usb::Usb;
