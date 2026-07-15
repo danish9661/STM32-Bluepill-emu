@@ -1,6 +1,5 @@
-use crate::system::{System, INSTRUCTION_COUNT};
+use crate::system::{System, instruction_count};
 use super::Peripheral;
-use std::sync::atomic::Ordering;
 
 const RTC_IRQ: i32 = 3;
 
@@ -37,7 +36,7 @@ impl Rtc {
                 alrl: 0xFFFF,
                 cnt: 0,
                 div_counter: 0,
-                last_tick: INSTRUCTION_COUNT.load(Ordering::Relaxed),
+                last_tick: instruction_count(),
                 last_cnt: 0,
             }))
         } else {
@@ -67,7 +66,7 @@ impl Peripheral for Rtc {
     fn tick(&mut self, sys: &System) {
         if self.crl & (1 << 5) == 0 { return; } // RTOFF — not enabled
 
-        let now = INSTRUCTION_COUNT.load(Ordering::Relaxed);
+        let now = instruction_count();
         let delta = now.wrapping_sub(self.last_tick);
         if delta == 0 { return; }
         self.last_tick = now;
@@ -84,7 +83,7 @@ impl Peripheral for Rtc {
             self.sync_div_regs();
 
             let alarm = ((self.alrh as u32) << 16) | self.alrl as u32;
-            if self.crh & 1 != 0 && self.last_cnt != alarm && self.cnt == alarm {
+            if self.crh & 1 != 0 && self.last_cnt < alarm && self.cnt >= alarm {
                 sys.p.nvic.borrow_mut().set_intr_pending(RTC_IRQ);
             }
             if self.cnt < self.last_cnt && self.crh & 2 != 0 {
@@ -125,7 +124,7 @@ impl Peripheral for Rtc {
                 let was_enabled = self.crl & (1 << 5);
                 self.crl = (self.crl & !0x07) | (value & 0x07);
                 if (self.crl & (1 << 5)) != 0 && was_enabled == 0 {
-                    self.last_tick = INSTRUCTION_COUNT.load(Ordering::Relaxed);
+                    self.last_tick = instruction_count();
                     self.div_counter = 0;
                 }
             }

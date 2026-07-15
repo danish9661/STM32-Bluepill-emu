@@ -417,16 +417,18 @@ assert_eq((spi_cr1 >> 3) & 0x7, 3, 'SPI1 CR1 BR=3');
 
 // Write to SPI DR (offset 0x0C) — triggers xfer, no device = rx 0xFF
 periph_write(SPI1 + 0x0C, 4, 0xA5);
+
+// Read SR first (before reading DR clears RXNE)
+let spi_sr = periph_read(SPI1 + 0x08, 4);
+assert_eq(spi_sr & (1 << 1), 1 << 1, 'SPI1 SR TXE');
+assert_eq(spi_sr & (1 << 0), 1 << 0, 'SPI1 SR RXNE');
+
+// Now read DR
 assert_eq(periph_read(SPI1 + 0x0C, 4), 0xFF, 'SPI1 DR xfer returns 0xFF (no device)');
 
 // CRCPR at offset 0x10 stores value directly
 periph_write(SPI1 + 0x10, 4, 0x07);
 assert_eq(periph_read(SPI1 + 0x10, 4), 0x07, 'SPI1 CRCPR');
-
-// Read SR
-let spi_sr = periph_read(SPI1 + 0x08, 4);
-assert_eq(spi_sr & (1 << 1), 1 << 1, 'SPI1 SR TXE');
-assert_eq(spi_sr & (1 << 0), 1 << 0, 'SPI1 SR RXNE');
 
 // ============================================================
 // I2C
@@ -468,9 +470,9 @@ const RTC = 0x40002800;
 periph_write(RTC + 0x0C, 4, 0x7FFF);
 assert_eq(periph_read(RTC + 0x0C, 4), 0x7FFF, 'RTC PRL');
 
-// Write to RTC CNT (counter)
-periph_write(RTC + 0x08, 4, 0x1234);
-assert_eq(periph_read(RTC + 0x08, 4), 0x1234, 'RTC CNT');
+// Write to RTC CNT (counter) — low half
+periph_write(RTC + 0x1C, 4, 0x1234);
+assert_eq(periph_read(RTC + 0x1C, 4), 0x1234, 'RTC CNT');
 
 // ============================================================
 // PWR
@@ -671,27 +673,27 @@ group('RTC Counting');
 
 reset();
 
-// Enable RTC (CRL bit 0 = RTOFF)
-periph_write(0x40002800 + 0x04, 4, 1);
+// Enable RTC (CRL bit 5 = RTOFF)
+periph_write(0x40002800 + 0x04, 4, 1 << 5);
 
 // Set prescaler = 99 (CNT increments every 100 ticks)
 periph_write(0x40002800 + 0x0C, 4, 99);
 
 // Write initial CNT = 0
-periph_write(0x40002800 + 0x14, 4, 0); // cntl
-periph_write(0x40002800 + 0x10, 4, 0); // cnth
+periph_write(0x40002800 + 0x1C, 4, 0); // cntl
+periph_write(0x40002800 + 0x18, 4, 0); // cnth
 
-assert_eq(periph_read(0x40002800 + 0x14, 4), 0, 'RTC CNTL = 0 initial');
+assert_eq(periph_read(0x40002800 + 0x1C, 4), 0, 'RTC CNTL = 0 initial');
 
 // Run 1000 ticks → should increment CNT by ~10
 for (let i = 0; i < 1000; i++) tick();
 
-let cntl = periph_read(0x40002800 + 0x14, 4);
+let cntl = periph_read(0x40002800 + 0x1C, 4);
 assert_eq(cntl, 10, 'RTC CNT = 10 after 1000 ticks with PRL=99');
 
 // Run 500 more ticks → CNT should be ~15
 for (let i = 0; i < 500; i++) tick();
-cntl = periph_read(0x40002800 + 0x14, 4);
+cntl = periph_read(0x40002800 + 0x1C, 4);
 assert_eq(cntl, 15, 'RTC CNT = 15 after 1500 total ticks');
 
 // ============================================================
@@ -933,11 +935,11 @@ reset();
 periph_write(0xE000E100, 4, 1 << 3);
 
 // Configure RTC: enable, set PRL=99, set ALR=5, enable ALRIE
-periph_write(0x40002818, 4, 0);   // ALRH = 0
-periph_write(0x4000281C, 4, 5);   // ALRL = 5 (alarm = 0x00000005)
+periph_write(0x40002820, 4, 0);   // ALRH = 0
+periph_write(0x40002824, 4, 5);   // ALRL = 5 (alarm = 0x00000005)
 periph_write(0x4000280C, 4, 99);  // PRLL = 99 (count every 100 ticks)
 periph_write(0x40002800, 4, 1);   // CRH: ALRIE=1
-periph_write(0x40002804, 4, 1);   // CRL: RTOFF=1 (enable)
+periph_write(0x40002804, 4, 1 << 5);   // CRL: RTOFF=1 (enable)
 
 // No interrupt should be pending yet
 assert_eq(has_pending_interrupt(), false, 'RTC no IRQ before alarm');

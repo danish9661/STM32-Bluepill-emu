@@ -2,10 +2,10 @@ import { readFileSync } from 'fs';
 import path from 'path';
 import * as yaml from 'js-yaml';
 import * as periph from './stm32_bluepill_wasm.js';
-const { periph_read, periph_write, tick, get_next_pending_interrupt, dma_get_pending_count, 
+const { periph_read, periph_write, tick, step, step_batch, get_next_pending_interrupt, dma_get_pending_count, 
 dma_get_pending, dma_set_completed, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen,
 add_lcd, add_i2c_oled,
-init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, gpio_read_output, initSync,
+init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, gpio_read_output,
 set_intr_masks, clear_current_interrupt } = periph;
 
 const parseHex = (v) => typeof v === 'number' ? v : parseInt(v, 16);
@@ -17,8 +17,8 @@ async function getMUnicorn() {
 }
 
 async function main() {
-    const wasmBytes = readFileSync(new URL('stm32_bluepill_wasm_bg.wasm', import.meta.url));
-    initSync({ module: wasmBytes });
+    // Module auto-initializes on import; no initSync needed
+    await null;
     const args = process.argv.slice(2);
     const configPaths = args.filter(a => a.startsWith('--config=')).map(a => a.split('=')[1]);
     const posArgs = args.filter(a => !a.startsWith('--'));
@@ -205,28 +205,14 @@ async function main() {
     }
 
     let instCount = 0n;
+    let batchInstCount = 0n;
     let stopRequested = false;
 
-    const readIntrMask = (reg) => {
-        try { return uc.reg_read_i32(Module[reg]) >>> 0; } catch (_) { return 0; }
-    };
-
+    // Per-instruction hook: just count instructions, no WASM calls.
+    // Actual tick/interrupt processing happens in step_batch() after each Unicorn batch.
     const codeHook = (handle, address, size, user_data) => {
         instCount++;
-        tick();
-        set_intr_masks(readIntrMask('ARM_REG_PRIMASK'), readIntrMask('ARM_REG_BASEPRI'));
-        if (is_watchdog_reset_requested()) {
-            stopRequested = true;
-            uc.emu_stop();
-            return;
-        }
-        if (dma_get_pending_count() > 0) {
-            uc.emu_stop();
-            return;
-        }
-        if (has_pending_interrupt()) {
-            uc.emu_stop();
-        }
+        batchInstCount++;
     };
     uc.hook_add(Module.HOOK_CODE, codeHook, null);
 
@@ -371,6 +357,12 @@ async function main() {
                 console.error('Emulation error:', e.message || e);
                 break;
             }
+        }
+        // Process all accumulated instructions in a single WASM call
+        if (batchInstCount > 0) {
+            const status = step_batch(Number(batchInstCount));
+            batchInstCount = 0n;
+            if (status === 1) { stopRequested = true; break; }
         }
         processDma();
         processInterrupts();

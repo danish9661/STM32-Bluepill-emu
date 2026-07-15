@@ -51,10 +51,10 @@ impl Peripheral for Flash {
         match offset {
             0x00 => self.acr,
             0x04 => self.keyr,
-            0x08 => self.optkeyr,
-            0x0C => self.sr,
-            0x10 => self.cr,
-            0x14 => self.ar,
+            0x08 => self.sr,
+            0x0C => self.cr,
+            0x10 => self.ar,
+            0x14 => self.optkeyr,
             0x1C => self.obr,
             0x20 => self.wrpr,
             _ => 0,
@@ -80,9 +80,8 @@ impl Peripheral for Flash {
                     _ => self.key_step = 0,
                 }
             }
-            0x08 => self.optkeyr = value,
-            0x0C => self.sr = value & 0xB3,
-            0x10 => {
+            0x08 => self.sr = value & 0xB3,
+            0x0C => {
                 let is_locked = self.cr & (1 << 7) != 0;
                 let mut cr = value & 0x3FFF;
                 if is_locked {
@@ -98,7 +97,8 @@ impl Peripheral for Flash {
                 }
                 self.update_sr();
             }
-            0x14 => self.ar = value,
+            0x10 => self.ar = value,
+            0x14 => self.optkeyr = value,
             0x1C => self.obr |= value,
             0x20 => self.wrpr = value,
             _ => {}

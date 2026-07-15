@@ -8,12 +8,11 @@ fn reflect_32(v: u32) -> u32 {
 }
 
 fn stm32_crc32(crc: u32, data: u32) -> u32 {
-    let rev = reflect_32(data);
-    let mut c = crc ^ rev;
+    let mut c = crc ^ data;
     for _ in 0..32 {
-        if c & 0x8000_0000 != 0 { c = (c << 1) ^ 0x04C1_1DB7; } else { c <<= 1; }
+        if c & 0x80000000 != 0 { c = (c << 1) ^ 0x04C11DB7; } else { c <<= 1; }
     }
-    reflect_32(c)
+    c
 }
 
 pub struct Crc { dr: u32, idr: u32, cr: u32 }
