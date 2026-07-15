@@ -56,6 +56,7 @@ pub struct PeripheralSlot<T> {
 
 pub struct Peripherals {
     pub peripherals: Vec<PeripheralSlot<RefCell<Box<dyn Peripheral>>>>,
+    pub tick_indices: Vec<usize>,
     pub nvic: RefCell<nvic::Nvic>,
     pub gpio: RefCell<GpioPorts>,
     rcc_enrs: RefCell<(u32, u32, u32)>,
@@ -115,6 +116,10 @@ fn extract_svd_max_offset(p: &PeripheralInfo) -> u32 {
     max_off
 }
 
+fn name_has_tick(name: &str) -> bool {
+    name.starts_with("TIM") || name.starts_with("DMA") || name == "RTC" || name.starts_with("ADC")
+}
+
 impl Peripherals {
     pub const NVIC_REGS_BASE: u32 = 0xE000_E100;
     pub const NVIC_REGS_END: u32 = 0xE000_E500;
@@ -133,6 +138,7 @@ impl Peripherals {
         let rcc_enrs = RefCell::new((0x0000_0014, 0x0000_0000, 0x0000_0000));
         let mut peripherals = Peripherals {
             peripherals: Vec::new(),
+            tick_indices: Vec::new(),
             nvic: RefCell::new(nvic::Nvic::default()),
             gpio: RefCell::new(gpio),
             rcc_enrs,
@@ -190,10 +196,14 @@ impl Peripherals {
             ;
 
             if let Some(peri) = peri {
+                let idx = peripherals.peripherals.len();
                 peripherals.peripherals.push(PeripheralSlot {
                     start, end,
                     peripheral: RefCell::new(peri),
                 });
+                if name_has_tick(name) {
+                    peripherals.tick_indices.push(idx);
+                }
             }
         }
 
@@ -205,6 +215,7 @@ impl Peripherals {
         let rcc_enrs = RefCell::new((0x0000_0014, 0x0000_0000, 0x0000_0000));
         let mut peripherals = Peripherals {
             peripherals: Vec::new(),
+            tick_indices: Vec::new(),
             nvic: RefCell::new(nvic::Nvic::default()),
             gpio: RefCell::new(gpio),
             rcc_enrs,
@@ -270,11 +281,16 @@ impl Peripherals {
             ;
 
             if let Some(p) = p {
+                let idx = peripherals.peripherals.len();
                 peripherals.peripherals.push(PeripheralSlot { start, end, peripheral: RefCell::new(p) });
+                if name_has_tick(name) {
+                    peripherals.tick_indices.push(idx);
+                }
             }
         }
 
         if let Some(p) = Fsmc::new("FSMC", ext_devices) {
+            let idx = peripherals.peripherals.len();
             peripherals.peripherals.push(PeripheralSlot { start: 0x6000_0000, end: 0xA000_1000, peripheral: RefCell::new(p) });
         }
 
@@ -393,9 +409,7 @@ impl Peripherals {
         let value = if Self::NVIC_REGS_BASE <= addr && addr < Self::NVIC_REGS_END {
             self.nvic.borrow_mut().read(sys, addr - Self::NVIC_REGS_BASE)
         } else if let Some(p) = Self::get_peripheral(&self.peripherals, addr) {
-            if self.clock_enabled(p.start) {
-                p.peripheral.borrow_mut().read(sys, addr - p.start)
-            } else { 0 }
+            p.peripheral.borrow_mut().read(sys, addr - p.start)
         } else { 0 };
         if is_reg { value << (8 * byte_offset) } else { value }
     }
@@ -426,9 +440,7 @@ impl Peripherals {
         if Self::NVIC_REGS_BASE <= addr && addr < Self::NVIC_REGS_END {
             self.nvic.borrow_mut().write(sys, addr - Self::NVIC_REGS_BASE, value);
         } else if let Some(p) = Self::get_peripheral(&self.peripherals, addr) {
-            if self.clock_enabled(p.start) {
-                p.peripheral.borrow_mut().write(sys, addr - p.start, value);
-            }
+            p.peripheral.borrow_mut().write(sys, addr - p.start, value);
         }
     }
 

@@ -64,10 +64,7 @@ impl DmaTransfer {
     }
 }
 
-static DMA_COMPLETED: [AtomicBool; 8] = [
-    AtomicBool::new(false), AtomicBool::new(false), AtomicBool::new(false), AtomicBool::new(false),
-    AtomicBool::new(false), AtomicBool::new(false), AtomicBool::new(false), AtomicBool::new(false),
-];
+static DMA_COMPLETION_BITS: AtomicU32 = AtomicU32::new(0);
 
 // Per-stream DMA interrupt info: IRQ number (-1 = none) and flags (bit 0=TCIE, 1=HTIE, 2=TEIE)
 static DMA_STREAM_IRQ: [AtomicI32; 8] = [
@@ -153,7 +150,9 @@ impl WasmSystem {
     }
 
     pub fn mark_dma_completed(&self, stream_idx: usize, _success: bool) {
-        DMA_COMPLETED[stream_idx].store(true, Ordering::Release);
+        if stream_idx < 8 {
+            DMA_COMPLETION_BITS.fetch_or(1 << stream_idx, Ordering::Release);
+        }
         // Fire NVIC interrupt after transfer completes
         if stream_idx < 8 {
             let irq = DMA_STREAM_IRQ[stream_idx].swap(-1, Ordering::Acquire);
@@ -167,13 +166,22 @@ impl WasmSystem {
     }
 
     pub fn dma_check_completion(&self, stream_idx: usize) -> bool {
-        DMA_COMPLETED[stream_idx].swap(false, Ordering::Acquire)
+        if stream_idx < 8 {
+            let mask = 1 << stream_idx;
+            DMA_COMPLETION_BITS.fetch_and(!mask, Ordering::Acquire) & mask != 0
+        } else {
+            false
+        }
+    }
+
+    pub fn dma_take_completions(&self) -> u32 {
+        DMA_COMPLETION_BITS.swap(0, Ordering::Acquire)
     }
 
     pub fn tick(&self) {
         let p = self.p.clone();
-        for slot in &p.peripherals {
-            slot.peripheral.borrow_mut().tick(self);
+        for &idx in &p.tick_indices {
+            p.peripherals[idx].peripheral.borrow_mut().tick(self);
         }
         p.nvic.borrow_mut().maybe_set_systick_intr_pending();
     }

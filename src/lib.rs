@@ -51,6 +51,32 @@ pub fn tick() {
     sys().tick();
 }
 
+/// Combined per-instruction step: sets masks, ticks peripherals, checks conditions.
+/// Returns: 0=continue, 1=watchdog reset, 2=DMA pending, 3=interrupt pending.
+#[wasm_bindgen]
+pub fn step(primask: u32, basepri: u32) -> u32 {
+    system::INTR_MASK_PRIMASK.store(primask, Ordering::Relaxed);
+    system::INTR_MASK_BASEPRI.store(basepri, Ordering::Relaxed);
+    system::INSTRUCTION_COUNT.fetch_add(1, Ordering::Relaxed);
+    sys().tick();
+    if is_watchdog_reset_requested() { return 1; }
+    if sys().pending_dma_count() > 0 { return 2; }
+    if sys().p.nvic.borrow().has_pending_masked(primask, basepri) { return 3; }
+    0
+}
+
+/// Process a batch of N instructions in one WASM call.
+/// Returns: 0=continue, 1=watchdog reset.
+#[wasm_bindgen]
+pub fn step_batch(count: u32) -> u32 {
+    let sys = sys();
+    for _ in 0..count {
+        system::INSTRUCTION_COUNT.fetch_add(1, Ordering::Relaxed);
+        sys.tick();
+    }
+    if is_watchdog_reset_requested() { 1 } else { 0 }
+}
+
 /// Check if any interrupt is pending, respecting PRIMASK/BASEPRI.
 #[wasm_bindgen]
 pub fn has_pending_interrupt() -> bool {

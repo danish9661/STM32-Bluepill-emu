@@ -57,12 +57,15 @@ impl Channel {
 
 impl Peripheral for Dma {
     fn tick(&mut self, sys: &System) {
-        for ch in 0..7 {
-            if sys.dma_check_completion(ch) {
-                let shift = ch * 4;
-                self.isr |= (1 << 4) << shift; // TCIF
-                self.channels[ch].cr &= !1;    // clear EN
-                self.channels[ch].ndtr = 0;
+        let bits = sys.dma_take_completions();
+        if bits != 0 {
+            for ch in 0..7 {
+                if bits & (1 << ch) != 0 {
+                    let shift = ch * 4;
+                    self.isr |= (1 << 4) << shift; // TCIF
+                    self.channels[ch].cr &= !1;    // clear EN
+                    self.channels[ch].ndtr = 0;
+                }
             }
         }
     }
@@ -111,6 +114,7 @@ impl Peripheral for Dma {
                                 self.channels[ch].cr = value & 0x7F7F;
                                 if value & 1 != 0 {
                                     self.channels[ch].do_xfer(&self.name, sys, ch);
+                                    self.channels[ch].ndtr = 0;
                                     let irq = self.channel_irq(ch);
                                     let cr = self.channels[ch].cr;
                                     let tcie = ((cr >> 4) & 1) as u8;
