@@ -27,6 +27,9 @@ button.danger:hover:not(:disabled) { background: #dc2626; color: #fff; }
 label.file-btn { background: #0f172a; color: #38bdf8; border: 1px dashed #0ea5e9; padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; display: inline-block; }
 label.file-btn:hover { background: #1d4ed8; color: #fff; }
 input[type="file"] { display: none; }
+select { background: #0f172a; color: #38bdf8; border: 1px solid #0ea5e9; padding: 7px 10px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+select:hover { background: #1e293b; }
+select:focus { outline: none; border-color: #7dd3fc; }
 .stats { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 12px; font-size: 12px; color: #94a3b8; }
 .stats b { color: #38bdf8; font-size: 14px; font-family: 'Cascadia Mono', Consolas, monospace; }
 .terminal { background: #020617; border: 1px solid #334155; border-radius: 8px; height: 240px; overflow-y: auto; padding: 10px 12px; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12.5px; line-height: 1.55; }
@@ -85,11 +88,15 @@ input[type="file"] { display: none; }
         <div class="card">
             <h2>Run Controls</h2>
             <div class="toolbar">
-                <button id="loadSampleBtn" class="primary">Load Blink Demo</button>
-                <button id="loadComprehensiveBtn">Load Comprehensive Test</button>
-                <label class="file-btn">Load .bin / .hex / .elf / .map <input type="file" id="fileInput" accept=".bin,.hex,.elf,.map"></label>
+                <select id="presetSelect">
+                    <option value="blink">Blink Demo (Arduino)</option>
+                    <option value="comprehensive">Comprehensive Test (21 peripherals)</option>
+                </select>
+                <button id="loadPresetBtn" class="primary">Load Preset</button>
+                <label class="file-btn">Load .bin / .hex <input type="file" id="binInput" accept=".bin,.hex"></label>
+                <label class="file-btn">Load .elf <input type="file" id="elfInput" accept=".elf"></label>
+                <label class="file-btn">Load .map <input type="file" id="mapInput" accept=".map"></label>
                 <button id="runBtn" disabled>Run</button>
-                <button id="stepBtn" disabled>Step 100K</button>
                 <button id="stopBtn" class="danger" disabled>Stop</button>
                 <button id="resetBtn" disabled>Reset</button>
             </div>
@@ -300,7 +307,6 @@ async function initEmulator(data, name, extDevices = {}) {
         if (symbolsData) emu.setSymbols(symbolsData);
         log(`Loaded ${name} (${data.length} bytes). PC=0x${emu.getRegisters().PC.toString(16).padStart(8, '0')}`);
         $('runBtn').disabled = false;
-        $('stepBtn').disabled = false;
         $('stopBtn').disabled = true;
         $('resetBtn').disabled = false;
         $('uartInput').disabled = false;
@@ -331,7 +337,6 @@ function runLoop() {
             setState('Stopped');
             $('stopBtn').disabled = true;
             $('runBtn').disabled = false;
-            $('stepBtn').disabled = false;
             return;
         }
     } catch (e) {
@@ -347,50 +352,59 @@ function runLoop() {
     animId = requestAnimationFrame(runLoop);
 }
 
-$('loadSampleBtn').addEventListener('click', async () => {
-    const resp = await fetch('blink.bin');
-    const buf = await resp.arrayBuffer();
-    await initEmulator(new Uint8Array(buf), 'blink.bin');
-});
-
-$('loadComprehensiveBtn').addEventListener('click', async () => {
+$('loadPresetBtn').addEventListener('click', async () => {
+    const preset = $('presetSelect').value;
     setState('Loading…');
     try {
-        const [fw, eeprom, spiflash] = await Promise.all([
-            fetch('comprehensive_test.bin').then(r => r.arrayBuffer()),
-            fetch('eeprom.bin').then(r => r.arrayBuffer()),
-            fetch('spi_flash.bin').then(r => r.arrayBuffer()),
-        ]);
-        await initEmulator(new Uint8Array(fw), 'comprehensive_test.bin', {
-            i2c_eeprom: [{ peripheral: 'I2C1', address: 0x50, data: new Uint8Array(eeprom) }],
-            spi_flash: [{ peripheral: 'SPI1', jedec_id: 0xef4016, data: new Uint8Array(spiflash), cs: null }],
-        });
+        if (preset === 'blink') {
+            const buf = await fetch('blink.bin').then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(buf), 'blink.bin');
+        } else if (preset === 'comprehensive') {
+            const [fw, eeprom, spiflash] = await Promise.all([
+                fetch('comprehensive_test.bin').then(r => r.arrayBuffer()),
+                fetch('eeprom.bin').then(r => r.arrayBuffer()),
+                fetch('spi_flash.bin').then(r => r.arrayBuffer()),
+            ]);
+            await initEmulator(new Uint8Array(fw), 'comprehensive_test.bin', {
+                i2c_eeprom: [{ peripheral: 'I2C1', address: 0x50, data: new Uint8Array(eeprom) }],
+                spi_flash: [{ peripheral: 'SPI1', jedec_id: 0xef4016, data: new Uint8Array(spiflash), cs: null }],
+            });
+        }
     } catch (e) {
-        log(`Failed to load comprehensive test: ${e.message || e}`, 't-err');
+        log(`Failed to load preset: ${e.message || e}`, 't-err');
         setState('Error');
     }
 });
 
-$('fileInput').addEventListener('change', async (e) => {
+$('binInput').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const lower = file.name.toLowerCase();
     if (lower.endsWith('.hex')) {
-        const text = await file.text();
-        await initEmulator(text, file.name);
-    } else if (lower.endsWith('.map')) {
-        const syms = parseSymbolMap(await file.text());
-        symbolsData = syms;
-        if (emu) { emu.setSymbols(syms); updateRegs(); }
-        log(`Loaded ${syms.length} symbols from ${file.name}.`, 't-in');
-    } else if (lower.endsWith('.elf')) {
-        const buf = await file.arrayBuffer();
-        await initEmulator(new Uint8Array(buf), file.name);
-        log(`ELF symbols: ${emu.getSymbolCount()} loaded.`, 't-in');
+        await initEmulator(await file.text(), file.name);
     } else {
         const buf = await file.arrayBuffer();
         await initEmulator(new Uint8Array(buf), file.name);
     }
+    e.target.value = '';
+});
+
+$('elfInput').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const buf = await file.arrayBuffer();
+    await initEmulator(new Uint8Array(buf), file.name);
+    log(`ELF symbols: ${emu.getSymbolCount()} loaded.`, 't-in');
+    e.target.value = '';
+});
+
+$('mapInput').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const syms = parseSymbolMap(await file.text());
+    symbolsData = syms;
+    if (emu) { emu.setSymbols(syms); updateRegs(); }
+    log(`Loaded ${syms.length} symbols from ${file.name}.`, 't-in');
     e.target.value = '';
 });
 
@@ -399,27 +413,8 @@ $('runBtn').addEventListener('click', () => {
     running = true;
     setState('Running');
     $('runBtn').disabled = true;
-    $('stepBtn').disabled = true;
     $('stopBtn').disabled = false;
     animId = requestAnimationFrame(runLoop);
-});
-
-$('stepBtn').addEventListener('click', () => {
-    if (!emu) return;
-    try {
-        const result = emu.step(100000);
-        $('instCount').textContent = result.instCount.toLocaleString();
-        $('stepCount').textContent = result.totalSteps.toLocaleString();
-        updateRegs();
-        updateVisuals();
-        pollUart();
-        if (result.stopped) {
-            log('Emulation stopped.', 't-err');
-            setState('Stopped');
-        }
-    } catch (e) {
-        log(`Step error: ${e.message || e}`, 't-err');
-    }
 });
 
 $('stopBtn').addEventListener('click', () => {
@@ -450,7 +445,7 @@ function sendUart() {
 }
 
 renderBoard(false);
-log('Load the Blink demo, a .bin/.hex/.elf firmware, or a .map for symbol names. Upload .map after the firmware for PC → symbol resolution.');
+log('Pick a preset firmware, or load a .bin/.hex/.elf firmware and a .map for symbol names. Upload .map after the firmware for PC → symbol resolution.');
 </script>
 </body>
 </html>
