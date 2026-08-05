@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { readFileSync } from 'fs';
 import path from 'path';
 import * as yaml from 'js-yaml';

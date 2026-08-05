@@ -1,0 +1,2 @@
+# This file overrides pkg/.gitignore (which ignores everything) so that
+# all built artifacts in pkg/ get included in the npm package.
