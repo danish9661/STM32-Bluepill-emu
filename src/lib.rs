@@ -117,8 +117,25 @@ pub fn dma_get_pending(index: u32) -> Vec<u32> {
 }
 
 #[wasm_bindgen]
+pub fn dma_get_all_pending() -> Vec<u32> {
+    sys().take_pending_dma_transfers()
+        .iter()
+        .flat_map(|t| t.to_u32_vec())
+        .collect()
+}
+
+#[wasm_bindgen]
 pub fn dma_set_completed(stream_idx: u32, success: bool) {
     sys().mark_dma_completed(stream_idx as usize, success);
+}
+
+#[wasm_bindgen]
+pub fn dma_set_completed_many(bits: u32) {
+    for stream in 0..8 {
+        if bits & (1 << stream) != 0 {
+            sys().mark_dma_completed(stream, true);
+        }
+    }
 }
 
 #[wasm_bindgen]

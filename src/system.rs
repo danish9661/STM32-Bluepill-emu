@@ -149,6 +149,11 @@ impl WasmSystem {
         }
     }
 
+    pub fn take_pending_dma_transfers(&self) -> Vec<DmaTransfer> {
+        let mut pending = self.pending_dma.borrow_mut();
+        std::mem::take(&mut *pending)
+    }
+
     pub fn mark_dma_completed(&self, stream_idx: usize, _success: bool) {
         if stream_idx < 8 {
             DMA_COMPLETION_BITS.fetch_or(1 << stream_idx, Ordering::Release);

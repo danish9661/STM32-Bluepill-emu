@@ -1,4 +1,6 @@
+import { readFileSync } from 'fs';
 import * as periph from '../pkg/stm32_bluepill_wasm.js';
+periph.initSync({ module: readFileSync(new URL('../pkg/stm32_bluepill_wasm_bg.wasm', import.meta.url)) });
 
 const { init, periph_read, periph_write, tick, step, has_pending_interrupt,
         get_next_pending_interrupt, clear_current_interrupt, gpio_read_output,

@@ -77,7 +77,7 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running Ardui
 9. **RTC CRL**: RTOFF at bit 5 (was bit 0).
 10. **RTC/FLASH register offsets** match STM32F103 datasheet.
 11. **SPI test fix**: Read SR before DR (DR read clears RXNE).
-12. **cli.mjs**: Removed stale `initSync(...)` call (module auto-initializes).
+12. **cli.mjs**: Removed stale `initSync(...)` call (module auto-initializes). Note: current wasm-bindgen glue no longer auto-initializes — call `periph.initSync({ module: readFileSync(wasmPath) })` after import (cli.mjs, emulator.js, tests).
 
 ### All 157 unit tests + 21 comprehensive tests pass
 Commit: `c5f9dec` (10 files, +283/-78)
