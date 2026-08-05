@@ -86,6 +86,7 @@ input[type="file"] { display: none; }
             <h2>Run Controls</h2>
             <div class="toolbar">
                 <button id="loadSampleBtn" class="primary">Load Blink Demo</button>
+                <button id="loadComprehensiveBtn">Load Comprehensive Test</button>
                 <label class="file-btn">Load .bin <input type="file" id="fileInput" accept=".bin,.hex"></label>
                 <button id="runBtn" disabled>Run</button>
                 <button id="stepBtn" disabled>Step 100K</button>
@@ -277,7 +278,7 @@ function pollUart() {
     } catch (e) {}
 }
 
-async function initEmulator(data, name) {
+async function initEmulator(data, name, extDevices = {}) {
     if (emu) { emu.close(); emu = null; }
     cancelAnimationFrame(animId);
     running = false;
@@ -292,6 +293,7 @@ async function initEmulator(data, name) {
             flash_size: 0x10000,
             ram_size: 0x5000,
             vector_table: 0x08000000,
+            ext_devices: extDevices,
         });
         log(`Loaded ${name} (${data.length} bytes). PC=0x${emu.getRegisters().PC.toString(16).padStart(8, '0')}`);
         $('runBtn').disabled = false;
@@ -346,6 +348,24 @@ $('loadSampleBtn').addEventListener('click', async () => {
     const resp = await fetch('blink.bin');
     const buf = await resp.arrayBuffer();
     await initEmulator(new Uint8Array(buf), 'blink.bin');
+});
+
+$('loadComprehensiveBtn').addEventListener('click', async () => {
+    setState('Loading…');
+    try {
+        const [fw, eeprom, spiflash] = await Promise.all([
+            fetch('comprehensive_test.bin').then(r => r.arrayBuffer()),
+            fetch('eeprom.bin').then(r => r.arrayBuffer()),
+            fetch('spi_flash.bin').then(r => r.arrayBuffer()),
+        ]);
+        await initEmulator(new Uint8Array(fw), 'comprehensive_test.bin', {
+            i2c_eeprom: [{ peripheral: 'I2C1', address: 0x50, data: new Uint8Array(eeprom) }],
+            spi_flash: [{ peripheral: 'SPI1', jedec_id: 0xef4016, data: new Uint8Array(spiflash), cs: null }],
+        });
+    } catch (e) {
+        log(`Failed to load comprehensive test: ${e.message || e}`, 't-err');
+        setState('Error');
+    }
 });
 
 $('fileInput').addEventListener('change', async (e) => {
