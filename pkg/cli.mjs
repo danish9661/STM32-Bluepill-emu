@@ -4,11 +4,13 @@ import path from 'path';
 import * as yaml from 'js-yaml';
 import { parseIntelHex, parseSymbolMap, parseElf } from './emulator.js';
 import * as periph from './stm32_bluepill_wasm.js';
-const { periph_read, periph_write, tick, step, step_batch, get_next_pending_interrupt, dma_get_pending_count, 
-dma_get_pending, dma_set_completed, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen,
+const { periph_read, periph_write, tick, step, step_batch, get_next_pending_interrupt, dma_get_all_pending, 
+dma_set_completed_many, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen,
 add_lcd, add_i2c_oled,
 init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, gpio_read_output,
 set_intr_masks, clear_current_interrupt } = periph;
+
+periph.initSync({ module: readFileSync(new URL('./stm32_bluepill_wasm_bg.wasm', import.meta.url)) });
 
 const parseHex = (v) => typeof v === 'number' ? v : parseInt(v, 16);
 
@@ -51,7 +53,6 @@ async function getMUnicorn() {
 }
 
 async function main() {
-    // Module auto-initializes on import; no initSync needed
     await null;
     const args = process.argv.slice(2);
     const configPaths = args.filter(a => a.startsWith('--config=')).map(a => a.split('=')[1]);
@@ -299,10 +300,10 @@ async function main() {
     uc.hook_add(Module.HOOK_INTR, intrHook, null);
 
     const processDma = () => {
-        const count = dma_get_pending_count();
-        for (let i = 0; i < count; i++) {
-            const pending = dma_get_pending(0);
-            if (pending.length < 5) continue;
+        const flat = dma_get_all_pending();
+        let doneBits = 0;
+        for (let i = 0; i + 7 <= flat.length; i += 7) {
+            const pending = flat.slice(i, i + 7);
             const dir = pending[0];
             const stream = pending[1];
             const src = pending[2];
@@ -310,6 +311,7 @@ async function main() {
             const size = pending[4];
             const peri_addr = pending[5] || 0;
             const peripheral = pending[6] || 0;
+            doneBits |= 1 << stream;
             try {
                 if (dir === 2) {
                     const data = uc.mem_read(BigInt(src), size);
@@ -343,8 +345,8 @@ async function main() {
             } catch (e) {
                 console.warn('DMA error:', e.message);
             }
-            dma_set_completed(stream, true);
         }
+        if (doneBits) dma_set_completed_many(doneBits);
     };
 
     const processInterrupts = () => {
