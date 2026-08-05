@@ -66,10 +66,48 @@ function getMUnicorn() {
 function parseHex(v) { return typeof v === 'number' ? v : parseInt(v, 16); }
 
 /**
+ * Parse an Intel HEX (ihex) text blob into a byte array.
+ *
+ * @param {string} text Intel HEX records (record types 00/01/02/04)
+ * @returns {{data: Uint8Array, base: number}} Bytes + lowest address they belong to
+ */
+export function parseIntelHex(text) {
+    let minAddr = Infinity, maxAddr = 0;
+    let base = 0;
+    const recs = [];
+    for (const raw of String(text).split(/\r?\n/)) {
+        const line = raw.trim();
+        if (!line || line[0] !== ':') continue;
+        const hex = line.slice(1);
+        if (hex.length < 10) continue;
+        const count = parseInt(hex.slice(0, 2), 16);
+        const addr = parseInt(hex.slice(2, 6), 16);
+        const type = parseInt(hex.slice(6, 8), 16);
+        if (hex.length < 8 + count * 2) continue;
+        const data = new Uint8Array(count);
+        for (let i = 0; i < count; i++) data[i] = parseInt(hex.slice(8 + i * 2, 10 + i * 2), 16);
+        if (type === 0x04) base = ((data[0] << 8) | data[1]) << 16;
+        else if (type === 0x02) base = ((data[0] << 8) | data[1]) << 4;
+        else if (type === 0x00) recs.push([base + addr, data]);
+        else if (type === 0x01) break;
+    }
+    if (!recs.length) return { data: new Uint8Array(0), base: 0 };
+    for (const [a, d] of recs) {
+        minAddr = Math.min(minAddr, a);
+        maxAddr = Math.max(maxAddr, a + d.length);
+    }
+    const out = new Uint8Array(maxAddr - minAddr);
+    for (const [a, d] of recs) out.set(d, a - minAddr);
+    return { data: out, base: minAddr };
+}
+
+/**
  * Create a full STM32F103C8 (Bluepill) emulator instance.
  *
  * @param {object} opts
- * @param {Uint8Array} opts.firmware           Firmware binary to load at flash base
+ * @param {Uint8Array|string} opts.firmware     Firmware to load at flash base: raw binary
+ *                                              (Uint8Array) or Intel HEX text (string,
+ *                                              auto-detected if bytes start with ':')
  * @param {number}    [opts.flash_size=0x10000] Flash region size (64KB default)
  * @param {number}    [opts.ram_size=0x5000]    SRAM size (20KB default)
  * @param {number}    [opts.vector_table=0x08000000] Vector table base address
@@ -144,7 +182,15 @@ export async function createEmulator(opts = {}) {
 
     const flash_addr = vector_table & ~0x1FFFF;
     uc.mem_map(flash_addr, flash_size, Module.PROT_ALL);
-    if (firmware.length > 0) uc.mem_write(BigInt(flash_addr), firmware);
+    let fwBytes = firmware;
+    let fwAddr = flash_addr;
+    if (typeof firmware === 'string' || (firmware instanceof Uint8Array && firmware.length > 0 && firmware[0] === 0x3A)) {
+        const text = typeof firmware === 'string' ? firmware : new TextDecoder().decode(firmware);
+        const parsed = parseIntelHex(text);
+        fwBytes = parsed.data;
+        if (parsed.base >= flash_addr && parsed.base < flash_addr + flash_size) fwAddr = parsed.base;
+    }
+    if (fwBytes.length > 0) uc.mem_write(BigInt(fwAddr), fwBytes);
 
     uc.mem_map(0x20000000, ram_size, Module.PROT_ALL);
 

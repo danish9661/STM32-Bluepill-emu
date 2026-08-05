@@ -78,6 +78,12 @@ npx bluepill-emu --config=config.yaml
 - `--uart=0x40013800` — UART base for stdin RX injection
 - Config YAML supports regions, SVD path, patches, and external devices
 
+## Firmware formats
+
+- **`.bin`** — raw binary, loaded at the flash base (default `0x08000000`). Works everywhere (CLI, library, demo site).
+- **`.hex`** — Intel HEX (Arduino/STM32duino output). Auto-detected (starts with `:`) by the CLI and `createEmulator()`, and by the demo site for `.hex` uploads. `--config` regions load `.hex` files too.
+- **`.map`** — linker map text file, **not executable**; it's a symbol/address report you can grep to find functions (`Reset_Handler`, `main`, etc.) while debugging.
+
 ## Browser usage
 
 ```html
