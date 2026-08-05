@@ -1,6 +1,6 @@
 cpu:
   vector_table: 0x08000000
-  svd: "../STM32F103.svd"
+  svd: "../../svd/STM32F103.svd"
 regions:
   - start: 0x08000000
     size: 0x20000

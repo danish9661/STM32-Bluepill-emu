@@ -17,9 +17,9 @@
   ],
   "scripts": {
     "build": "wasm-pack build --target web --out-dir pkg",
-    "test": "node test_all.mjs",
-    "bench": "node bench.mjs",
-    "prepublishOnly": "node test_all.mjs"
+    "test": "node tests/test_all.mjs",
+    "bench": "node tests/bench.mjs",
+    "prepublishOnly": "node tests/test_all.mjs"
   },
   "keywords": [
     "stm32",

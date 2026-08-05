@@ -126,6 +126,7 @@ async function main() {
         const svdFallbackPaths = [
             path.resolve(fwDir, 'STM32F103.svd'),
             path.resolve(process.cwd(), 'STM32F103.svd'),
+            path.resolve(process.cwd(), 'svd', 'STM32F103.svd'),
         ];
         let svdLoaded = false;
         for (const svdPath of svdFallbackPaths) {

@@ -1,5 +1,5 @@
-const MUnicorn = require('./unicorn_arm.cjs');
-const periph = require('./stm32_periph_wasm.js');
+const MUnicorn = require('../pkg/unicorn_arm.cjs');
+const periph = require('../pkg/stm32_periph_wasm.js');
 const fs = require('fs');
 
 async function main() {
