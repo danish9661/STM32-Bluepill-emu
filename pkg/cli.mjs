@@ -2,7 +2,7 @@
 import { readFileSync } from 'fs';
 import path from 'path';
 import * as yaml from 'js-yaml';
-import { parseIntelHex } from './emulator.js';
+import { parseIntelHex, parseSymbolMap, parseElf } from './emulator.js';
 import * as periph from './stm32_bluepill_wasm.js';
 const { periph_read, periph_write, tick, step, step_batch, get_next_pending_interrupt, dma_get_pending_count, 
 dma_get_pending, dma_set_completed, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen,
@@ -13,12 +13,35 @@ set_intr_masks, clear_current_interrupt } = periph;
 const parseHex = (v) => typeof v === 'number' ? v : parseInt(v, 16);
 
 function loadFirmware(buf) {
+    if (buf.length > 4 && buf[0] === 0x7F && buf[1] === 0x45 && buf[2] === 0x4C && buf[3] === 0x46) {
+        const elf = parseElf(buf);
+        console.log(`Parsed ELF: ${elf.regions.length} load segments, ${elf.symbols.length} symbols`);
+        return { data: new Uint8Array(0), base: null, regions: elf.regions, symbols: elf.symbols };
+    }
     if (buf.length > 0 && buf[0] === 0x3A) {
         const parsed = parseIntelHex(new TextDecoder().decode(buf));
         console.log(`Parsed Intel HEX: base=0x${parsed.base.toString(16)} (${parsed.data.length} bytes)`);
-        return { data: parsed.data, base: parsed.base };
+        return { data: parsed.data, base: parsed.base, regions: null, symbols: null };
     }
-    return { data: buf, base: null };
+    return { data: buf, base: null, regions: null, symbols: null };
+}
+
+function makeResolver(symbols) {
+    if (!symbols || !symbols.length) return null;
+    const sorted = symbols.slice().sort((a, b) => a.addr - b.addr);
+    return (addr) => {
+        const a = addr & ~1;
+        let lo = 0, hi = sorted.length - 1, best = -1;
+        while (lo <= hi) {
+            const mid = (lo + hi) >> 1;
+            if (sorted[mid].addr <= a) { best = mid; lo = mid + 1; } else hi = mid - 1;
+        }
+        if (best < 0) return null;
+        const s = sorted[best];
+        const off = a - s.addr;
+        if (off > 0x20000) return null;
+        return off > 0 ? `${s.name}+0x${off.toString(16)}` : s.name;
+    };
 }
 
 async function getMUnicorn() {
@@ -38,6 +61,7 @@ async function main() {
         || (configPaths.length > 0 ? posArgs[0] : posArgs[1])
         || process.env.MAX_INST || '1000000', 10);
     const showRegs = args.includes('--regs') || process.env.SHOW_REGS === '1';
+    const mapPath = args.find(a => a.startsWith('--map='))?.split('=')[1];
     let uartAddr = parseInt(args.find(a => a.startsWith('--uart='))?.split('=')[1] || process.env.UART_ADDR || '0x40013800', 16);
 
     let config = {};
@@ -58,6 +82,8 @@ async function main() {
 
     let firmware;
     let fwBase = null;
+    let fwRegions = null;
+    let fwSymbols = null;
     let vector_table;
     let memRegions;
 
@@ -70,6 +96,8 @@ async function main() {
         const fw = loadFirmware(readFileSync(romFile));
         firmware = fw.data;
         fwBase = fw.base;
+        fwRegions = fw.regions;
+        fwSymbols = fw.symbols;
         console.log(`Loading firmware: ${romFile} (${firmware.length} bytes)`);
 
         // Register external devices from config BEFORE init()
@@ -118,13 +146,15 @@ async function main() {
     } else {
         const firmwarePath = posArgs[0] || process.env.FIRMWARE;
         if (!firmwarePath) {
-            console.error('Usage: node cli.mjs <firmware.bin> [max_instructions] [--config=path] [--max=N]');
+            console.error('Usage: node cli.mjs <firmware.bin|.hex|.elf> [max_instructions] [--config=path] [--max=N] [--map=file.map]');
             console.error('  or set FIRMWARE env var');
             process.exit(1);
         }
         const fw = loadFirmware(readFileSync(firmwarePath));
         firmware = fw.data;
         fwBase = fw.base;
+        fwRegions = fw.regions;
+        fwSymbols = fw.symbols;
         console.log(`Loading firmware: ${firmwarePath} (${firmware.length} bytes)`);
 
         const fwDir = path.dirname(path.resolve(firmwarePath));
@@ -174,9 +204,18 @@ async function main() {
     for (const r of memRegions) {
         uc.mem_map(r.start, r.size, Module.PROT_ALL);
     }
+    if (mapPath) {
+        fwSymbols = parseSymbolMap(readFileSync(path.resolve(mapPath), 'utf8'));
+        console.log(`Loaded ${fwSymbols.length} symbols from map: ${mapPath}`);
+    }
+
     const romRegion = memRegions.find(r => firmware && (r._firmware || r.load || (r.start <= vector_table && r.start + r.size > vector_table)));
     const romStart = romRegion ? romRegion.start : (memRegions[0]?.start || 0x08000000);
-    if (firmware && fwBase != null) {
+    if (fwRegions && fwRegions.length) {
+        for (const r of fwRegions) {
+            uc.mem_write(BigInt(r.start), r.data);
+        }
+    } else if (firmware && fwBase != null) {
         uc.mem_write(BigInt(fwBase), firmware);
     } else if (firmware) {
         uc.mem_write(BigInt(romStart), firmware);
@@ -405,7 +444,10 @@ async function main() {
     try { if (process.stdin.isTTY) process.stdin.setRawMode(false); } catch (_) {}
 
     console.log(`\nDone: ${totalSteps} steps, ${instCount} instructions in ${elapsed}s`);
-    console.log(`PC=0x${finalPc.toString(16)} SP=0x${finalSp.toString(16)}`);
+    const resolve = makeResolver(fwSymbols);
+    const pcName = resolve && resolve(finalPc);
+    const spName = resolve && resolve(finalSp);
+    console.log(`PC=0x${finalPc.toString(16)}${pcName ? `  → ${pcName}` : ''} SP=0x${finalSp.toString(16)}${spName ? `  → ${spName}` : ''}`);
 
     // Verify peripheral state
     const gpioC_BSRR = periph_read(0x40011010, 4);

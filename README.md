@@ -82,7 +82,8 @@ npx bluepill-emu --config=config.yaml
 
 - **`.bin`** — raw binary, loaded at the flash base (default `0x08000000`). Works everywhere (CLI, library, demo site).
 - **`.hex`** — Intel HEX (Arduino/STM32duino output). Auto-detected (starts with `:`) by the CLI and `createEmulator()`, and by the demo site for `.hex` uploads. `--config` regions load `.hex` files too.
-- **`.map`** — linker map text file, **not executable**; it's a symbol/address report you can grep to find functions (`Reset_Handler`, `main`, etc.) while debugging.
+- **`.elf`** — full ELF32 executable: auto-detected by magic bytes; all `PT_LOAD` segments are written to their link addresses (flash + RAM init data), and symbols are extracted automatically for `resolveSymbol()`.
+- **`.map`** — GNU ld linker map; **not executable**. Pair it with the firmware for symbol names: `cli.mjs --map=build/app.ino.map`, or upload it in the demo site after the firmware. The terminal/register panel then shows `PC → HAL_Delay+0x14` instead of a bare address. `resolveSymbol(addr)` is also available on the library emulator object (`emu.setSymbols(...)`, or auto from `.elf`).
 
 ## Browser usage
 

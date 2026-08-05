@@ -87,7 +87,7 @@ input[type="file"] { display: none; }
             <div class="toolbar">
                 <button id="loadSampleBtn" class="primary">Load Blink Demo</button>
                 <button id="loadComprehensiveBtn">Load Comprehensive Test</button>
-                <label class="file-btn">Load .bin / .hex <input type="file" id="fileInput" accept=".bin,.hex"></label>
+                <label class="file-btn">Load .bin / .hex / .elf / .map <input type="file" id="fileInput" accept=".bin,.hex,.elf,.map"></label>
                 <button id="runBtn" disabled>Run</button>
                 <button id="stepBtn" disabled>Step 100K</button>
                 <button id="stopBtn" class="danger" disabled>Stop</button>
@@ -111,7 +111,7 @@ input[type="file"] { display: none; }
 </div>
 
 <script type="module">
-import { createEmulator } from './emulator.js';
+import { createEmulator, parseSymbolMap } from './emulator.js';
 
 const $ = id => document.getElementById(id);
 const boardWrap = $('boardWrap');
@@ -120,6 +120,7 @@ const gpioGrid = $('gpioGrid');
 const stateBadge = $('stateBadge');
 let emu = null;
 let firmwareData = null;
+let symbolsData = null;
 let animId = null;
 let running = false;
 
@@ -240,7 +241,8 @@ function updateRegs() {
     if (!emu) return;
     try {
         const r = emu.getRegisters();
-        $('statPc').textContent = '0x' + r.PC.toString(16).padStart(8, '0');
+        const pcSym = emu.resolveSymbol(r.PC);
+        $('statPc').textContent = '0x' + r.PC.toString(16).padStart(8, '0') + (pcSym ? ` → ${pcSym}` : '');
         $('statSp').textContent = '0x' + r.SP.toString(16).padStart(8, '0');
     } catch (e) {}
 }
@@ -295,6 +297,7 @@ async function initEmulator(data, name, extDevices = {}) {
             vector_table: 0x08000000,
             ext_devices: extDevices,
         });
+        if (symbolsData) emu.setSymbols(symbolsData);
         log(`Loaded ${name} (${data.length} bytes). PC=0x${emu.getRegisters().PC.toString(16).padStart(8, '0')}`);
         $('runBtn').disabled = false;
         $('stepBtn').disabled = false;
@@ -371,9 +374,19 @@ $('loadComprehensiveBtn').addEventListener('click', async () => {
 $('fileInput').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    if (file.name.toLowerCase().endsWith('.hex')) {
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith('.hex')) {
         const text = await file.text();
         await initEmulator(text, file.name);
+    } else if (lower.endsWith('.map')) {
+        const syms = parseSymbolMap(await file.text());
+        symbolsData = syms;
+        if (emu) { emu.setSymbols(syms); updateRegs(); }
+        log(`Loaded ${syms.length} symbols from ${file.name}.`, 't-in');
+    } else if (lower.endsWith('.elf')) {
+        const buf = await file.arrayBuffer();
+        await initEmulator(new Uint8Array(buf), file.name);
+        log(`ELF symbols: ${emu.getSymbolCount()} loaded.`, 't-in');
     } else {
         const buf = await file.arrayBuffer();
         await initEmulator(new Uint8Array(buf), file.name);
@@ -437,7 +450,7 @@ function sendUart() {
 }
 
 renderBoard(false);
-log('Load the Blink demo, a .bin/.hex firmware, or the comprehensive test to start.');
+log('Load the Blink demo, a .bin/.hex/.elf firmware, or a .map for symbol names. Upload .map after the firmware for PC → symbol resolution.');
 </script>
 </body>
 </html>

@@ -102,6 +102,73 @@ export function parseIntelHex(text) {
 }
 
 /**
+ * Parse a GNU ld linker map file into symbol entries.
+ *
+ * @param {string} text GNU ld .map output
+ * @returns {Array<{name: string, addr: number}>}
+ */
+export function parseSymbolMap(text) {
+    const syms = [];
+    const re = /^\s*0x([0-9a-fA-F]{8,16})\s+([A-Za-z_.$][\w.$]*)(?:\s*=|\s*$)/gm;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+        if (m[2] === '.') continue; // ld location counter, not a real symbol
+        syms.push({ name: m[2], addr: parseInt(m[1], 16) });
+    }
+    return syms;
+}
+
+/**
+ * Parse an ELF32 executable (ARM, little-endian) into loadable regions + symbols.
+ *
+ * @param {Uint8Array|ArrayBuffer} buffer ELF file bytes
+ * @returns {{regions: Array<{start: number, data: Uint8Array}>, symbols: Array<{name: string, addr: number}>}}
+ */
+export function parseElf(buffer) {
+    const b = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer;
+    if (b.length < 52 || b[0] !== 0x7F || b[1] !== 0x45 || b[2] !== 0x4C || b[3] !== 0x46) {
+        throw new Error('Not an ELF file');
+    }
+    const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    const u32 = (off) => dv.getUint32(off, true);
+    const u16 = (off) => dv.getUint16(off, true);
+    const e_phoff = u32(28), e_phentsize = u16(42), e_phnum = u16(44);
+    const regions = [];
+    for (let i = 0; i < e_phnum; i++) {
+        const off = e_phoff + i * e_phentsize;
+        if (off + 32 > b.length) break;
+        const p_type = u32(off), p_offset = u32(off + 4), p_vaddr = u32(off + 8), p_filesz = u32(off + 16);
+        if (p_type !== 1 || p_filesz === 0) continue;
+        regions.push({ start: p_vaddr >>> 0, data: b.slice(p_offset, p_offset + p_filesz) });
+    }
+    const e_shoff = u32(32), e_shentsize = u16(46), e_shnum = u16(48);
+    const sections = [];
+    for (let i = 0; i < e_shnum; i++) {
+        const off = e_shoff + i * e_shentsize;
+        if (off + 40 > b.length) break;
+        sections.push({ type: u32(off + 4), offset: u32(off + 16), size: u32(off + 20), link: u32(off + 24) });
+    }
+    const symbols = [];
+    for (const sh of sections) {
+        if (sh.type !== 2 || sh.size === 0) continue; // SHT_SYMTAB
+        const strOff = sections[sh.link] ? sections[sh.link].offset : 0;
+        const count = Math.min(Math.floor(sh.size / 16), Math.floor((b.length - sh.offset) / 16));
+        for (let i = 0; i < count; i++) {
+            const o = sh.offset + i * 16;
+            const st_name = u32(o), st_value = u32(o + 4), st_info = b[o + 12];
+            if (st_value === 0 || st_name === 0) continue;
+            const type = st_info & 0xF;
+            if (type !== 1 && type !== 2) continue; // OBJECT or FUNC
+            let name = '';
+            let p = strOff + st_name;
+            while (p < b.length && b[p] !== 0) name += String.fromCharCode(b[p++]);
+            if (name) symbols.push({ name, addr: st_value >>> 0 });
+        }
+    }
+    return { regions, symbols };
+}
+
+/**
  * Create a full STM32F103C8 (Bluepill) emulator instance.
  *
  * @param {object} opts
@@ -182,13 +249,28 @@ export async function createEmulator(opts = {}) {
 
     const flash_addr = vector_table & ~0x1FFFF;
     uc.mem_map(flash_addr, flash_size, Module.PROT_ALL);
+    if (firmware instanceof ArrayBuffer) firmware = new Uint8Array(firmware);
     let fwBytes = firmware;
     let fwAddr = flash_addr;
+    let symbolList = [];
+    let sortedSymbols = null;
     if (typeof firmware === 'string' || (firmware instanceof Uint8Array && firmware.length > 0 && firmware[0] === 0x3A)) {
         const text = typeof firmware === 'string' ? firmware : new TextDecoder().decode(firmware);
         const parsed = parseIntelHex(text);
         fwBytes = parsed.data;
         if (parsed.base >= flash_addr && parsed.base < flash_addr + flash_size) fwAddr = parsed.base;
+    } else if (firmware instanceof Uint8Array && firmware.length > 4 &&
+               firmware[0] === 0x7F && firmware[1] === 0x45 && firmware[2] === 0x4C && firmware[3] === 0x46) {
+        const elf = parseElf(firmware);
+        fwBytes = new Uint8Array(0);
+        let wrote = 0;
+        for (const reg of elf.regions) {
+            const inFlash = reg.start >= flash_addr && reg.start < flash_addr + flash_size;
+            const inRam = reg.start >= 0x20000000 && reg.start < 0x20000000 + ram_size;
+            if (inFlash || inRam) { uc.mem_write(BigInt(reg.start), reg.data); wrote++; }
+        }
+        symbolList = elf.symbols;
+        if (verbose) console.log(`ELF: ${elf.regions.length} load segments, ${elf.symbols.length} symbols (${wrote} written)`);
     }
     if (fwBytes.length > 0) uc.mem_write(BigInt(fwAddr), fwBytes);
 
@@ -441,6 +523,36 @@ export async function createEmulator(opts = {}) {
         getPc() { return uc.reg_read_i32(Module.ARM_REG_PC); },
         getSp() { return uc.reg_read_i32(Module.ARM_REG_SP); },
         setPc(pc) { uc.reg_write_i32(Module.ARM_REG_PC, pc | 1); },
+
+        /** Set symbol table (from .elf or .map) for resolveSymbol(). */
+        setSymbols(list) {
+            symbolList = list || [];
+            sortedSymbols = null;
+        },
+
+        getSymbolCount() { return symbolList.length; },
+
+        /**
+         * Resolve an address to the nearest symbol at or below it (e.g. 'main+0x1e').
+         * @returns {string|null}
+         */
+        resolveSymbol(addr) {
+            if (!symbolList.length) return null;
+            if (!sortedSymbols) {
+                sortedSymbols = symbolList.slice().sort((a, b) => a.addr - b.addr);
+            }
+            const a = addr & ~1;
+            let lo = 0, hi = sortedSymbols.length - 1, best = -1;
+            while (lo <= hi) {
+                const mid = (lo + hi) >> 1;
+                if (sortedSymbols[mid].addr <= a) { best = mid; lo = mid + 1; } else hi = mid - 1;
+            }
+            if (best < 0) return null;
+            const s = sortedSymbols[best];
+            const off = a - s.addr;
+            if (off > 0x20000) return null;
+            return off > 0 ? `${s.name}+0x${off.toString(16)}` : s.name;
+        },
 
         getUartOutput() { return get_uart_output(); },
 
