@@ -87,7 +87,7 @@ input[type="file"] { display: none; }
             <div class="toolbar">
                 <button id="loadSampleBtn" class="primary">Load Blink Demo</button>
                 <button id="loadComprehensiveBtn">Load Comprehensive Test</button>
-                <label class="file-btn">Load .bin <input type="file" id="fileInput" accept=".bin,.hex"></label>
+                <label class="file-btn">Load .bin / .hex <input type="file" id="fileInput" accept=".bin,.hex"></label>
                 <button id="runBtn" disabled>Run</button>
                 <button id="stepBtn" disabled>Step 100K</button>
                 <button id="stopBtn" class="danger" disabled>Stop</button>
@@ -371,8 +371,14 @@ $('loadComprehensiveBtn').addEventListener('click', async () => {
 $('fileInput').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const buf = await file.arrayBuffer();
-    await initEmulator(new Uint8Array(buf), file.name);
+    if (file.name.toLowerCase().endsWith('.hex')) {
+        const text = await file.text();
+        await initEmulator(text, file.name);
+    } else {
+        const buf = await file.arrayBuffer();
+        await initEmulator(new Uint8Array(buf), file.name);
+    }
+    e.target.value = '';
 });
 
 $('runBtn').addEventListener('click', () => {
@@ -431,7 +437,7 @@ function sendUart() {
 }
 
 renderBoard(false);
-log('Load the Blink demo or a .bin firmware to start.');
+log('Load the Blink demo, a .bin/.hex firmware, or the comprehensive test to start.');
 </script>
 </body>
 </html>

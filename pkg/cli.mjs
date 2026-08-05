@@ -2,6 +2,7 @@
 import { readFileSync } from 'fs';
 import path from 'path';
 import * as yaml from 'js-yaml';
+import { parseIntelHex } from './emulator.js';
 import * as periph from './stm32_bluepill_wasm.js';
 const { periph_read, periph_write, tick, step, step_batch, get_next_pending_interrupt, dma_get_pending_count, 
 dma_get_pending, dma_set_completed, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen,
@@ -10,6 +11,15 @@ init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, gpio_read_
 set_intr_masks, clear_current_interrupt } = periph;
 
 const parseHex = (v) => typeof v === 'number' ? v : parseInt(v, 16);
+
+function loadFirmware(buf) {
+    if (buf.length > 0 && buf[0] === 0x3A) {
+        const parsed = parseIntelHex(new TextDecoder().decode(buf));
+        console.log(`Parsed Intel HEX: base=0x${parsed.base.toString(16)} (${parsed.data.length} bytes)`);
+        return { data: parsed.data, base: parsed.base };
+    }
+    return { data: buf, base: null };
+}
 
 async function getMUnicorn() {
     const { createRequire } = await import('module');
@@ -47,6 +57,7 @@ async function main() {
     const Module = await MUnicorn({});
 
     let firmware;
+    let fwBase = null;
     let vector_table;
     let memRegions;
 
@@ -56,7 +67,9 @@ async function main() {
         if (!romRegion) { console.error('No region with load file found'); process.exit(1); }
         vector_table = parseHex(config.cpu?.vector_table || romRegion.start);
         const romFile = path.resolve(romRegion._dir || config._devices_dir, romRegion.load);
-        firmware = readFileSync(romFile);
+        const fw = loadFirmware(readFileSync(romFile));
+        firmware = fw.data;
+        fwBase = fw.base;
         console.log(`Loading firmware: ${romFile} (${firmware.length} bytes)`);
 
         // Register external devices from config BEFORE init()
@@ -109,7 +122,9 @@ async function main() {
             console.error('  or set FIRMWARE env var');
             process.exit(1);
         }
-        firmware = readFileSync(firmwarePath);
+        const fw = loadFirmware(readFileSync(firmwarePath));
+        firmware = fw.data;
+        fwBase = fw.base;
         console.log(`Loading firmware: ${firmwarePath} (${firmware.length} bytes)`);
 
         const fwDir = path.dirname(path.resolve(firmwarePath));
@@ -161,9 +176,12 @@ async function main() {
     }
     const romRegion = memRegions.find(r => firmware && (r._firmware || r.load || (r.start <= vector_table && r.start + r.size > vector_table)));
     const romStart = romRegion ? romRegion.start : (memRegions[0]?.start || 0x08000000);
-    if (firmware) uc.mem_write(BigInt(romStart), firmware);
-
-    if (romStart !== vector_table) uc.mem_write(BigInt(vector_table), firmware);
+    if (firmware && fwBase != null) {
+        uc.mem_write(BigInt(fwBase), firmware);
+    } else if (firmware) {
+        uc.mem_write(BigInt(romStart), firmware);
+        if (romStart !== vector_table) uc.mem_write(BigInt(vector_table), firmware);
+    }
 
     const periphRanges = [
         [0x40000000, 0xB0000000],
