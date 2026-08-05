@@ -1,18 +1,42 @@
-import * as periph from './stm32_bluepill_wasm.js';
-
-const { periph_read, periph_write, tick, step_batch, get_next_pending_interrupt,
-dma_get_pending_count, dma_get_pending, dma_set_completed, is_watchdog_reset_requested,
-add_spi_flash, add_i2c_eeprom, add_touchscreen, add_lcd, add_i2c_oled, add_software_spi,
-init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, gpio_read_output,
-gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt,
-can_inject_message, adc_set_sim_value, touchscreen_set_touch } = periph;
-
 const PERIPH_RANGES = [
     [0x40000000, 0xB0000000],
     [0xE0000000, 0xE1000000],
 ];
 
 const DEFAULT_MAX_BATCH = 100000;
+
+/**
+ * Load the Rust peripheral WASM module.
+ * - Node.js: import the wasm-pack glue directly (ESM wasm import works there)
+ * - Browser: fetch + WebAssembly.instantiate (MIME-agnostic, works on GitHub Pages
+ *   and any static host without strict module-MIME support)
+ */
+let periphPromise;
+function getPeriph() {
+    if (!periphPromise) {
+        if (typeof process !== 'undefined' && process.versions?.node) {
+            periphPromise = import('./stm32_bluepill_wasm.js');
+        } else {
+            periphPromise = (async () => {
+                const wbg = await import('./stm32_bluepill_wasm_bg.js');
+                const resp = await fetch(new URL('./stm32_bluepill_wasm_bg.wasm', import.meta.url));
+                const bytes = await resp.arrayBuffer();
+                const mod = new WebAssembly.Module(bytes);
+                const imports = {};
+                for (const { module, name } of WebAssembly.Module.imports(mod)) {
+                    (imports[module] ??= {})[name] = wbg[name] ?? (() => {});
+                }
+                const { instance } = await WebAssembly.instantiate(bytes, imports);
+                wbg.__wbg_set_wasm(instance.exports);
+                if (typeof instance.exports.__wbindgen_start === 'function') {
+                    instance.exports.__wbindgen_start();
+                }
+                return wbg;
+            })();
+        }
+    }
+    return periphPromise;
+}
 
 function getMUnicorn() {
     const browserGlobal = () => (typeof window !== 'undefined' && window.MUnicorn) ? window.MUnicorn : null;
@@ -78,6 +102,14 @@ export async function createEmulator(opts = {}) {
 
     const MUnicorn = await getMUnicorn();
     const Module = await MUnicorn({});
+    const periph = await getPeriph();
+
+    const { periph_read, periph_write, tick, step_batch, get_next_pending_interrupt,
+    dma_get_pending_count, dma_get_pending, dma_set_completed, is_watchdog_reset_requested,
+    add_spi_flash, add_i2c_eeprom, add_touchscreen, add_lcd, add_i2c_oled, add_software_spi,
+    init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, gpio_read_output,
+    gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt,
+    can_inject_message, adc_set_sim_value, touchscreen_set_touch } = periph;
 
     // Register external devices BEFORE init()
     for (const d of ext_devices.spi_flash || []) {
