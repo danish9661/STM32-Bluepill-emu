@@ -1,7 +1,10 @@
 # STM32 Bluepill Emulator (WASM)
 
+[![Demo](https://img.shields.io/badge/live%20demo-github%20pages-38bdf8)](https://danish9661.github.io/STM32-Bluepill-emu/)
+
 Full-system emulation of an **STM32F103C8 (Bluepill)** running Arduino firmware, in Node.js or the browser. Uses the Unicorn ARM Cortex-M3 CPU emulator (WASM) + a Rust peripheral emulator (GPIO, USART, SPI, I2C, TIM, ADC, DMA, CAN, RTC, CRC, NVIC, EXTI, and more — all registers implemented, only USB is a stub).
 
+- **Try it live**: [danish9661.github.io/STM32-Bluepill-emu](https://danish9661.github.io/STM32-Bluepill-emu/) — run blink with a board + LED visualization and a UART terminal, or upload your own `.bin`
 - **~5.1M instructions/sec** real-world (20M instructions in ~3.9s)
 - Runs firmware compiled for the real chip: Arduino core (STM32duino), libopencm3, STM32Cube HAL
 - Verified: `Serial.println()`, `digitalWrite()`, `millis()`, SPI, I2C, CAN, DMA all work
@@ -85,6 +88,8 @@ npx bluepill-emu --config=config.yaml
   emu.run(1_000_000);
 </script>
 ```
+
+A full demo site (board + LED visualization, UART terminal, run/step controls) lives in `site/` and is deployed to GitHub Pages via `.github/workflows/pages.yml`.
 
 ## Development
 

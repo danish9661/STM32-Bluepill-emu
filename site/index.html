@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STM32 Bluepill Emulator — Live Demo</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+header { background: #1e293b; border-bottom: 1px solid #334155; padding: 14px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+header h1 { font-size: 17px; color: #38bdf8; font-weight: 600; letter-spacing: 0.3px; }
+header .sub { font-size: 12px; color: #94a3b8; }
+header .spacer { flex: 1; }
+.badge { font-size: 11px; background: #0ea5e9; color: #082f49; padding: 3px 10px; border-radius: 999px; font-weight: 600; }
+.badge.off { background: #475569; color: #cbd5e1; }
+.wrap { display: grid; grid-template-columns: 380px 1fr; gap: 20px; padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
+@media (max-width: 960px) { .wrap { grid-template-columns: 1fr; } }
+.card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 16px; }
+.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #7dd3fc; margin-bottom: 12px; }
+.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+button { background: #0f172a; color: #38bdf8; border: 1px solid #0ea5e9; padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+button:hover:not(:disabled) { background: #1d4ed8; color: #fff; }
+button:disabled { opacity: 0.35; cursor: not-allowed; }
+button.primary { background: #0ea5e9; color: #082f49; }
+button.danger { border-color: #ef4444; color: #f87171; }
+button.danger:hover:not(:disabled) { background: #dc2626; color: #fff; }
+label.file-btn { background: #0f172a; color: #38bdf8; border: 1px dashed #0ea5e9; padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; display: inline-block; }
+label.file-btn:hover { background: #1d4ed8; color: #fff; }
+input[type="file"] { display: none; }
+.stats { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 12px; font-size: 12px; color: #94a3b8; }
+.stats b { color: #38bdf8; font-size: 14px; font-family: 'Cascadia Mono', Consolas, monospace; }
+.terminal { background: #020617; border: 1px solid #334155; border-radius: 8px; height: 240px; overflow-y: auto; padding: 10px 12px; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12.5px; line-height: 1.55; }
+.terminal .t-in { color: #a5b4fc; }
+.terminal .t-out { color: #4ade80; }
+.terminal .t-err { color: #f87171; }
+.tx-row { display: flex; gap: 8px; margin-top: 10px; }
+.tx-row input { flex: 1; background: #0f172a; border: 1px solid #334155; color: #e2e8f0; border-radius: 6px; padding: 7px 10px; font-family: Consolas, monospace; font-size: 13px; }
+.tx-row input:focus { outline: none; border-color: #0ea5e9; }
+/* Board */
+.board-wrap { display: flex; justify-content: center; padding: 8px 0; }
+.board { filter: drop-shadow(0 6px 18px rgba(0,0,0,0.5)); }
+.board text { font-family: Consolas, monospace; }
+.led-label { font-size: 10px; fill: #94a3b8; }
+.gpio-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; font-size: 10.5px; font-family: Consolas, monospace; }
+.gpio-port { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 6px; }
+.gpio-port h3 { font-size: 10px; color: #7dd3fc; margin-bottom: 4px; letter-spacing: 1px; }
+.gpio-pin { display: flex; justify-content: space-between; padding: 1.5px 4px; border-radius: 3px; color: #94a3b8; }
+.gpio-pin.high { background: rgba(34,197,94,0.18); color: #4ade80; }
+.gpio-pin.low { color: #64748b; }
+.gpio-pin.in { color: #fbbf24; }
+.gpio-pin b { font-weight: 600; }
+.legend { font-size: 10.5px; color: #94a3b8; margin-top: 10px; display: flex; gap: 14px; flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.hi { background: #4ade80; } .dot.lo { background: #64748b; } .dot.in { background: #fbbf24; }
+</style>
+</head>
+<body>
+<script src="unicorn_arm.js"></script>
+<header>
+    <h1>STM32 Bluepill Emulator</h1>
+    <span class="sub">STM32F103C8 · full-system WASM emulation in your browser</span>
+    <span class="spacer"></span>
+    <span id="stateBadge" class="badge off">Idle</span>
+</header>
+
+<div class="wrap">
+    <div>
+        <div class="card">
+            <h2>Blue Pill Board · PC13</h2>
+            <div class="board-wrap" id="boardWrap"></div>
+            <div class="legend">
+                <span><span class="dot hi"></span> output high</span>
+                <span><span class="dot lo"></span> output low</span>
+                <span><span class="dot in"></span> input mode</span>
+            </div>
+        </div>
+        <div class="card" style="margin-top:16px">
+            <h2>GPIO State</h2>
+            <div class="gpio-grid" id="gpioGrid"></div>
+        </div>
+    </div>
+
+    <div>
+        <div class="card">
+            <h2>Run Controls</h2>
+            <div class="toolbar">
+                <button id="loadSampleBtn" class="primary">Load Blink Demo</button>
+                <label class="file-btn">Load .bin <input type="file" id="fileInput" accept=".bin,.hex"></label>
+                <button id="runBtn" disabled>Run</button>
+                <button id="stepBtn" disabled>Step 100K</button>
+                <button id="stopBtn" class="danger" disabled>Stop</button>
+                <button id="resetBtn" disabled>Reset</button>
+            </div>
+            <div class="stats">
+                <span>Instructions <b id="instCount">0</b></span>
+                <span>Steps <b id="stepCount">0</b></span>
+                <span>Speed <b id="speed">—</b></span>
+                <span>PC <b id="statPc">--------</b></span>
+                <span>SP <b id="statSp">--------</b></span>
+            </div>
+            <h2 style="margin-top:14px">UART Terminal</h2>
+            <div class="terminal" id="terminal"><span class="t-out">Bluepill emulator ready. Load firmware to begin.</span><br></div>
+            <div class="tx-row">
+                <input id="uartInput" placeholder="Type to send bytes to UART RX (Serial.available / read)…" disabled>
+                <button id="sendBtn" disabled>Send</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+import { createEmulator } from './emulator.js';
+
+const $ = id => document.getElementById(id);
+const boardWrap = $('boardWrap');
+const terminal = $('terminal');
+const gpioGrid = $('gpioGrid');
+const stateBadge = $('stateBadge');
+let emu = null;
+let firmwareData = null;
+let animId = null;
+let running = false;
+
+const PORTS = ['A', 'B', 'C', 'D'];
+const PIN_NAMES = ['0','1','2','3','4','5','6','7','8','9','10','11','12','13','14','15'];
+
+function log(msg, cls = 't-out') {
+    const d = document.createElement('span');
+    d.className = cls;
+    d.textContent = msg + '\n';
+    terminal.appendChild(d);
+    terminal.scrollTop = terminal.scrollHeight;
+}
+
+function setState(state) {
+    stateBadge.textContent = state;
+    stateBadge.classList.toggle('off', state === 'Idle' || state === 'Stopped');
+}
+
+function boardSvg(ledOn) {
+    const ledFill = ledOn ? '#4ade80' : '#334155';
+    const glow = ledOn ? 'rgba(74,222,128,0.45)' : 'none';
+    // Blue Pill layout: headers at top/left/right/bottom, chip center, PC13 LED top-left
+    const pins = {
+        left: ['3V3','GND','PB9','PB8','PB7','PB6','PB5','PB4','PB3','PA15','PA12','PA11','PA10','PA9','PA8','PB15','PB14','PB13','PB12','PB11'],
+        right: ['PB10','PB2','PB1','PB0','PA7','PA6','PA5','PA4','PA3','PA2','PA1','PA0','PC15','PC14','PC13','NRST','GND','5V'],
+        top: ['3V3','GND','D-','D+'],
+        bottom: ['5V','GND','BOOT0','NRST'],
+    };
+    let out = `<svg class="board" width="330" height="440" viewBox="0 0 330 440">`;
+    // PCB
+    out += `<rect x="30" y="10" width="270" height="420" rx="14" fill="#0b3d91" stroke="#1d4ed8" stroke-width="1.5"/>`;
+    out += `<rect x="36" y="16" width="258" height="408" rx="11" fill="none" stroke="rgba(255,255,255,0.08)"/>`;
+    // USB connector (top center)
+    out += `<rect x="135" y="4" width="60" height="12" rx="3" fill="#64748b"/>`;
+    out += `<rect x="139" y="8" width="52" height="4" rx="1.5" fill="#0f172a"/>`;
+    // 8 MHz crystal
+    out += `<rect x="195" y="330" width="44" height="22" rx="3" fill="#475569" stroke="#64748b"/>`;
+    out += `<text x="217" y="344" fill="#cbd5e1" font-size="9" text-anchor="middle">8MHz</text>`;
+    // Reset button
+    out += `<rect x="200" y="52" width="26" height="18" rx="3" fill="#334155" stroke="#475569"/>`;
+    out += `<text x="213" y="46" fill="#94a3b8" font-size="8" text-anchor="middle">RST</text>`;
+    // Chip (LQFP48)
+    out += `<rect x="85" y="150" width="160" height="140" rx="6" fill="#111827" stroke="#38bdf8" stroke-width="2"/>`;
+    out += `<text x="165" y="205" fill="#38bdf8" font-size="14" text-anchor="middle" font-weight="bold">STM32F103C8T6</text>`;
+    out += `<text x="165" y="225" fill="#64748b" font-size="10" text-anchor="middle">ARM Cortex-M3</text>`;
+    out += `<text x="165" y="240" fill="#64748b" font-size="9" text-anchor="middle">64KB Flash · 20KB SRAM</text>`;
+    out += `<text x="165" y="270" fill="#475569" font-size="8" text-anchor="middle">LQFP48</text>`;
+    // PC13 LED (top-left area of board, near PA12/PA13 corner on real board)
+    out += `<circle cx="58" cy="92" r="9" fill="${ledFill}" stroke="#64748b" stroke-width="1.5"/>`;
+    out += `<circle cx="58" cy="92" r="13" fill="${glow}"/>`;
+    out += `<text class="led-label" x="58" y="112" text-anchor="middle">PC13 LED</text>`;
+    // Pins
+    const drawPins = (side, list) => {
+        const n = list.length;
+        list.forEach((name, i) => {
+            const isPc13 = name === 'PC13';
+            const hi = isPc13 && ledOn;
+            const fill = hi ? '#4ade80' : (name === '3V3' || name === '5V') ? '#f87171' : name === 'GND' ? '#334155' : '#94a3b8';
+            let r, x1, y1, x2, y2, tx, ty;
+            if (side === 'left') {
+                const y = 60 + i * (300 / (n - 1));
+                r = `<line x1="30" y1="${y}" x2="12" y2="${y}" stroke="${fill}" stroke-width="3"/>`;
+                x1 = 24; y1 = y; x2 = 20; y2 = y; tx = 14; ty = y + 3;
+            } else if (side === 'right') {
+                const y = 60 + i * (300 / (n - 1));
+                r = `<line x1="300" y1="${y}" x2="318" y2="${y}" stroke="${fill}" stroke-width="3"/>`;
+                x1 = 306; y1 = y; x2 = 310; y2 = y; tx = 322; ty = y + 3;
+            } else if (side === 'top') {
+                const x = 48 + i * (234 / (n - 1));
+                r = `<line x1="${x}" y1="10" x2="${x}" y2="26" stroke="${fill}" stroke-width="3"/>`;
+                x1 = x; y1 = 20; x2 = x; y2 = 24; tx = x - 9; ty = 32;
+            } else {
+                const x = 48 + i * (234 / (n - 1));
+                r = `<line x1="${x}" y1="430" x2="${x}" y2="414" stroke="${fill}" stroke-width="3"/>`;
+                x1 = x; y1 = 420; x2 = x; y2 = 416; tx = x - 9; ty = 406;
+            }
+            out += r;
+            if (name.length <= 4) {
+                out += `<text x="${tx}" y="${ty}" fill="#cbd5e1" font-size="7.5">${name}</text>`;
+            }
+        });
+    };
+    drawPins('left', pins.left);
+    drawPins('right', pins.right);
+    drawPins('top', pins.top);
+    drawPins('bottom', pins.bottom);
+    out += `</svg>`;
+    return out;
+}
+
+function renderBoard(ledOn) {
+    boardWrap.innerHTML = boardSvg(ledOn);
+}
+
+function renderGpio() {
+    if (!emu) { gpioGrid.innerHTML = ''; return; }
+    let html = '';
+    for (const port of PORTS) {
+        const pi = port.charCodeAt(0) - 65;
+        let cells = '';
+        for (let p = 0; p < 16; p++) {
+            let cls = 'low', label = '0';
+            try {
+                const odr = emu.gpioReadOutput(pi, p);
+                const idr = emu.gpioReadInput(pi, p);
+                if (odr) { cls = 'high'; label = '1'; }
+                else if (idr) { cls = 'in'; label = 'Z'; }
+            } catch (e) { cls = 'low'; }
+            cells += `<div class="gpio-pin ${cls}" title="P${port}${PIN_NAMES[p]}"><b>${port}${PIN_NAMES[p]}</b>${label}</div>`;
+        }
+        html += `<div class="gpio-port"><h3>P${port}</h3>${cells}</div>`;
+    }
+    gpioGrid.innerHTML = html;
+}
+
+function updateRegs() {
+    if (!emu) return;
+    try {
+        const r = emu.getRegisters();
+        $('statPc').textContent = '0x' + r.PC.toString(16).padStart(8, '0');
+        $('statSp').textContent = '0x' + r.SP.toString(16).padStart(8, '0');
+    } catch (e) {}
+}
+
+function updateVisuals() {
+    if (!emu) return;
+    try {
+        const ledOn = !!emu.gpioReadOutput(2, 13);
+        renderBoard(ledOn);
+        renderGpio();
+    } catch (e) {}
+}
+
+function pollUart() {
+    if (!emu) return;
+    try {
+        const out = emu.getUartOutput();
+        if (out && out.length) {
+            const txt = typeof out === 'string' ? out : String.fromCharCode(...out);
+            for (const ch of txt) {
+                if (ch === '\n') {
+                    const d = document.createElement('span');
+                    d.className = 't-out';
+                    terminal.appendChild(d);
+                    terminal.appendChild(document.createElement('br'));
+                } else {
+                    const d = document.createElement('span');
+                    d.className = 't-out';
+                    d.textContent = ch;
+                    terminal.appendChild(d);
+                }
+            }
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+    } catch (e) {}
+}
+
+async function initEmulator(data, name) {
+    if (emu) { emu.close(); emu = null; }
+    cancelAnimationFrame(animId);
+    running = false;
+    $('instCount').textContent = '0';
+    $('stepCount').textContent = '0';
+    $('speed').textContent = '—';
+    firmwareData = data;
+    setState('Initializing…');
+    try {
+        emu = await createEmulator({
+            firmware: data,
+            flash_size: 0x10000,
+            ram_size: 0x5000,
+            vector_table: 0x08000000,
+        });
+        log(`Loaded ${name} (${data.length} bytes). PC=0x${emu.getRegisters().PC.toString(16).padStart(8, '0')}`);
+        $('runBtn').disabled = false;
+        $('stepBtn').disabled = false;
+        $('stopBtn').disabled = true;
+        $('resetBtn').disabled = false;
+        $('uartInput').disabled = false;
+        $('sendBtn').disabled = false;
+        $('uartInput').focus();
+        updateRegs();
+        updateVisuals();
+        setState('Ready');
+    } catch (e) {
+        log(`Init failed: ${e.message || e}`, 't-err');
+        setState('Error');
+        console.error(e);
+    }
+}
+
+function runLoop() {
+    if (!running || !emu) return;
+    const t0 = performance.now();
+    try {
+        const result = emu.run(500000);
+        const dt = (performance.now() - t0) / 1000;
+        if (dt > 0) $('speed').textContent = (500000 / dt / 1e6).toFixed(1) + 'M IPS';
+        $('instCount').textContent = result.instCount.toLocaleString();
+        $('stepCount').textContent = result.totalSteps.toLocaleString();
+        if (result.stopped) {
+            running = false;
+            log('Emulation stopped.', 't-err');
+            setState('Stopped');
+            $('stopBtn').disabled = true;
+            $('runBtn').disabled = false;
+            $('stepBtn').disabled = false;
+            return;
+        }
+    } catch (e) {
+        running = false;
+        log(`Run error: ${e.message || e}`, 't-err');
+        setState('Error');
+        console.error(e);
+        return;
+    }
+    updateRegs();
+    updateVisuals();
+    pollUart();
+    animId = requestAnimationFrame(runLoop);
+}
+
+$('loadSampleBtn').addEventListener('click', async () => {
+    const resp = await fetch('blink.bin');
+    const buf = await resp.arrayBuffer();
+    await initEmulator(new Uint8Array(buf), 'blink.bin');
+});
+
+$('fileInput').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const buf = await file.arrayBuffer();
+    await initEmulator(new Uint8Array(buf), file.name);
+});
+
+$('runBtn').addEventListener('click', () => {
+    if (!emu) return;
+    running = true;
+    setState('Running');
+    $('runBtn').disabled = true;
+    $('stepBtn').disabled = true;
+    $('stopBtn').disabled = false;
+    animId = requestAnimationFrame(runLoop);
+});
+
+$('stepBtn').addEventListener('click', () => {
+    if (!emu) return;
+    try {
+        const result = emu.step(100000);
+        $('instCount').textContent = result.instCount.toLocaleString();
+        $('stepCount').textContent = result.totalSteps.toLocaleString();
+        updateRegs();
+        updateVisuals();
+        pollUart();
+        if (result.stopped) {
+            log('Emulation stopped.', 't-err');
+            setState('Stopped');
+        }
+    } catch (e) {
+        log(`Step error: ${e.message || e}`, 't-err');
+    }
+});
+
+$('stopBtn').addEventListener('click', () => {
+    if (emu) emu.stop();
+    running = false;
+    setState('Stopping…');
+    setTimeout(() => { if (emu && !running) setState('Stopped'); }, 150);
+});
+
+$('resetBtn').addEventListener('click', async () => {
+    running = false;
+    cancelAnimationFrame(animId);
+    if (firmwareData) await initEmulator(firmwareData, 'firmware');
+});
+
+$('sendBtn').addEventListener('click', sendUart);
+$('uartInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendUart(); });
+
+function sendUart() {
+    if (!emu) return;
+    const val = $('uartInput').value;
+    if (!val) return;
+    const bytes = [];
+    for (const ch of val) bytes.push(ch.charCodeAt(0) & 0xFF);
+    emu.uartRxBytes(bytes);
+    log(`TX → ${JSON.stringify(val)}`, 't-in');
+    $('uartInput').value = '';
+}
+
+renderBoard(false);
+log('Load the Blink demo or a .bin firmware to start.');
+</script>
+</body>
+</html>
