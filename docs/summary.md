@@ -1,7 +1,7 @@
 ## Progress
 
 ### Done
-- **Comprehensive firmware** (`comprehensive_test/comprehensive_test.ino`) — register-level Arduino sketch testing all 10 peripherals
+- **Comprehensive firmware** (`tests/comprehensive_test/comprehensive_test.ino`) — register-level Arduino sketch testing all 10 peripherals
 - **10 peripheral tests**:
   1. GPIO (PC13 LED blink)
   2. USART TX (string output)
@@ -30,13 +30,13 @@
 ### Usage
 ```bash
 # Run all 10 tests with config file
-node pkg/cli.mjs --config=comprehensive_test/config.yaml --max=10000000
+node pkg/cli.mjs --config=tests/comprehensive_test/config.yaml --max=10000000
 
 # Run directly with firmware path
-node pkg/cli.mjs comprehensive_test/build/comprehensive_test.ino.bin 10000000
+node pkg/cli.mjs tests/comprehensive_test/build/comprehensive_test.ino.bin 10000000
 
 # Show register dump
-node pkg/cli.mjs --config=comprehensive_test/config.yaml --max=10000000 --regs
+node pkg/cli.mjs --config=tests/comprehensive_test/config.yaml --max=10000000 --regs
 ```
 
 ### Build

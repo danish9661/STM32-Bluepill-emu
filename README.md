@@ -90,8 +90,8 @@ npx bluepill-emu --config=config.yaml
 
 ```bash
 wasm-pack build --target web --out-dir pkg   # rebuild Rust peripherals
-node test_all.mjs                            # 157 unit tests
-node bench.mjs                               # benchmarks
+node tests/test_all.mjs                      # 157 unit tests
+node tests/bench.mjs                         # benchmarks
 node pkg/cli.mjs firmware.bin                # run firmware
 ```
 

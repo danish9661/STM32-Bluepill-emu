@@ -1,5 +1,5 @@
 async function main() {
-    const MUnicorn = require('./unicorn_arm.cjs');
+    const MUnicorn = require('../pkg/unicorn_arm.cjs');
     try {
         console.log('typeof MUnicorn:', typeof MUnicorn);
         const Module = await MUnicorn({});

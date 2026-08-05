@@ -41,14 +41,23 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running Ardui
 
 ### JS
 - `pkg/cli.mjs` — Main emulation runner: Unicorn setup, event loop, DMA/interrupt processing
+- `pkg/emulator.js` — Library API (`createEmulator`) used by the npm package
 - `pkg/unicorn_arm.cjs` + `unicorn_arm.js` — Unicorn ARM WASM module (binary, native Node binding)
 - `pkg/index.html` — Browser demo (python -m http.server)
+- `scripts/` — Dev utilities: `build_blink.py`, `extract_wasm.mjs`, `periph_server.mjs`, `uc_bridge.py`, `start.cmd`
 
 ### Tests
-- `test_all.mjs` — 157 unit tests (GPIO, USART, ADC, RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C, RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX). Run: `node test_all.mjs`
-- `comprehensive_test/` — 21-peripheral firmware test (Arduino sketch → bin). Run: `node pkg/cli.mjs --config=comprehensive_test/config.yaml`
-- `bench.mjs` — Microbenchmarks comparing tick() vs step() performance
-- `pkg/test_unicorn.cjs` — Simple Unicorn smoke test
+- `tests/test_all.mjs` — 157 unit tests (GPIO, USART, ADC, RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C, RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX). Run: `node tests/test_all.mjs`
+- `tests/comprehensive_test/` — 21-peripheral firmware test (Arduino sketch → bin). Run: `node pkg/cli.mjs --config=tests/comprehensive_test/config.yaml`
+- `tests/bench.mjs` — Microbenchmarks comparing tick() vs step() performance
+- `tests/test_unicorn.cjs` — Simple Unicorn smoke test
+
+### Examples & Docs
+- `examples/` — Sample firmwares: `blink_standalone/`, `blink_arduino/`, `blink_test/` (config)
+- `docs/NEXT_PHASE.md` — Single-WASM unification roadmap
+- `docs/summary.md` — Historical project summary
+- `svd/STM32F103.svd` — Device description used by `init_svd`
+- `third_party/` — Unicorn JS source package + tarball
 
 ### Config
 - `Cargo.toml` — Rust deps: wasm-bindgen, svd-parser, serde, log, regex
@@ -133,7 +142,7 @@ If WASM port is too complex:
 ## Build Commands (Windows, for reference)
 ```bash
 wasm-pack build --target web    # builds Rust → pkg/
-node test_all.mjs               # 157 unit tests
-node bench.mjs                  # benchmarks
+node tests/test_all.mjs         # 157 unit tests
+node tests/bench.mjs            # benchmarks
 node pkg/cli.mjs firmware.bin   # run firmware
 ```

@@ -1,11 +1,10 @@
 target/
 node_modules/
-blink_arduino/build/
-blink_standalone/build/
-blink_test/
-package/
+examples/blink_arduino/build/
+examples/blink_standalone/build/
+examples/blink_test/
+third_party/unicorn/
 *.bin
 *.o
 *.elf
-alexaltea-unicorn-js-*.tgz
-build_blink.py
+third_party/alexaltea-unicorn-js-*.tgz

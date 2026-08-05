@@ -3,10 +3,10 @@ const require = createRequire(import.meta.url);
 
 async function main() {
     try {
-        const periph = require('./stm32_periph_wasm.js');
+        const periph = require('../pkg/stm32_periph_wasm.js');
         console.log('periph loaded, keys:', Object.keys(periph).length);
         
-        const MUnicorn = require('./unicorn_arm.cjs');
+        const MUnicorn = require('../pkg/unicorn_arm.cjs');
         console.log('typeof MUnicorn:', typeof MUnicorn);
         const Module = await MUnicorn({});
         console.log('SUCCESS! Unicorn:', typeof Module.Unicorn);

@@ -1,4 +1,4 @@
-import * as periph from './pkg/stm32_bluepill_wasm.js';
+import * as periph from '../pkg/stm32_bluepill_wasm.js';
 
 const { init, periph_read, periph_write, tick, has_pending_interrupt,
         get_next_pending_interrupt, clear_current_interrupt, gpio_read_output, gpio_set_input,
