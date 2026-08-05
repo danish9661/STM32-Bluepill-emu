@@ -14,32 +14,18 @@ const DEFAULT_MAX_BATCH = 100000;
 let periphPromise;
 function getPeriph() {
     if (!periphPromise) {
-        if (typeof process !== 'undefined' && process.versions?.node) {
-            periphPromise = import('./stm32_bluepill_wasm.js').then(async (p) => {
-                if (typeof p.initSync === 'function') {
-                    const { readFileSync } = await import('fs');
-                    p.initSync({ module: readFileSync(new URL('./stm32_bluepill_wasm_bg.wasm', import.meta.url)) });
-                }
-                return p;
-            });
-        } else {
-            periphPromise = (async () => {
-                const wbg = await import('./stm32_bluepill_wasm_bg.js');
-                const resp = await fetch(new URL('./stm32_bluepill_wasm_bg.wasm', import.meta.url));
-                const bytes = await resp.arrayBuffer();
-                const mod = new WebAssembly.Module(bytes);
-                const imports = {};
-                for (const { module, name } of WebAssembly.Module.imports(mod)) {
-                    (imports[module] ??= {})[name] = wbg[name] ?? (() => {});
-                }
-                const { instance } = await WebAssembly.instantiate(bytes, imports);
-                wbg.__wbg_set_wasm(instance.exports);
-                if (typeof instance.exports.__wbindgen_start === 'function') {
-                    instance.exports.__wbindgen_start();
-                }
-                return wbg;
-            })();
-        }
+        // The high-level glue loads the wasm itself: initSync(module) in Node,
+        // or default() which fetches stm32_bluepill_wasm_bg.wasm relative to the
+        // module URL in the browser (no static wasm import -> works on GitHub Pages).
+        periphPromise = import('./stm32_bluepill_wasm.js').then(async (p) => {
+            if (typeof process !== 'undefined' && process.versions?.node) {
+                const { readFileSync } = await import('fs');
+                p.initSync({ module: readFileSync(new URL('./stm32_bluepill_wasm_bg.wasm', import.meta.url)) });
+            } else {
+                await p.default();
+            }
+            return p;
+        });
     }
     return periphPromise;
 }
