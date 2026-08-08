@@ -10,17 +10,6 @@ use system::WasmSystem;
 // We use static mut since WASM is single-threaded — this allows re-initialization.
 static mut SYS: Option<WasmSystem> = None;
 
-// Debug log buffer — drain via drain_i2c_log() from JS.
-static mut I2C_LOG: Vec<String> = Vec::new();
-
-pub fn i2c_log(msg: String) {
-    unsafe {
-        if I2C_LOG.len() < 4096 {
-            I2C_LOG.push(msg);
-        }
-    }
-}
-
 #[allow(static_mut_refs)]
 fn sys() -> &'static WasmSystem {
     unsafe { SYS.as_ref().expect("WasmSystem not initialized") }
@@ -176,6 +165,12 @@ pub fn uart_rx_byte(addr: u32, byte: u8) -> bool {
     sys().p.rx_byte(&*sys(), addr, byte)
 }
 
+/// Number of unread bytes still queued in the UART RX buffer at addr.
+#[wasm_bindgen]
+pub fn uart_rx_pending(addr: u32) -> u32 {
+    sys().p.rx_pending(addr)
+}
+
 /// Inject a CAN message into the CAN peripheral at the given address.
 /// Returns true if the message was accepted (matched a filter and placed in a FIFO).
 #[wasm_bindgen]
@@ -205,39 +200,7 @@ pub fn add_spi_flash(peripheral: &str, jedec_id: u32, data: &[u8], cs: Option<St
         .push(std::rc::Rc::new(std::cell::RefCell::new(flash)));
 }
 
-/// TEMP DEBUG: flash content[0..4] LE + cs change count in high bits.
-#[wasm_bindgen]
-pub fn flash_debug() -> u32 {
-    let ext = system::get_ext_devices().lock().unwrap();
-    match ext.spi_flashes.first() {
-        Some(f) => {
-            let f = f.borrow();
-            let c = &f.config.content;
-            let b0 = c.get(0).copied().unwrap_or(0) as u32;
-            let b1 = c.get(1).copied().unwrap_or(0) as u32;
-            let b2 = c.get(2).copied().unwrap_or(0) as u32;
-            let b3 = c.get(3).copied().unwrap_or(0) as u32;
-            b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
-        }
-        None => 0xDEADBEEF,
-    }
-}
-
-#[wasm_bindgen]
-pub fn flash_cs_count() -> u32 {
-    crate::ext_devices::spi_flash::cs_change_count()
-}
-
-#[wasm_bindgen]
-pub fn flash_trace() -> String {
-    let ext = system::get_ext_devices().lock().unwrap();
-    match ext.spi_flashes.first() {
-        Some(f) => f.borrow().trace_hex(),
-        None => String::new(),
-    }
-}
-
-/// Add an I2C EEPROM device. Must be called before init().
+/// Add an SPI flash device. Must be called before init().
 #[wasm_bindgen]
 pub fn add_i2c_eeprom(peripheral: &str, address: u8, data: &[u8]) {
     use crate::ext_devices::i2c_eeprom::{I2cEeprom, I2cEepromConfig};
@@ -321,14 +284,5 @@ pub fn touchscreen_set_touch(peripheral: &str, x: u16, y: u16, pressure: u16) {
             ts.borrow_mut().set_touch(x, y, pressure);
             break;
         }
-    }
-}
-
-/// Drain accumulated I2C debug log. Returns log lines joined by newline.
-#[wasm_bindgen]
-pub fn drain_i2c_log() -> String {
-    unsafe {
-        let lines: Vec<String> = std::mem::take(&mut I2C_LOG);
-        lines.join("\n")
     }
 }

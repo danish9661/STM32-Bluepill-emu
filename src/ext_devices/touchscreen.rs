@@ -26,6 +26,7 @@ pub struct Touchscreen {
     data_high: u8,
     data_low: u8,
     reply_state: u8,
+    deferred_reply: bool,
 }
 
 impl Touchscreen {
@@ -41,6 +42,7 @@ impl Touchscreen {
             data_high: 0,
             data_low: 0,
             reply_state: 0,
+            deferred_reply: false,
         }
     }
 
@@ -62,11 +64,14 @@ impl Touchscreen {
     fn prepare_reply(&mut self) {
         let channel = (self.cmd_byte >> 4) & 0x07;
         let is_8bit = (self.cmd_byte >> 3) & 0x01;
-        let val = match channel {
-            1 => self.touch_y,
-            5 => self.touch_x,
-            3 | 4 => self.touch_pressure,
-            _ => 0,
+        let val = match self.cmd_byte {
+            0x94 => self.touch_pressure,
+            _ => match channel {
+                1 => self.touch_y,
+                5 => self.touch_x,
+                3 | 4 => self.touch_pressure,
+                _ => 0,
+            },
         };
         self.data_high = (val >> 4) as u8;
         self.data_low = ((val & 0x0F) << 4) as u8;
@@ -81,6 +86,10 @@ impl ExtDevice<(), u8> for Touchscreen {
     }
 
     fn read(&mut self, _sys: &System, _addr: ()) -> u8 {
+        if self.deferred_reply {
+            self.deferred_reply = false;
+            return 0;
+        }
         match self.reply_state {
             1 => { self.reply_state = 2; self.data_high }
             2 => { self.reply_state = 0; self.data_low }
@@ -92,6 +101,7 @@ impl ExtDevice<(), u8> for Touchscreen {
         if v & 0x80 != 0 {
             self.cmd_byte = v;
             self.prepare_reply();
+            self.deferred_reply = true;
         }
     }
 

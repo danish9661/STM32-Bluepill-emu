@@ -65,6 +65,9 @@ volatile uint32_t exti0IrqCount = 0;
 
 void onTimer() { tim2IrqCount++; }
 
+/* global scope so ~HardwareTimer doesn't clear HardwareTimer_Handle[1] */
+HardwareTimer timer2(TIM2);
+
 void extiISR() { exti0IrqCount++; }
 
 /* ================================ tests ================================ */
@@ -81,7 +84,9 @@ void testGPIO() {
 
 void testUSART_TX() {
     Serial.print("Hello from BluePill! ");
-    bool txe = (reg(USART1_B + 0x00) & (1 << 7)) != 0;
+    /* TXE clears while a byte shifts out; poll until the transmit side becomes ready again */
+    uint32_t txe = 0;
+    for (uint32_t i = 0; i < 2000000 && !txe; i++) txe = (reg(USART1_B + 0x00) & (1 << 7)) != 0;
     report("USART TX", txe, txe ? "TXE set" : "TXE not set");
 }
 
@@ -513,7 +518,6 @@ void setup() {
     testLCD();
     testTouchscreen();
 
-    HardwareTimer timer2(TIM2);
     timer2.setOverflow(1000, MICROSEC_FORMAT); /* 1 ms */
     timer2.attachInterrupt(onTimer);
     timer2.resume();

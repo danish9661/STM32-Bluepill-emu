@@ -1,10 +1,6 @@
 use crate::{system::System, ext_devices::{ExtDevices, I2cDeviceEntry}};
 use super::Peripheral;
 
-macro_rules! i2clog {
-    ($($arg:tt)*) => { crate::i2c_log(format!($($arg)*)); };
-}
-
 #[derive(Clone, PartialEq, Debug)]
 enum I2cState { Idle, StartSent, AddrSent { is_read: bool }, Active { is_read: bool } }
 
@@ -107,23 +103,16 @@ impl Peripheral for I2c {
                         let mut d = self.devices[idx].device.borrow_mut();
                         self.dr = d.read(sys, ()) as u32;
                         self.sr1 |= 1 << 6; // RXNE
-                        i2clog!("[I2C] RX read DR=0x{:02X}, preloaded next=0x{:02X}", v, self.dr);
-                    } else {
-                        i2clog!("[I2C] DR read in non-read state {:?}, returning 0x{:02X}", self.state, v);
                     }
-                } else {
-                    i2clog!("[I2C] DR read with no active device, returning 0x{:02X}", v);
                 }
                 self.fire_interrupts(sys);
                 v
             }
              0x14 => {
                 self.sr1_addr_flag = (self.sr1 & (1 << 1)) != 0;
-                i2clog!("[I2C] SR1 read: 0x{:04X} (SB={} ADDR={} TXE={} RXNE={} BTF={})", self.sr1, self.sr1 & 1, (self.sr1 >> 1) & 1, (self.sr1 >> 7) & 1, (self.sr1 >> 6) & 1, (self.sr1 >> 2) & 1);
                 self.sr1
             }
             0x18 => {
-                i2clog!("[I2C] SR2 read: addr_flag={} state={:?} sr1=0x{:04X}", self.sr1_addr_flag, self.state, self.sr1);
                 // Reading SR2 clears ADDR flag
                 if self.sr1_addr_flag {
                     self.sr1 &= !(1 << 1); // Clear ADDR
@@ -179,20 +168,17 @@ impl Peripheral for I2c {
                     self.sr2 = (1 << 0) | (1 << 1); // BUSY=1, MSL=1
                     self.active_device = None;
                     self.cr1 &= !(1 << 8); // Clear START
-                    i2clog!("[I2C] START generated, cr2=0x{:03X}", self.cr2);
                     self.fire_interrupts(sys);
                 }
 
                 // STOP generation
                 if stop != 0 {
                     if matches!(self.state, I2cState::Active { .. } | I2cState::AddrSent { .. }) {
-                        i2clog!("[I2C] STOP generated, state was {:?}, cr2=0x{:03X}", self.state, self.cr2);
                         let rxne_pending = self.sr1 & (1 << 6);
                         if matches!(self.state, I2cState::Active { is_read: true }) && rxne_pending != 0 {
                             // Master receiver: HAL writes STOP in the ADDR handler
                             // (single-byte reads: NACK + STOP immediately), then reads
                             // the byte via RXNE. Keep the pending byte readable.
-                            i2clog!("[I2C] STOP during read: keeping RXNE dr=0x{:02X}", self.dr);
                             self.state = I2cState::Idle;
                             self.active_device = None;
                             self.sr1_addr_flag = false;
@@ -205,23 +191,17 @@ impl Peripheral for I2c {
             }
             0x04 => {
                 let prev_buf = self.cr2 & (1 << 10);
-                let old_cr2 = self.cr2;
                 self.cr2 = value & 0x07FF;
-                i2clog!("[I2C] CR2 write: 0x{:03X} -> 0x{:03X} (ITEVTEN={})", old_cr2, self.cr2, (self.cr2 >> 9) & 1);
                 if prev_buf != 0 && value & (1 << 10) == 0 {
                     if matches!(self.state, I2cState::Active { .. }) {
                         self.sr1 |= 1 << 2; // BTF
-                        i2clog!("[I2C] BUF IT disabled → BTF set, state={:?}", self.state);
                     }
                 }
                 if value & (1 << 8 | 1 << 9 | 1 << 10) != 0 {
                     sys.p.nvic.borrow_mut().enable_irq(31);
                     sys.p.nvic.borrow_mut().enable_irq(32);
-                    i2clog!("[I2C] CR2 write enabled interrupts: irq31_enabled={} irq32_enabled={}", 
-                        sys.p.nvic.borrow().is_enabled(31), sys.p.nvic.borrow().is_enabled(32));
                 }
                 self.fire_interrupts(sys);
-                i2clog!("[I2C] after fire_interrupts: pending_31={}", sys.p.nvic.borrow().is_pending(31));
             }
             0x08 => self.oar1 = value & 0x3FFF,
             0x0C => self.oar2 = value & 0x3FF,
@@ -237,14 +217,12 @@ impl Peripheral for I2c {
                             self.devices[idx].device.borrow_mut().reset();
                             self.sr1 = 1 << 1; // ADDR
                             self.sr2 = (1 << 0) | (1 << 1); // BUSY=1, MSL=1
-                            i2clog!("[I2C] ADDR sent: 0x{:02X} ({}), found dev {}, is_read={}", addr, if is_read {"R"} else {"W"}, idx, is_read);
                             if is_read {
                                 let mut d = self.devices[idx].device.borrow_mut();
                                 self.dr = d.read(sys, ()) as u32;
                             }
                             self.state = I2cState::AddrSent { is_read };
                         } else {
-                            i2clog!("[I2C] ADDR NACK: 0x{:02X}", addr);
                             // NACK: set AF (Acknowledge Failure, bit 10)
                             self.sr1 = 1 << 10;
                             self.sr2 = (1 << 0) | (1 << 1);
@@ -257,14 +235,11 @@ impl Peripheral for I2c {
                         if let Some(idx) = self.active_device {
                             let mut d = self.devices[idx].device.borrow_mut();
                             d.write(sys, (), value as u8);
-                            i2clog!("[I2C] TX byte: 0x{:02X} (chr={})", value, value as u8);
                         }
                         self.sr1 |= 1 << 7; // TXE
                         self.fire_interrupts(sys);
                     }
-                    _ => {
-                        i2clog!("[I2C] DR write in unexpected state {:?}, val=0x{:02X}", self.state, value);
-                    }
+                    _ => {}
                 }
             }
             0x1C => self.ccr = value & 0xFFF,

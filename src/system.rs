@@ -133,7 +133,11 @@ impl WasmSystem {
     }
 
     pub fn queue_dma_transfer(&self, t: DmaTransfer) {
-        self.pending_dma.borrow_mut().push(t);
+        let mut pending = self.pending_dma.borrow_mut();
+        if pending.iter().any(|x| x.stream_idx == t.stream_idx) {
+            return; // channel already has a transfer queued; ignore re-arms
+        }
+        pending.push(t);
     }
 
     pub fn pending_dma_count(&self) -> usize {
