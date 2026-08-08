@@ -29,10 +29,12 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 ```
 
 ### Performance
-- ~5.1M IPS real-world (20M instructions in ~3.9s)
+- ~5.1M IPS real-world (200M instructions in ~39s; 100M in ~25s)
 - `step_batch()` gave 3.15× speedup over per-instruction `step()`
 - `has_tick` flag: 69% tick speedup; `tick_indices` Vec + `AtomicU32` DMA bitmask: minor gains
-- **Bottleneck**: memory hooks (periph_read/periph_write) are JS callbacks — every peripheral register access crosses WASM→JS→WASM
+- **instCount as plain number, not BigInt** (cli.mjs codeHook): ~19% faster full run (48.3s → 39.1s); BigInt ops per instruction were measurable at 5M instr/sec. `maxInst` compare + `step_batch` arg are now numbers too
+- **Bottleneck**: memory hooks (periph_read/periph_write) are JS callbacks — every peripheral register access crosses WASM→JS→WASM. `node --cpu-prof` shows ~55% of time inside wasm functions (Rust peripheral dispatch), 3.1% in wasm-to-js glue, ~4.5% JS `get` — per-access Uint8Array reuse was neutral (binding reallocates anyway)
+- **Regression canary**: `node tests/canary.mjs` (or `node tests/canary.mjs <maxInstr>` default 100M) — runs firmware, asserts exit 0, no FAIL lines, SUMMARY pass=37 fail=0, ~25s. Faster than the full 200M run.
 
 ## Current Status (uncommitted WIP — see "What We Did — Current Sprint" below)
 ### Test suite: `node tests/test_all.mjs`
@@ -40,7 +42,7 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 
 ### Firmware test — `tests/arduino_periph_test/` (24-peripheral Arduino sketch, 37 checks)
 ```
-echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml --max=200000000     # ~79s, 2000 steps
+echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml --max=200000000     # ~40s, 2000 steps
 ```
 - **PASS (37/37)**: sync section (GPIO, USART TX, UART Loopback, RCC, FLASH, PWR, BKP, IWDG, WWDG, RTC, CRC, DAC, ADC, AFIO, EXTI reg, CAN, SPI Flash, I2C EEPROM, I2C OLED, touchscreen, LCD, I2C2 EEPROM, SPI2 Flash, USART2 Loopback) + async section (DMA TX/RX, UART RX, TIM2, EXTI0, EXTI1, EXTI13, CAN RX, SysTick, TIM3 PWM, TIM4, RTC Alarm IRQ)
 - **CAN RX injection**: cli.mjs polls the firmware's `canRxArmed` RAM global (symbol from ELF), then calls `can_inject_message(0x40006400, 0<<21, 2, 0xDEAD, 0)`. Note the firmware's filter bank 0 is ID-list mode (FS1R=1, FM1R=0, F0=0) → only STDID **0** matches — inject ID 0, not 0x123.
@@ -69,7 +71,12 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
 - `tests/test_all.mjs`: UART/DMA tests now use `dma_get_pending_count()`/`dma_set_completed_many()` + `tick()` to model the async bridge — was 157, now **158/158 pass**
 ### New firmware tests + cli CAN RX injection (this sprint)
 - `tests/arduino_periph_test/arduino_periph_test.ino`: added `testI2C2()` (register-level I2C2 master on 0x40005800 → EEPROM 0x51 round-trip via repeated START), `testSPI2()` (register-level SPI2 master 0x40003800, JEDEC `EF 40 17` + PP/readback on PB12), `testUSART2()` (HDSEL loopback), plus async TIM3 PWM (CC1IF via OC1M=PWM1), TIM4 CNT, RTC alarm IRQ (custom `extern "C" RTC_IRQHandler`, IRQ3), EXTI1 (PB1) + EXTI13 (PB13) via SWIER, and CAN RX (firmware sets `canRxArmed` RAM flag → cli injects once → firmware reads RFIFO0)
-- `pkg/cli.mjs`: added `can_inject_message` import; main loop polls the ELF symbol `canRxArmed` via `uc.mem_read` and injects a single CAN frame `(ID=0, DLC=2, data=0xDEAD)` — 37/37 firmware checks PASS
+### cli.mjs perf (`pkg/cli.mjs`)
+- **instCount/batchInstCount as plain numbers** (was BigInt): ~19% faster full run (48.3s → 39.1s at 200M); codeHook increments are the hottest JS path
+- CAN RX injection: `can_inject_message` import; main loop polls the ELF symbol `canRxArmed` via `uc.mem_read` and injects a single CAN frame `(ID=0, DLC=2, data=0xDEAD)` — 37/37 firmware checks PASS
+- Regression canary: `tests/canary.mjs` (spawns cli with `--max=100000000`, asserts `SUMMARY pass=37 fail=0`, prints `CANARY PASS`) — ~25s, replaces slower full-run checks
+### WASM abort investigation (this sprint)
+- `Fatal: undefined Stack: undefined` at ~35M instr (seen once) — stress-tested: 7 runs totalling ~2.5B instructions (200M×3, 400M×2, 600M, 300M with `usr/bin/time -v`) — **zero aborts**, max RSS 155MB stable (no leak). Not reproducible; monitor on any re-occurrence
 
 ## Active Workarounds (temporary, remove or upstream later)
 1. **`mrs rX, msp` → `mov rX, sp`** (cli.mjs `patchMrsMsp`, ~line 19): Unicorn cannot decode Thumb `mrs`; newlib `_sbrk` uses it; rewrite to 4-byte equivalent + nop (same footprint)
@@ -84,6 +91,7 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
 cargo check                          # Rust sanity (fast)
 wasm-pack build --target web         # rebuild pkg/stm32_bluepill_wasm_bg* (Rust → wasm)
 node tests/test_all.mjs              # 158 unit tests
+node tests/canary.mjs                # regression canary: 37/37 firmware checks, ~25s
 node tests/bench.mjs                 # benchmarks
 node pkg/cli.mjs tests/arduino_periph_test/build/arduino_periph_test.ino.elf   # run firmware
 echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml --max=200000000
@@ -102,11 +110,11 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 
 ## Next Phase — What's Left
 
-### Immediate (get 21/21 — ALL PASS as of this sprint; re-check after any change)
-1. **Verify nothing regressed after instrumentation removal** — rerun `tests/test_all.mjs` (158) + firmware 200M run (37/37) after any edit to `src/` or `pkg/cli.mjs`
+### Immediate (ALL PASS as of this sprint; re-check after any change)
+1. **Verify nothing regressed** — rerun `tests/test_all.mjs` (158) + canary (`node tests/canary.mjs`, 37/37) after any edit to `src/` or `pkg/cli.mjs`
 
-### Known issue
-- WASM abort (`Fatal: undefined Stack: undefined`) at ~35M+ instructions (seen once) — investigate if it re-occurs after other fixes
+### Known issue (monitor only)
+- WASM abort (`Fatal: undefined Stack: undefined`) at ~35M+ instructions — seen once, **not reproducible** across ~2.5B stress instructions (7 runs). Re-investigate if it re-occurs
 
 ## Next Phase — Long-term Optimizations
 1. **Single WASM module** (Emscripten): compile Rust peripheral code + Unicorn C into one `emcc` output (Linux toolchain; `wasm32-unknown-emscripten` target). Recommended-free approach elsewhere in docs

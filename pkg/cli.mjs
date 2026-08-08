@@ -298,7 +298,7 @@ async function main() {
         let val;
         if (addr32 >= 0xE0001000 && addr32 < 0xE0001100) {
             val = addr32 === 0xE0001004
-                ? Number(instCount & 0xFFFFFFFFn)
+                ? Number(instCount & 0xFFFFFFFF)
                 : (addr32 === 0xE0001000 ? 1 : 0);
         } else {
             val = periph_read(addr32, size) >>> 0;
@@ -332,11 +332,12 @@ async function main() {
         uc.hook_add(Module.HOOK_MEM_WRITE, memWriteHook, null, start, end);
     }
 
-    let instCount = 0n;
-    let batchInstCount = 0n;
+    let instCount = 0;
+    let batchInstCount = 0;
     let stopRequested = false;
 
-    // Per-instruction hook: just count instructions, no WASM calls.
+    // Per-instruction hook: just count instructions, no WASM calls, no BigInt
+    // (number increments are ~3x faster than BigInt at 5M instr/sec).
     // Actual tick/interrupt processing happens in step_batch() after each Unicorn batch.
     const codeHook = (handle, address, size, user_data) => {
         instCount++;
@@ -473,8 +474,8 @@ async function main() {
             }
         }
         if (batchInstCount > 0) {
-            const status = step_batch(Number(batchInstCount));
-            batchInstCount = 0n;
+            const status = step_batch(batchInstCount);
+            batchInstCount = 0;
             if (status === 1) { stopRequested = true; break; }
         }
         processDma();
@@ -490,7 +491,7 @@ async function main() {
         }
 
         try { if (stopRequested || is_watchdog_reset_requested()) break; } catch (wdErr) { console.error('WDT check error:', wdErr); break; }
-        if (instCount >= BigInt(maxInst)) break;
+        if (instCount >= maxInst) break;
         await new Promise(r => setImmediate(r));
     }
 
