@@ -294,7 +294,6 @@ impl Peripherals {
         }
 
         if let Some(p) = Fsmc::new("FSMC", ext_devices) {
-            let idx = peripherals.peripherals.len();
             peripherals.peripherals.push(PeripheralSlot { start: 0x6000_0000, end: 0xA000_1000, peripheral: RefCell::new(p) });
         }
 

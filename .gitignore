@@ -17,3 +17,5 @@ tests/arduino_periph_test/build/*.cache
 tests/arduino_periph_test/build/*.log
 tests/arduino_echo/build/
 tests/arduino_fade/build/
+tests/arduino_periph_test/build/compile_commands.json
+tests/arduino_periph_test/build/build.options.json
