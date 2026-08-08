@@ -54,8 +54,10 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
   `node -e "const fs=require('fs'); const e2=Buffer.alloc(65536); e2[0]=0x42; e2[1]=0x24; fs.writeFileSync('tests/arduino_periph_test/build/eeprom2.bin', e2); fs.writeFileSync('tests/arduino_periph_test/build/spi_flash2.bin', Buffer.alloc(65536));"`
 
 ## What We Did — Current Sprint (uncommitted WIP)
-### USART byte-time TXE pacing (`src/peripherals/usart.rs`)
-- `write_dr()` non-loopback now clears TXE and sets `txe_clear_until = instr + byte_time()` (BRR*p10); `tick()` re-asserts TXE + fires pending at byte-time edge — prevents back-to-back TXE interrupt storms
+### UART TX speedup — immediate TXE + NVIC re-pend fairness (`src/peripherals/usart.rs`, `src/peripherals/nvic.rs`)
+- **Root cause of slow UART**: `txe_clear_until = instr + byte_time()` was compared against `instruction_count()`, which only updates at batch boundaries → stale mid-batch → TXE re-asserted ~1 byte per 100K batch ≈ 50 B/s. Also the core's `Serial` (STMicro core 2.12) is ring-buffer + `HAL_UART_Transmit_IT` driven: `write()` spins in `availableForWrite()` until the TXE ISR drains the ring — a pure software loop, so nothing re-pended mid-drain.
+- `write_dr()` now re-asserts TXE immediately (polling firmware drains at instruction rate); `tick()` always calls `update_interrupt()` (was early-returning when TXE set — deadlock with TXEIE enabled).
+- **NVIC fairness**: `get_next_pending_intr` yields when the same IRQ re-pends itself (`last_popped`): a hot self-re-pending IRQ (TXE draining the ring) alternates with other pending IRQs instead of consuming all 16 batch slots → EXTI13/CAN/etc. still fire during long prints; TXE drains ~8 bytes/batch (was 1). periph37 full run in browser: 15.8s wall (previously exceeded the 60s harness cap)
 - `refresh_txe()` on SR/DR reads, `rx_pending()` for the DMA gate
 ### SPI device selection (`src/peripherals/spi.rs`, `src/peripherals/gpio.rs`)
 - `active_device()` now uses new `gpio.read_pin_effective()` (read callback, else driven output state) — previously `read_port` ignored output-only pins, so the flash CS settled non-selected; touchscreen CS (PA2) now correctly selects the ADS7846

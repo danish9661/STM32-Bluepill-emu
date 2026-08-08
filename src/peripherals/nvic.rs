@@ -29,6 +29,8 @@ pub struct Nvic {
     priority: [u8; IRQ_COUNT],
     /// Active exception priorities stack (top = current priority)
     active_prio_stack: Vec<u8>,
+    /// Last IRQ popped by get_next_pending_intr (for same-batch fairness)
+    last_popped: Option<i32>,
 }
 
 impl Default for Nvic {
@@ -43,6 +45,7 @@ impl Default for Nvic {
             active: [0; REG_WORDS],
             priority: [0; IRQ_COUNT],
             active_prio_stack: Vec::new(),
+            last_popped: None,
         }
     }
 }
@@ -139,6 +142,10 @@ impl Nvic {
     }
 
     fn find_highest_pending(&self, primask: u32, basepri: u32) -> Option<i32> {
+        self.find_highest_pending_excluding(primask, basepri, None)
+    }
+
+    fn find_highest_pending_excluding(&self, primask: u32, basepri: u32, exclude: Option<i32>) -> Option<i32> {
         let mut best: Option<i32> = None;
         let mut best_prio: u8 = 0xFF;
         let pending = self.pending;
@@ -147,6 +154,7 @@ impl Nvic {
             let bit = (IRQ_OFFSET + irq) as u128;
             if bit >= 128 { break; }
             if pending & (1u128 << bit) == 0 { continue; }
+            if Some(irq) == exclude { continue; }
             if !self.can_fire(irq, primask, basepri) { continue; }
             let prio = self.exception_priority(irq);
             if best.is_none() || prio < best_prio {
@@ -175,7 +183,17 @@ impl Nvic {
     pub fn get_next_pending_intr(&mut self) -> Option<i32> {
         let primask = INTR_MASK_PRIMASK.load(Ordering::Relaxed);
         let basepri = INTR_MASK_BASEPRI.load(Ordering::Relaxed);
-        let irq = self.find_highest_pending(primask, basepri)?;
+        let mut irq = self.find_highest_pending(primask, basepri)?;
+        // Fairness: if the IRQ that just ran re-pended itself (e.g. UART TXE
+        // draining a software TX ring), yield to another pending IRQ so one
+        // hot interrupt cannot consume every slot of the batch and starve
+        // lower-priority IRQs (EXTI13 never fired during a long print).
+        if self.last_popped == Some(irq) {
+            if let Some(other) = self.find_highest_pending_excluding(primask, basepri, Some(irq)) {
+                irq = other;
+            }
+        }
+        self.last_popped = Some(irq);
         let bit = (IRQ_OFFSET + irq) as u128;
         self.pending &= !(1u128 << bit);
         if irq >= 0 {

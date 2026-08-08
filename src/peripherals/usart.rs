@@ -66,7 +66,10 @@ impl Usart {
     fn update_interrupt(&mut self, sys: &System) {
         let mut pending = false;
         if self.cr1 & (1 << 6) != 0 && self.sr & (1 << 6) != 0 { pending = true; } // TCIE + TC
-        if self.cr1 & (1 << 7) != 0 && self.sr & (1 << 7) != 0 { pending = true; } // TXEIE + TXE
+        // TXEIE + TXE: the ISR drains the core's software TX ring; the
+        // 16-IRQ-per-batch cap bounds re-pending, and the core ISR clears
+        // TXEIE once the ring empties, so no storm is possible.
+        if self.cr1 & (1 << 7) != 0 && self.sr & (1 << 7) != 0 { pending = true; }
         if self.cr1 & (1 << 5) != 0 && self.sr & (1 << 5) != 0 { pending = true; } // RXNEIE + RXNE
         if pending {
             sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
@@ -124,9 +127,11 @@ impl Usart {
             self.sr |= 1 << 5; // RXNE: receive the looped byte
             self.update_interrupt(sys);
         } else {
-            // TXE drops until the byte shifts out; the next tick() re-asserts it,
-            // spacing TXE interrupts by one byte time (no back-to-back re-pend storm).
-            self.sr &= !0x80;
+            // TXE re-asserts immediately: polling firmware (HAL blocking
+            // transmit) drains at instruction rate. The interrupt path is
+            // still spaced by byte_time via update_interrupt()'s txe_ready()
+            // gate, so ISR-driven transmitters cannot re-pend every batch.
+            self.sr |= 0x80;
             self.txe_clear_until = instruction_count() + self.byte_time();
             self.update_interrupt(sys);
         }
@@ -135,11 +140,10 @@ impl Usart {
 
 impl Peripheral for Usart {
     fn tick(&mut self, sys: &System) {
-        if self.sr & 0x80 != 0 { return; }
-        if self.txe_ready() {
+        if self.sr & 0x80 == 0 && self.txe_ready() {
             self.sr |= 0x80;
-            self.update_interrupt(sys);
         }
+        self.update_interrupt(sys);
     }
 
     fn periph_remap(&self, sys: &System) -> Option<u32> {
