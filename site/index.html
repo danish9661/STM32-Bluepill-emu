@@ -142,6 +142,7 @@ let canInjected = false;   // CAN autopilot: true after the single frame is inje
 const CAN_RAM_FLAG = 0x200000b8;  // firmware 'canRxArmed' symbol (arduino_periph_test build)
 let autopilot = false;
 let autopilotSteps = 0;
+let lastTotalInst = 0;
 
 (async () => {
     try { svdXml = await fetch('STM32F103.svd').then(r => r.text()); } catch (e) {}
@@ -318,6 +319,7 @@ async function initEmulator(data, name, extDevices = {}) {
     runStartTs = 0;
     runStartInst = 0;
     totalInst = 0;
+    lastTotalInst = 0;
     firmwareData = data;
     setState('Initializing…');
     try {
@@ -353,8 +355,10 @@ function runLoop() {
     try {
         let result;
         if (autopilot) {
-            result = emu.step(100000);
-            autopilotSteps++;
+            do {
+                result = emu.step(100000);
+                autopilotSteps++;
+            } while (!result.stopped && performance.now() - t0 < 80);
             if (autoBytes.length && emu.rxPending() === 0) {
                 const b = autoBytes.shift();
                 emu.uartRx(b);
@@ -368,13 +372,15 @@ function runLoop() {
             result = emu.run(500000);
         }
         const dt = (performance.now() - t0) / 1000;
-        if (dt > 0) $('speed').textContent = (500000 / dt / 1e6).toFixed(1) + 'M IPS';
+        const frameInst = result.instCount - lastTotalInst;
+        if (dt > 0) $('speed').textContent = (frameInst / dt / 1e6).toFixed(1) + 'M IPS';
         const elapsed = runStartTs ? (performance.now() - runStartTs) / 1000 : 0;
         if (elapsed > 0.5) {
             $('avgMips').textContent = ((result.instCount - runStartInst) / elapsed / 1e6).toFixed(1) + 'M IPS';
         }
         $('instCount').textContent = result.instCount.toLocaleString();
         totalInst = result.instCount;
+        lastTotalInst = totalInst;
         $('stepCount').textContent = (autopilot ? autopilotSteps : result.totalSteps).toLocaleString();
         if (result.stopped) {
             running = false;
