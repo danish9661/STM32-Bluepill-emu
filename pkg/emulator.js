@@ -349,7 +349,7 @@ export async function createEmulator(opts = {}) {
         if (addr32 >= 0xE0001000 && addr32 < 0xE0001100) {
             // SysTick: Rust never decrements CVR; fake a counting-down value
             val = addr32 === 0xE0001004
-                ? Number(instCount & 0xFFFFFFFFn)
+                ? instCount & 0xFFFFFFFF
                 : (addr32 === 0xE0001000 ? 1 : 0);
         } else {
             val = periph_read(addr32, size) >>> 0;
@@ -381,8 +381,8 @@ export async function createEmulator(opts = {}) {
     }
 
     let stopRequested = false;
-    let instCount = 0n;
-    let batchInstCount = 0n;
+    let instCount = 0;
+    let batchInstCount = 0;
 
     const codeHook = () => { instCount++; batchInstCount++; };
     uc.hook_add(Module.HOOK_CODE, codeHook, null);
@@ -487,7 +487,7 @@ export async function createEmulator(opts = {}) {
             uc.reg_write_i32(Module.ARM_REG_LR, 0xFFFFFFF9);
             uc.reg_write_i32(Module.ARM_REG_PC, handler_pc);
             try {
-                uc.emu_start(BigInt(handler_pc), 0n, 0n, DEFAULT_MAX_BATCH);
+                uc.emu_start(handler_pc, 0, 0, DEFAULT_MAX_BATCH);
             } catch (e) { /* BX LR EXC_RETURN handled by intrHook */ }
             clear_current_interrupt();
             const savedFrame = uc.mem_read(BigInt(savedAt - 32), 32);
@@ -516,7 +516,7 @@ export async function createEmulator(opts = {}) {
                 processDma();
                 const curPc = uc.reg_read_i32(Module.ARM_REG_PC);
                 try {
-                    uc.emu_start(BigInt(curPc | 1), 0n, 0n, DEFAULT_MAX_BATCH);
+                    uc.emu_start(curPc | 1, 0, 0, DEFAULT_MAX_BATCH);
                 } catch (e) {
                     const msg = String(e);
                     if (msg.includes('UC_ERR_READ_UNMAPPED') || msg.includes('UC_ERR_FETCH_UNMAPPED') || msg.includes('UC_ERR_WRITE_UNMAPPED')) {
@@ -527,19 +527,19 @@ export async function createEmulator(opts = {}) {
                     }
                 }
                 if (batchInstCount > 0) {
-                    const status = step_batch(Number(batchInstCount));
-                    batchInstCount = 0n;
+                    const status = step_batch(batchInstCount);
+                    batchInstCount = 0;
                     if (status === 1) { stopRequested = true; break; }
                 }
                 processDma();
                 processInterrupts();
                 totalSteps++;
                 if (is_watchdog_reset_requested()) break;
-                if (maxInstructions > 0 && instCount - startInst >= BigInt(maxInstructions)) break;
+                if (maxInstructions > 0 && instCount - startInst >= maxInstructions) break;
             }
             return {
                 totalSteps,
-                instCount: Number(instCount),
+                instCount,
                 stopped: stopRequested || is_watchdog_reset_requested(),
             };
         },
@@ -549,7 +549,7 @@ export async function createEmulator(opts = {}) {
             processDma();
             const curPc = uc.reg_read_i32(Module.ARM_REG_PC);
             try {
-                uc.emu_start(BigInt(curPc | 1), 0n, 0n, maxBatch);
+                uc.emu_start(curPc | 1, 0, 0, maxBatch);
             } catch (e) {
                 const msg = String(e);
                 if (msg.includes('UC_ERR_READ_UNMAPPED') || msg.includes('UC_ERR_FETCH_UNMAPPED') || msg.includes('UC_ERR_WRITE_UNMAPPED')) {
@@ -560,15 +560,15 @@ export async function createEmulator(opts = {}) {
                 }
             }
             if (batchInstCount > 0) {
-                const status = step_batch(Number(batchInstCount));
-                batchInstCount = 0n;
+                const status = step_batch(batchInstCount);
+                batchInstCount = 0;
                 if (status === 1) stopRequested = true;
             }
             processDma();
             processInterrupts();
             return {
                 pc: uc.reg_read_i32(Module.ARM_REG_PC),
-                instCount: Number(instCount),
+                instCount,
                 stopped: stopRequested || is_watchdog_reset_requested(),
             };
         },

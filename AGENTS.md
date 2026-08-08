@@ -32,7 +32,8 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 - ~5.1M IPS real-world (200M instructions in ~39s; 100M in ~25s)
 - `step_batch()` gave 3.15× speedup over per-instruction `step()`
 - `has_tick` flag: 69% tick speedup; `tick_indices` Vec + `AtomicU32` DMA bitmask: minor gains
-- **instCount as plain number, not BigInt** (cli.mjs codeHook): ~19% faster full run (48.3s → 39.1s); BigInt ops per instruction were measurable at 5M instr/sec. `maxInst` compare + `step_batch` arg are now numbers too
+- **instCount as plain number, not BigInt** (cli.mjs + pkg/emulator.js codeHook): ~19% faster full run (48.3s → 39.1s); BigInt ops per instruction were measurable at 5M instr/sec. `maxInst` compare + `step_batch` arg are now numbers too. Same change in emulator.js lifted the browser demo from 3.8M → 5.0M Avg IPS (~30%)
+- **Site runLoop**: batch ~5× `step(100000)` per rAF frame (80ms budget), one UI pass per frame — UART TXE pacing needs 100K batches; Speed stat divides real frame instructions, not a fixed 500K
 - **Bottleneck**: memory hooks (periph_read/periph_write) are JS callbacks — every peripheral register access crosses WASM→JS→WASM. `node --cpu-prof` shows ~55% of time inside wasm functions (Rust peripheral dispatch), 3.1% in wasm-to-js glue, ~4.5% JS `get` — per-access Uint8Array reuse was neutral (binding reallocates anyway)
 - **Regression canary**: `node tests/canary.mjs` (or `node tests/canary.mjs <maxInstr>` default 100M) — runs firmware, asserts exit 0, no FAIL lines, SUMMARY pass=37 fail=0, ~25s. Faster than the full 200M run.
 
