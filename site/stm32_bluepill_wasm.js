@@ -8,7 +8,7 @@ export function adc_set_sim_value(val) {
 }
 
 /**
- * Add an I2C EEPROM device. Must be called before init().
+ * Add an SPI flash device. Must be called before init().
  * @param {string} peripheral
  * @param {number} address
  * @param {Uint8Array} data
@@ -337,6 +337,16 @@ export function touchscreen_set_touch(peripheral, x, y, pressure) {
 export function uart_rx_byte(addr, byte) {
     const ret = wasm.uart_rx_byte(addr, byte);
     return ret !== 0;
+}
+
+/**
+ * Number of unread bytes still queued in the UART RX buffer at addr.
+ * @param {number} addr
+ * @returns {number}
+ */
+export function uart_rx_pending(addr) {
+    const ret = wasm.uart_rx_pending(addr);
+    return ret >>> 0;
 }
 function __wbg_get_imports() {
     const import0 = {

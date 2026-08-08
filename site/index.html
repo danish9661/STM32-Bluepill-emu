@@ -91,6 +91,7 @@ select:focus { outline: none; border-color: #7dd3fc; }
                 <select id="presetSelect">
                     <option value="blink">Blink Demo (Arduino)</option>
                     <option value="comprehensive">Comprehensive Test (21 peripherals)</option>
+                    <option value="periph37">Peripheral Test (37 checks, auto)</option>
                 </select>
                 <button id="loadPresetBtn" class="primary">Load Preset</button>
                 <label class="file-btn">Load .bin / .hex <input type="file" id="binInput" accept=".bin,.hex"></label>
@@ -134,6 +135,15 @@ let running = false;
 let runStartTs = 0;
 let runStartInst = 0;
 let totalInst = 0;
+let svdXml = null;
+let autoBytes = [];        // bytes to auto-inject (one at a time, when UART RX is empty)
+let canInjected = false;   // CAN autopilot: true after the single frame is injected
+const CAN_RAM_FLAG = 0x200000b8;  // firmware 'canRxArmed' symbol (arduino_periph_test build)
+let autopilot = false;
+
+(async () => {
+    try { svdXml = await fetch('STM32F103.svd').then(r => r.text()); } catch (e) {}
+})();
 
 const PORTS = ['A', 'B', 'C', 'D'];
 const PIN_NAMES = ['0','1','2','3','4','5','6','7','8','9','10','11','12','13','14','15'];
@@ -295,6 +305,9 @@ async function initEmulator(data, name, extDevices = {}) {
     if (emu) { emu.close(); emu = null; }
     cancelAnimationFrame(animId);
     running = false;
+    autopilot = false;
+    autoBytes = [];
+    canInjected = false;
     $('instCount').textContent = '0';
     $('stepCount').textContent = '0';
     $('speed').textContent = '—';
@@ -306,6 +319,7 @@ async function initEmulator(data, name, extDevices = {}) {
     setState('Initializing…');
     try {
         emu = await createEmulator({
+            svd: svdXml || undefined,
             firmware: data,
             flash_size: 0x10000,
             ram_size: 0x5000,
@@ -334,16 +348,30 @@ function runLoop() {
     if (!running || !emu) return;
     const t0 = performance.now();
     try {
-        const result = emu.run(500000);
+        let result;
+        if (autopilot) {
+            result = emu.step(100000);
+            if (autoBytes.length && emu.rxPending() === 0) {
+                const b = autoBytes.shift();
+                emu.uartRx(b);
+                log(`auto TX → '${String.fromCharCode(b)}'`, 't-in');
+            }
+            if (!canInjected && emu.memRead32(CAN_RAM_FLAG) !== 0) {
+                canInjected = emu.canInjectMessage(0x40006400, 0 << 21, 2, 0xDEAD, 0);
+                log(`CAN frame injected (accepted=${canInjected})`, 't-in');
+            }
+        } else {
+            result = emu.run(500000);
+        }
         const dt = (performance.now() - t0) / 1000;
         if (dt > 0) $('speed').textContent = (500000 / dt / 1e6).toFixed(1) + 'M IPS';
         const elapsed = runStartTs ? (performance.now() - runStartTs) / 1000 : 0;
         if (elapsed > 0.5) {
             $('avgMips').textContent = ((result.instCount - runStartInst) / elapsed / 1e6).toFixed(1) + 'M IPS';
         }
-    $('instCount').textContent = result.instCount.toLocaleString();
-    totalInst = result.instCount;
-    $('stepCount').textContent = result.totalSteps.toLocaleString();
+        $('instCount').textContent = result.instCount.toLocaleString();
+        totalInst = result.instCount;
+        $('stepCount').textContent = result.totalSteps.toLocaleString();
         if (result.stopped) {
             running = false;
             log('Emulation stopped.', 't-err');
@@ -382,6 +410,30 @@ $('loadPresetBtn').addEventListener('click', async () => {
                 i2c_eeprom: [{ peripheral: 'I2C1', address: 0x50, data: new Uint8Array(eeprom) }],
                 spi_flash: [{ peripheral: 'SPI1', jedec_id: 0xef4016, data: new Uint8Array(spiflash), cs: null }],
             });
+        } else if (preset === 'periph37') {
+            const [fw, e1, e2, sf1, sf2] = await Promise.all([
+                fetch('arduino_periph_test.bin').then(r => r.arrayBuffer()),
+                fetch('arduino_eeprom.bin').then(r => r.arrayBuffer()),
+                fetch('arduino_eeprom2.bin').then(r => r.arrayBuffer()),
+                fetch('arduino_spi_flash.bin').then(r => r.arrayBuffer()),
+                fetch('arduino_spi_flash2.bin').then(r => r.arrayBuffer()),
+            ]);
+            await initEmulator(new Uint8Array(fw), 'arduino_periph_test.bin (37 checks)', {
+                i2c_eeprom: [
+                    { peripheral: 'I2C1', address: 0x50, data: new Uint8Array(e1) },
+                    { peripheral: 'I2C2', address: 0x51, data: new Uint8Array(e2) },
+                ],
+                i2c_oled: [{ peripheral: 'I2C1', address: 0x3C, width: 128, height: 64 }],
+                spi_flash: [
+                    { peripheral: 'SPI1', jedec_id: 0xEF4016, data: new Uint8Array(sf1), cs: 'PA4' },
+                    { peripheral: 'SPI2', jedec_id: 0xEF4017, data: new Uint8Array(sf2), cs: 'PB12' },
+                ],
+                lcd: [{ peripheral: 'SPI1', cs: 'PA1' }],
+                touchscreen: [{ peripheral: 'SPI1', touch_detected_pin: 'PA3', cs: 'PA2' }],
+            });
+            autoBytes = [0x41, 0x42];   // 'A' for DMA RX, 'B' for UART RX
+            autopilot = true;
+            log('Autopilot on: will inject A/B + one CAN frame as the firmware waits.', 't-in');
         }
     } catch (e) {
         log(`Failed to load preset: ${e.message || e}`, 't-err');

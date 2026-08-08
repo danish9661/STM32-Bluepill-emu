@@ -129,9 +129,15 @@ export function parseElf(buffer) {
     for (let i = 0; i < e_phnum; i++) {
         const off = e_phoff + i * e_phentsize;
         if (off + 32 > b.length) break;
-        const p_type = u32(off), p_offset = u32(off + 4), p_vaddr = u32(off + 8), p_filesz = u32(off + 16);
+        const p_type = u32(off), p_offset = u32(off + 4), p_vaddr = u32(off + 8), p_paddr = u32(off + 12), p_filesz = u32(off + 16);
         if (p_type !== 1 || p_filesz === 0) continue;
-        regions.push({ start: p_vaddr >>> 0, data: b.slice(p_offset, p_offset + p_filesz) });
+        const data = b.slice(p_offset, p_offset + p_filesz);
+        regions.push({ start: p_vaddr >>> 0, data });
+        // The firmware startup copies .data from its load (LMA) address; the
+        // emulator must provide that copy too, not just the VMA.
+        if (p_paddr !== p_vaddr) {
+            regions.push({ start: p_paddr >>> 0, data });
+        }
     }
     const e_shoff = u32(32), e_shentsize = u16(46), e_shnum = u16(48);
     const sections = [];
@@ -204,7 +210,7 @@ export async function createEmulator(opts = {}) {
     const { periph_read, periph_write, tick, step_batch, get_next_pending_interrupt,
     dma_get_all_pending, dma_set_completed_many, is_watchdog_reset_requested,
     add_spi_flash, add_i2c_eeprom, add_touchscreen, add_lcd, add_i2c_oled, add_software_spi,
-    init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, gpio_read_output,
+    init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
     gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt,
     can_inject_message, adc_set_sim_value, touchscreen_set_touch } = periph;
 
@@ -246,10 +252,31 @@ export async function createEmulator(opts = {}) {
     let fwAddr = flash_addr;
     let symbolList = [];
     let sortedSymbols = null;
+
+    // Unicorn ARM cannot decode `mrs rX, msp` (used by newlib _sbrk). In thread
+    // mode MSP == SP, so rewrite to `mov rX, sp` + nop (same 4-byte footprint).
+    const patchMrsMsp = (data) => {
+        let patched = 0;
+        for (let i = 0; i + 3 < data.length; i++) {
+            if (data[i] === 0xEF && data[i + 1] === 0xF3
+                && data[i + 2] === 0x08 && (data[i + 3] & 0xF0) === 0x80) {
+                const rd = data[i + 3] & 0x0F;
+                const mov = 0x4668 | rd;
+                data[i] = mov & 0xFF;
+                data[i + 1] = mov >> 8;
+                data[i + 2] = 0x00;
+                data[i + 3] = 0xBF;
+                patched++;
+            }
+        }
+        if (patched > 0 && verbose) console.log(`Patched ${patched} 'mrs msp' to 'mov sp' (malloc/_sbrk support)`);
+        return data;
+    };
+
     if (typeof firmware === 'string' || (firmware instanceof Uint8Array && firmware.length > 0 && firmware[0] === 0x3A)) {
         const text = typeof firmware === 'string' ? firmware : new TextDecoder().decode(firmware);
         const parsed = parseIntelHex(text);
-        fwBytes = parsed.data;
+        fwBytes = patchMrsMsp(parsed.data);
         if (parsed.base >= flash_addr && parsed.base < flash_addr + flash_size) fwAddr = parsed.base;
     } else if (firmware instanceof Uint8Array && firmware.length > 4 &&
                firmware[0] === 0x7F && firmware[1] === 0x45 && firmware[2] === 0x4C && firmware[3] === 0x46) {
@@ -259,12 +286,37 @@ export async function createEmulator(opts = {}) {
         for (const reg of elf.regions) {
             const inFlash = reg.start >= flash_addr && reg.start < flash_addr + flash_size;
             const inRam = reg.start >= 0x20000000 && reg.start < 0x20000000 + ram_size;
-            if (inFlash || inRam) { uc.mem_write(BigInt(reg.start), reg.data); wrote++; }
+            if (inFlash || inRam) { uc.mem_write(BigInt(reg.start), patchMrsMsp(reg.data)); wrote++; }
         }
         symbolList = elf.symbols;
         if (verbose) console.log(`ELF: ${elf.regions.length} load segments, ${elf.symbols.length} symbols (${wrote} written)`);
     }
-    if (fwBytes.length > 0) uc.mem_write(BigInt(fwAddr), fwBytes);
+    if (fwBytes.length > 0) uc.mem_write(BigInt(fwAddr), patchMrsMsp(fwBytes));
+
+    // TEMP WORKAROUND: Unicorn skips the two `bl HAL_NVIC_EnableIRQ` in
+    // i2c_init(). Replace 0x8001bbc..0x8001bdb with inline NVIC ISER0/ISER1
+    // writes (SetPriority calls preserved). Probe guards against other builds.
+    try {
+        const patchAddr = 0x8001BBCn;
+        const probe = uc.mem_read(patchAddr, 4);
+        if (probe[0] === 0x00 && probe[1] === 0xF0 && probe[2] === 0x92 && probe[3] === 0xFD) {
+            uc.mem_write(patchAddr, new Uint8Array([
+                0x00, 0xF0, 0x92, 0xFD, // bl  HAL_NVIC_SetPriority (r0=31)
+                0x4E, 0xF2, 0x00, 0x13, // movw r3, #0xE100
+                0xCE, 0xF2, 0x00, 0x03, // movt r3, #0xE000  -> r3 = 0xE000E100
+                0x40, 0xF2, 0x00, 0x02, // movw r2, #0x0000
+                0xC8, 0xF2, 0x00, 0x02, // movt r2, #0x8000  -> r2 = 0x80000000
+                0x1A, 0x60,             // str  r2, [r3]     -> ISER0 |= bit31 (IRQ31)
+                0x20, 0x20,             // movs r0, #32
+                0x00, 0xF0, 0x86, 0xFD, // bl  HAL_NVIC_SetPriority (r0=32)
+                0x01, 0x22,             // movs r2, #1
+                0x5A, 0x60,             // str  r2, [r3, #4] -> ISER1 |= 1 (IRQ32)
+            ]));
+            if (verbose) console.log('Applied i2c_init IRQ-enable patch (Unicorn bl skip workaround)');
+        }
+    } catch (e) {
+        if (verbose) console.error('i2c_init patch failed:', e.message);
+    }
 
     uc.mem_map(0x20000000, ram_size, Module.PROT_ALL);
 
@@ -293,14 +345,34 @@ export async function createEmulator(opts = {}) {
 
     const memReadHook = (handle, type, address, size, value, user_data) => {
         const addr32 = Number(address);
-        const val = periph_read(addr32, size) >>> 0;
+        let val;
+        if (addr32 >= 0xE0001000 && addr32 < 0xE0001100) {
+            // SysTick: Rust never decrements CVR; fake a counting-down value
+            val = addr32 === 0xE0001004
+                ? Number(instCount & 0xFFFFFFFFn)
+                : (addr32 === 0xE0001000 ? 1 : 0);
+        } else {
+            val = periph_read(addr32, size) >>> 0;
+        }
         const bytes = new Uint8Array(size);
         for (let i = 0; i < size; i++) bytes[i] = (val >> (i * 8)) & 0xFF;
         uc.mem_write(address, bytes);
     };
 
     const memWriteHook = (handle, type, address, size, value, user_data) => {
-        periph_write(Number(address), size, Number(value));
+        const addr32 = Number(address);
+        const valueNum = Number(value);
+        periph_write(addr32, size, valueNum);
+        // TEMP WORKAROUND: HAL I2C1 ISR requires hi2c->Mode == 0x22 (MASTER_RX)
+        // before reading DR; patch it in RAM when a read-request is written to DR.
+        if (addr32 === 0x40005410 && (valueNum & 1) === 1) {
+            try {
+                const hi2c1Ptr = read32(0x200002d8);
+                if (hi2c1Ptr && hi2c1Ptr !== 0xFFFFFFFF) {
+                    uc.mem_write(BigInt(hi2c1Ptr + 0x3D), new Uint8Array([0x22]));
+                }
+            } catch (_) {}
+        }
     };
 
     for (const [start, end] of PERIPH_RANGES) {
@@ -351,18 +423,7 @@ export async function createEmulator(opts = {}) {
                     const data = uc.mem_read(BigInt(src), size);
                     uc.mem_write(BigInt(dst), data);
                 } else if (dir === 0) {
-                    const data = uc.mem_read(BigInt(src), size);
-                    if (peripheral) {
-                        for (let j = 0; j < size; j += 4) {
-                            const chunk = Math.min(4, size - j);
-                            let val = 0;
-                            for (let k = 0; k < chunk; k++) val |= data[j + k] << (k * 8);
-                            periph_write(peri_addr, chunk, val);
-                        }
-                    } else {
-                        uc.mem_write(BigInt(dst), data);
-                    }
-                } else if (dir === 1) {
+                    // periph -> mem: pop bytes from the peripheral, store in RAM
                     if (peripheral) {
                         for (let j = 0; j < size; j += 4) {
                             const chunk = Math.min(4, size - j);
@@ -373,6 +434,19 @@ export async function createEmulator(opts = {}) {
                         }
                     } else {
                         const data = uc.mem_read(BigInt(src), size);
+                        uc.mem_write(BigInt(dst), data);
+                    }
+                } else if (dir === 1) {
+                    // mem -> periph: read RAM, push into the peripheral
+                    const data = uc.mem_read(BigInt(src), size);
+                    if (peripheral) {
+                        for (let j = 0; j < size; j += 4) {
+                            const chunk = Math.min(4, size - j);
+                            let val = 0;
+                            for (let k = 0; k < chunk; k++) val |= data[j + k] << (k * 8);
+                            periph_write(peri_addr, chunk, val);
+                        }
+                    } else {
                         uc.mem_write(BigInt(dst), data);
                     }
                 }
@@ -436,6 +510,7 @@ export async function createEmulator(opts = {}) {
         /** Run up to maxInstructions (0 = forever). Returns {totalSteps, instCount, stopped}. */
         run(maxInstructions = 0) {
             stopRequested = false;
+            const startInst = instCount;
             let totalSteps = 0;
             while (!stopRequested) {
                 processDma();
@@ -444,7 +519,7 @@ export async function createEmulator(opts = {}) {
                     uc.emu_start(BigInt(curPc | 1), 0n, 0n, DEFAULT_MAX_BATCH);
                 } catch (e) {
                     const msg = String(e);
-                    if (msg.includes('UC_ERR_READ_UNMAPPED') || msg.includes('UC_ERR_FETCH_UNMAPPED')) {
+                    if (msg.includes('UC_ERR_READ_UNMAPPED') || msg.includes('UC_ERR_FETCH_UNMAPPED') || msg.includes('UC_ERR_WRITE_UNMAPPED')) {
                         const pc2 = uc.reg_read_i32(Module.ARM_REG_PC);
                         uc.reg_write_i32(Module.ARM_REG_PC, (pc2 + 2) | 1);
                     } else {
@@ -460,7 +535,7 @@ export async function createEmulator(opts = {}) {
                 processInterrupts();
                 totalSteps++;
                 if (is_watchdog_reset_requested()) break;
-                if (maxInstructions > 0 && instCount >= BigInt(maxInstructions)) break;
+                if (maxInstructions > 0 && instCount - startInst >= BigInt(maxInstructions)) break;
             }
             return {
                 totalSteps,
@@ -477,7 +552,7 @@ export async function createEmulator(opts = {}) {
                 uc.emu_start(BigInt(curPc | 1), 0n, 0n, maxBatch);
             } catch (e) {
                 const msg = String(e);
-                if (msg.includes('UC_ERR_READ_UNMAPPED') || msg.includes('UC_ERR_FETCH_UNMAPPED')) {
+                if (msg.includes('UC_ERR_READ_UNMAPPED') || msg.includes('UC_ERR_FETCH_UNMAPPED') || msg.includes('UC_ERR_WRITE_UNMAPPED')) {
                     const pc2 = uc.reg_read_i32(Module.ARM_REG_PC);
                     uc.reg_write_i32(Module.ARM_REG_PC, (pc2 + 2) | 1);
                 } else {
@@ -555,6 +630,16 @@ export async function createEmulator(opts = {}) {
             let ok = false;
             for (const b of bytes) ok = uart_rx_byte(uart_addr, b) || ok;
             return ok;
+        },
+
+        /** Unread bytes still queued in the UART RX buffer (0 = empty). */
+        rxPending() { return uart_rx_pending(uart_addr); },
+
+        /** Read a 32-bit word from emulated memory (e.g. a RAM flag). */
+        memRead32(addr) {
+            const b = uc.mem_read(BigInt(addr), 4);
+            const dt = new DataView(b.buffer, b.byteOffset, b.byteLength);
+            return dt.getUint32(0, true);
         },
 
         canInjectMessage(addr, tir, tdtr, tdlr, tdhr) {
