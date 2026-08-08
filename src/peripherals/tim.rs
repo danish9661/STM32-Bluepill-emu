@@ -81,7 +81,10 @@ impl Timer {
         let dir = (self.cr1 >> 4) & 1;
         let cms = (self.cr1 >> 5) & 0x3;
 
-        for _ in 0..ticks.min(1000) {
+        // Process ALL accumulated ticks (bounded by batch size); a cap here
+        // would drop timer events when ticks arrive in per-batch chunks
+        // (e.g. 100K instructions per step_batch with a 1-tick period).
+        for _ in 0..ticks {
             let old_cnt = self.cnt;
             match (cms, dir) {
                 (0, 0) => { // Up-counting
