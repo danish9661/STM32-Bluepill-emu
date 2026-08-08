@@ -36,6 +36,7 @@ select:focus { outline: none; border-color: #7dd3fc; }
 .terminal .t-in { color: #a5b4fc; }
 .terminal .t-out { color: #4ade80; }
 .terminal .t-err { color: #f87171; }
+.terminal .t-ok { color: #4ade80; font-weight: bold; }
 .tx-row { display: flex; gap: 8px; margin-top: 10px; }
 .tx-row input { flex: 1; background: #0f172a; border: 1px solid #334155; color: #e2e8f0; border-radius: 6px; padding: 7px 10px; font-family: Consolas, monospace; font-size: 13px; }
 .tx-row input:focus { outline: none; border-color: #0ea5e9; }
@@ -140,6 +141,7 @@ let autoBytes = [];        // bytes to auto-inject (one at a time, when UART RX 
 let canInjected = false;   // CAN autopilot: true after the single frame is injected
 const CAN_RAM_FLAG = 0x200000b8;  // firmware 'canRxArmed' symbol (arduino_periph_test build)
 let autopilot = false;
+let autopilotSteps = 0;
 
 (async () => {
     try { svdXml = await fetch('STM32F103.svd').then(r => r.text()); } catch (e) {}
@@ -306,6 +308,7 @@ async function initEmulator(data, name, extDevices = {}) {
     cancelAnimationFrame(animId);
     running = false;
     autopilot = false;
+    autopilotSteps = 0;
     autoBytes = [];
     canInjected = false;
     $('instCount').textContent = '0';
@@ -351,6 +354,7 @@ function runLoop() {
         let result;
         if (autopilot) {
             result = emu.step(100000);
+            autopilotSteps++;
             if (autoBytes.length && emu.rxPending() === 0) {
                 const b = autoBytes.shift();
                 emu.uartRx(b);
@@ -371,7 +375,7 @@ function runLoop() {
         }
         $('instCount').textContent = result.instCount.toLocaleString();
         totalInst = result.instCount;
-        $('stepCount').textContent = result.totalSteps.toLocaleString();
+        $('stepCount').textContent = (autopilot ? autopilotSteps : result.totalSteps).toLocaleString();
         if (result.stopped) {
             running = false;
             log('Emulation stopped.', 't-err');
@@ -390,6 +394,24 @@ function runLoop() {
     updateRegs();
     updateVisuals();
     pollUart();
+    if (autopilot) {
+        const termText = terminal.textContent;
+        const sumM = termText.match(/SUMMARY\s+pass=(\d+)\s+fail=(\d+)/);
+        if (sumM || autopilotSteps >= 2000) {
+            running = false;
+            if (sumM) {
+                const pass = +sumM[1], fail = +sumM[2];
+                log(`All done: ${pass} checks passed, ${fail} failed.`, fail ? 't-err' : 't-ok');
+                setState(fail ? 'Error' : 'Done');
+            } else {
+                log('Autopilot stopped: instruction budget reached (200M).', 't-err');
+                setState('Stopped');
+            }
+            $('stopBtn').disabled = true;
+            $('runBtn').disabled = false;
+            return;
+        }
+    }
     animId = requestAnimationFrame(runLoop);
 }
 
