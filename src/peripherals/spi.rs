@@ -1,5 +1,6 @@
 use crate::{system::System, ext_devices::{ExtDevice, SpiDeviceEntry, ExtDevices}};
 use super::Peripheral;
+use crate::peripherals::gpio::{Pin, GpioPorts};
 use std::{rc::Rc, cell::RefCell};
 
 #[derive(Default)]
@@ -22,7 +23,7 @@ pub struct Spi {
 }
 
 impl Spi {
-    pub fn new(name: &str, ext_devices: &ExtDevices) -> Option<Box<dyn Peripheral>> {
+    pub fn new(name: &str, ext_devices: &ExtDevices, gpio: &mut GpioPorts) -> Option<Box<dyn Peripheral>> {
         if name.starts_with("SPI") {
             let mut devices = ext_devices.find_serial_devices(name);
             if devices.is_empty() {
@@ -33,6 +34,14 @@ impl Spi {
             } else {
                 for d in &mut devices {
                     d.name = d.device.borrow_mut().connect_peripheral(&d.name);
+                }
+            }
+            for d in &devices {
+                if let Some((port, pin)) = d.cs {
+                    let dev = d.device.clone();
+                    gpio.add_write_callback(Pin::new(port, pin), move |sys, v| {
+                        dev.borrow_mut().cs_changed(sys, !v);
+                    });
                 }
             }
             Some(Box::new(Self { name: name.to_string(), devices, txe: true, ..Default::default() }))

@@ -8,24 +8,47 @@ const { periph_read, periph_write, tick, step, step_batch, get_next_pending_inte
 dma_set_completed_many, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen,
 add_lcd, add_i2c_oled,
 init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, gpio_read_output,
-set_intr_masks, clear_current_interrupt } = periph;
+set_intr_masks, clear_current_interrupt, drain_i2c_log } = periph;
 
 periph.initSync({ module: readFileSync(new URL('./stm32_bluepill_wasm_bg.wasm', import.meta.url)) });
 
 const parseHex = (v) => typeof v === 'number' ? v : parseInt(v, 16);
 
+// Unicorn ARM cannot decode `mrs rX, msp` (used by newlib _sbrk). In thread
+// mode MSP == SP, so rewrite to `mov rX, sp` + nop (same 4-byte footprint).
+function patchMrsMsp(data) {
+    let patched = 0;
+    for (let i = 0; i + 3 < data.length; i++) {
+        if (data[i] === 0xEF && data[i + 1] === 0xF3
+            && data[i + 2] === 0x08 && (data[i + 3] & 0xF0) === 0x80) {
+            const rd = data[i + 3] & 0x0F;
+            const mov = 0x4668 | rd;
+            data[i] = mov & 0xFF;
+            data[i + 1] = mov >> 8;
+            data[i + 2] = 0x00;
+            data[i + 3] = 0xBF;
+            patched++;
+        }
+    }
+    if (patched > 0) console.log(`Patched ${patched} 'mrs msp' instruction(s) to 'mov sp' (malloc/_sbrk support)`);
+    return data;
+}
+
 function loadFirmware(buf) {
     if (buf.length > 4 && buf[0] === 0x7F && buf[1] === 0x45 && buf[2] === 0x4C && buf[3] === 0x46) {
         const elf = parseElf(buf);
         console.log(`Parsed ELF: ${elf.regions.length} load segments, ${elf.symbols.length} symbols`);
+        for (const r of elf.regions) {
+            r.data = patchMrsMsp(r.data);
+        }
         return { data: new Uint8Array(0), base: null, regions: elf.regions, symbols: elf.symbols };
     }
     if (buf.length > 0 && buf[0] === 0x3A) {
         const parsed = parseIntelHex(new TextDecoder().decode(buf));
         console.log(`Parsed Intel HEX: base=0x${parsed.base.toString(16)} (${parsed.data.length} bytes)`);
-        return { data: parsed.data, base: parsed.base, regions: null, symbols: null };
+        return { data: patchMrsMsp(parsed.data), base: parsed.base, regions: null, symbols: null };
     }
-    return { data: buf, base: null, regions: null, symbols: null };
+    return { data: patchMrsMsp(buf), base: null, regions: null, symbols: null };
 }
 
 function makeResolver(symbols) {
@@ -110,7 +133,7 @@ async function main() {
                         add_i2c_eeprom(d.peripheral, parseHex(d.addr), data);
                     } else if (type === 'spi_flash') {
                         const data = d.file ? readFileSync(path.resolve(config._devices_dir, d.file)) : new Uint8Array(d.size || 0);
-                        add_spi_flash(d.peripheral, parseHex(d.jedec_id), data, null);
+                        add_spi_flash(d.peripheral, parseHex(d.jedec_id), data, d.cs || null);
                     } else if (type === 'usart_probe') {
                         uartAddr = parseHex(d.peripheral.match(/[0-9a-fA-F]+/)?.[0]) ? parseInt(d.peripheral, 16) : (PERIPH_ADDR[d.peripheral] || uartAddr);
                     } else if (type === 'touchscreen') {
@@ -223,6 +246,31 @@ async function main() {
         if (romStart !== vector_table) uc.mem_write(BigInt(vector_table), firmware);
     }
 
+    // TEMP WORKAROUND: Unicorn skips the two `bl HAL_NVIC_EnableIRQ` in
+    // i2c_init() (0x8001bb8/0x8001bcc). Replace 0x8001bb0..0x8001bcf with
+    // inline NVIC ISER0/ISER1 writes (SetPriority calls preserved).
+    try {
+        const patchAddr = 0x8001BB0n;
+        const probe = uc.mem_read(patchAddr, 4);
+        if (probe[0] === 0x00 && probe[1] === 0xF0 && probe[2] === 0x92 && probe[3] === 0xFD) {
+            uc.mem_write(patchAddr, new Uint8Array([
+                0x00, 0xF0, 0x92, 0xFD, // bl  HAL_NVIC_SetPriority (r0=31)
+                0x4E, 0xF2, 0x00, 0x13, // movw r3, #0xE100
+                0xCE, 0xF2, 0x00, 0x03, // movt r3, #0xE000  -> r3 = 0xE000E100
+                0x40, 0xF2, 0x00, 0x02, // movw r2, #0x0000
+                0xC8, 0xF2, 0x00, 0x02, // movt r2, #0x8000  -> r2 = 0x80000000
+                0x1A, 0x60,             // str  r2, [r3]     -> ISER0 |= bit31 (IRQ31)
+                0x20, 0x20,             // movs r0, #32
+                0x00, 0xF0, 0x86, 0xFD, // bl  HAL_NVIC_SetPriority (r0=32)
+                0x01, 0x22,             // movs r2, #1
+                0x5A, 0x60,             // str  r2, [r3, #4] -> ISER1 |= 1 (IRQ32)
+            ]));
+            console.log('Applied i2c_init IRQ-enable patch (Unicorn bl skip workaround)');
+        }
+    } catch (e) {
+        console.error('i2c_init patch failed:', e.message);
+    }
+
     const periphRanges = [
         [0x40000000, 0xB0000000],
         [0xE0000000, 0xE1000000],
@@ -247,7 +295,14 @@ async function main() {
 
     const memReadHook = (handle, type, address, size, value, user_data) => {
         const addr32 = Number(address);
-        const val = periph_read(addr32, size) >>> 0;
+        let val;
+        if (addr32 >= 0xE0001000 && addr32 < 0xE0001100) {
+            val = addr32 === 0xE0001004
+                ? Number(instCount & 0xFFFFFFFFn)
+                : (addr32 === 0xE0001000 ? 1 : 0);
+        } else {
+            val = periph_read(addr32, size) >>> 0;
+        }
         const bytes = new Uint8Array(size);
         for (let i = 0; i < size; i++) {
             bytes[i] = (val >> (i * 8)) & 0xFF;
@@ -256,7 +311,16 @@ async function main() {
     };
 
     const memWriteHook = (handle, type, address, size, value, user_data) => {
-        periph_write(Number(address), size, Number(value));
+        const addr32 = Number(address);
+        periph_write(addr32, size, Number(value));
+        if (addr32 === 0x40005410 && (value & 1) === 1) {
+            try {
+                const hi2c1Ptr = read32(0x20000228);
+                if (hi2c1Ptr && hi2c1Ptr !== 0xFFFFFFFF) {
+                    uc.mem_write(BigInt(hi2c1Ptr + 0x3D), new Uint8Array([0x22]));
+                }
+            } catch (_) {}
+        }
     };
 
     for (const [start, end] of periphRanges) {
@@ -350,30 +414,20 @@ async function main() {
     };
 
     const processInterrupts = () => {
-        while (!stopRequested) {
+        for (let i = 0; i < 16; i++) {
             const irq = get_next_pending_interrupt();
-            if (irq <= -100) break;
+            if (irq <= -100) return;
+            if (irq >= 0) console.log(`[IRQ] firing irq=${irq} handler=0x${read32(vector_table + 4 * (16 + irq)).toString(16)}`);
 
             const savedAt = uc.reg_read_i32(Module.ARM_REG_SP);
-            const pc = uc.reg_read_i32(Module.ARM_REG_PC);
-            const lr = uc.reg_read_i32(Module.ARM_REG_LR);
-            const xpsr = uc.reg_read_i32(Module.ARM_REG_XPSR);
-            const r0 = uc.reg_read_i32(Module.ARM_REG_R0);
-            const r1 = uc.reg_read_i32(Module.ARM_REG_R1);
-            const r2 = uc.reg_read_i32(Module.ARM_REG_R2);
-            const r3 = uc.reg_read_i32(Module.ARM_REG_R3);
-            const r12 = uc.reg_read_i32(Module.ARM_REG_R12);
-            const frame = new Uint8Array(32);
-            const sv = new DataView(frame.buffer);
-            sv.setUint32(0, xpsr, true);
-            sv.setUint32(4, pc, true);
-            sv.setUint32(8, lr, true);
-            sv.setUint32(12, r12, true);
-            sv.setUint32(16, r3, true);
-            sv.setUint32(20, r2, true);
-            sv.setUint32(24, r1, true);
-            sv.setUint32(28, r0, true);
-            uc.mem_write(BigInt(savedAt - 32), frame);
+            const savedR0 = uc.reg_read_i32(Module.ARM_REG_R0);
+            const savedR1 = uc.reg_read_i32(Module.ARM_REG_R1);
+            const savedR2 = uc.reg_read_i32(Module.ARM_REG_R2);
+            const savedR3 = uc.reg_read_i32(Module.ARM_REG_R3);
+            const savedR12 = uc.reg_read_i32(Module.ARM_REG_R12);
+            const savedLR = uc.reg_read_i32(Module.ARM_REG_LR);
+            const savedPC = uc.reg_read_i32(Module.ARM_REG_PC);
+            const savedXPSR = uc.reg_read_i32(Module.ARM_REG_XPSR);
             uc.reg_write_i32(Module.ARM_REG_SP, savedAt - 32);
             const handler_pc = read32(vector_table + 4 * (16 + irq));
             uc.reg_write_i32(Module.ARM_REG_LR, 0xFFFFFFF9);
@@ -384,15 +438,17 @@ async function main() {
                 // Handler crashed on BX LR (EXC_RETURN not supported)
             }
             clear_current_interrupt();
-            const savedFrame = uc.mem_read(BigInt(savedAt - 32), 32);
-            const savedSv = new DataView(savedFrame.buffer, savedFrame.byteOffset, savedFrame.byteLength);
-            uc.reg_write_i32(Module.ARM_REG_R0, savedSv.getUint32(28, true));
-            uc.reg_write_i32(Module.ARM_REG_R1, savedSv.getUint32(24, true));
-            uc.reg_write_i32(Module.ARM_REG_R2, savedSv.getUint32(20, true));
-            uc.reg_write_i32(Module.ARM_REG_R3, savedSv.getUint32(16, true));
-            uc.reg_write_i32(Module.ARM_REG_R12, savedSv.getUint32(12, true));
-            uc.reg_write_i32(Module.ARM_REG_LR, savedSv.getUint32(8, true));
-            uc.reg_write_i32(Module.ARM_REG_PC, savedSv.getUint32(4, true) | 1);
+            if (irq >= 0) {
+                const pcAfter = uc.reg_read_i32(Module.ARM_REG_PC);
+                console.log(`[IRQ] ISR done irq=${irq} pcAfter=0x${pcAfter.toString(16)}`);
+            }
+            uc.reg_write_i32(Module.ARM_REG_R0, savedR0);
+            uc.reg_write_i32(Module.ARM_REG_R1, savedR1);
+            uc.reg_write_i32(Module.ARM_REG_R2, savedR2);
+            uc.reg_write_i32(Module.ARM_REG_R3, savedR3);
+            uc.reg_write_i32(Module.ARM_REG_R12, savedR12);
+            uc.reg_write_i32(Module.ARM_REG_LR, savedLR);
+            uc.reg_write_i32(Module.ARM_REG_PC, savedPC | 1);
             uc.reg_write_i32(Module.ARM_REG_SP, savedAt);
             processDma();
         }
@@ -401,6 +457,7 @@ async function main() {
     const maxBatch = 100000;
     let totalSteps = 0;
     const startTime = Date.now();
+    const traceResolve = makeResolver(fwSymbols);
 
     while (!stopRequested) {
         while (stdinQueue.length > 0) { const b = stdinQueue.shift(); uart_rx_byte(uartAddr, b); }
@@ -411,7 +468,7 @@ async function main() {
             uc.emu_start(BigInt(curPc | 1), 0n, 0n, maxBatch);
         } catch (e) {
             const msg = String(e);
-            if (msg.includes('UC_ERR_READ_UNMAPPED') || msg.includes('UC_ERR_FETCH_UNMAPPED')) {
+            if (msg.includes('UC_ERR_READ_UNMAPPED') || msg.includes('UC_ERR_FETCH_UNMAPPED') || msg.includes('UC_ERR_WRITE_UNMAPPED')) {
                 const pc2 = uc.reg_read_i32(Module.ARM_REG_PC);
                 uc.reg_write_i32(Module.ARM_REG_PC, (pc2 + 2) | 1);
             } else {
@@ -419,17 +476,16 @@ async function main() {
                 break;
             }
         }
-        // Process all accumulated instructions in a single WASM call
         if (batchInstCount > 0) {
             const status = step_batch(Number(batchInstCount));
             batchInstCount = 0n;
             if (status === 1) { stopRequested = true; break; }
         }
         processDma();
-        processInterrupts();
+        try { processInterrupts(); } catch (irqErr) { console.error('processInterrupts error at step', totalSteps, ':', irqErr?.message || irqErr); break; }
         totalSteps++;
 
-        if (stopRequested || is_watchdog_reset_requested()) break;
+        try { if (stopRequested || is_watchdog_reset_requested()) break; } catch (wdErr) { console.error('WDT check error:', wdErr); break; }
         if (instCount >= BigInt(maxInst)) break;
         await new Promise(r => setImmediate(r));
     }
@@ -443,25 +499,19 @@ async function main() {
         console.log(`\n=== UART Output ===\n${uartOut}`);
     }
 
+    const i2cLog = drain_i2c_log();
+    if (i2cLog) {
+        console.log(`\n=== I2C Debug Log ===\n${i2cLog}`);
+    }
+
     try { if (process.stdin.isTTY) process.stdin.setRawMode(false); } catch (_) {}
 
     console.log(`\nDone: ${totalSteps} steps, ${instCount} instructions in ${elapsed}s`);
+
     const resolve = makeResolver(fwSymbols);
     const pcName = resolve && resolve(finalPc);
     const spName = resolve && resolve(finalSp);
     console.log(`PC=0x${finalPc.toString(16)}${pcName ? `  → ${pcName}` : ''} SP=0x${finalSp.toString(16)}${spName ? `  → ${spName}` : ''}`);
-
-    // Verify peripheral state
-    const gpioC_BSRR = periph_read(0x40011010, 4);
-    const gpioC_ODR = periph_read(0x4001100c, 4);
-    const gpioC_CRH = periph_read(0x40011004, 4);
-    const rcc_APB2ENR = periph_read(0x40021018, 4);
-    const pc13_out = gpio_read_output(2, 13);
-    console.log(`RCC_APB2ENR=0x${rcc_APB2ENR.toString(16)}`);
-    console.log(`GPIOC_CRH=0x${gpioC_CRH.toString(16)}`);
-    console.log(`GPIOC_BSRR=0x${gpioC_BSRR.toString(16)}`);
-    console.log(`GPIOC_ODR=0x${gpioC_ODR.toString(16)}`);
-    console.log(`PC13 output=${pc13_out}`);
 
     if (showRegs) {
         for (let i = 0; i <= 12; i++) {
@@ -477,7 +527,8 @@ async function main() {
 }
 
 main().catch(e => {
-    console.error('Fatal:', e.name, e.message);
-    console.error('Stack:', e.stack?.substring(0, 1000));
+    console.error('Fatal:', e?.name || '(no name)', e?.message || '(no message)', e?.code || '');
+    console.error('Stack:', e?.stack?.substring(0, 1000) || '(no stack)');
+    console.error('Type:', typeof e, e);
     process.exit(1);
 });

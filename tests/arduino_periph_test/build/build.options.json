@@ -1,0 +1,9 @@
+{
+  "additionalFiles": "",
+  "compiler.optimization_flags": "{build.flags.optimize} {build.flags.debug}",
+  "customBuildProperties": "",
+  "fqbn": "STMicroelectronics:stm32:GenF1:pnum=BLUEPILL_F103C8",
+  "hardwareFolders": "C:\\Users\\Danish\\AppData\\Local\\Arduino15\\packages",
+  "otherLibrariesFolders": "C:\\Users\\Danish\\Documents\\Arduino\\libraries",
+  "sketchLocation": "C:\\Users\\Danish\\Documents\\stm32-bluepill-wasm\\tests\\arduino_periph_test"
+}

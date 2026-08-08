@@ -140,6 +140,8 @@ pub trait ExtDevice<A, T> {
     fn read(&mut self, sys: &crate::system::System, addr: A) -> T;
     fn write(&mut self, sys: &crate::system::System, addr: A, v: T);
     fn reset(&mut self) {}
+    /// Called when the device's CS pin changes state (true = selected/CS low).
+    fn cs_changed(&mut self, _sys: &crate::system::System, _selected: bool) {}
 }
 
 // SAFETY: WASM is single-threaded; Rc/RefCell are safe

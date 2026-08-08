@@ -129,9 +129,15 @@ export function parseElf(buffer) {
     for (let i = 0; i < e_phnum; i++) {
         const off = e_phoff + i * e_phentsize;
         if (off + 32 > b.length) break;
-        const p_type = u32(off), p_offset = u32(off + 4), p_vaddr = u32(off + 8), p_filesz = u32(off + 16);
+        const p_type = u32(off), p_offset = u32(off + 4), p_vaddr = u32(off + 8), p_paddr = u32(off + 12), p_filesz = u32(off + 16);
         if (p_type !== 1 || p_filesz === 0) continue;
-        regions.push({ start: p_vaddr >>> 0, data: b.slice(p_offset, p_offset + p_filesz) });
+        const data = b.slice(p_offset, p_offset + p_filesz);
+        regions.push({ start: p_vaddr >>> 0, data });
+        // The firmware startup copies .data from its load (LMA) address; the
+        // emulator must provide that copy too, not just the VMA.
+        if (p_paddr !== p_vaddr) {
+            regions.push({ start: p_paddr >>> 0, data });
+        }
     }
     const e_shoff = u32(32), e_shentsize = u16(46), e_shnum = u16(48);
     const sections = [];
