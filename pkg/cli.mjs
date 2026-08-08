@@ -6,7 +6,7 @@ import { parseIntelHex, parseSymbolMap, parseElf } from './emulator.js';
 import * as periph from './stm32_bluepill_wasm.js';
 const { periph_read, periph_write, tick, step, step_batch, get_next_pending_interrupt, dma_get_all_pending, 
 dma_set_completed_many, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen,
-add_lcd, add_i2c_oled,
+add_lcd, add_i2c_oled, can_inject_message,
 init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
 set_intr_masks, clear_current_interrupt } = periph;
 
@@ -324,6 +324,9 @@ async function main() {
         }
     };
 
+    /* CAN RX injection: firmware sets canRxArmed=1, then waits for a frame */
+    const canArmedSym = fwSymbols?.find(s => s.name === 'canRxArmed');
+
     for (const [start, end] of periphRanges) {
         uc.hook_add(Module.HOOK_MEM_READ, memReadHook, null, start, end);
         uc.hook_add(Module.HOOK_MEM_WRITE, memWriteHook, null, start, end);
@@ -448,6 +451,9 @@ async function main() {
     const startTime = Date.now();
     const traceResolve = makeResolver(fwSymbols);
 
+    /* CAN RX injection: firmware sets canRxArmed=1, then waits for a frame */
+    let canInjected = false;
+
     while (!stopRequested) {
         const dmaBusy = dma_get_all_pending().length > 0;
         while (stdinQueue.length > 0 && uart_rx_pending(uartAddr) === 0 && !dmaBusy) { const b = stdinQueue.shift(); uart_rx_byte(uartAddr, b); }
@@ -474,6 +480,14 @@ async function main() {
         processDma();
         try { processInterrupts(); } catch (irqErr) { console.error('processInterrupts error at step', totalSteps, ':', irqErr?.message || irqErr); break; }
         totalSteps++;
+
+        if (canArmedSym && !canInjected) {
+            const armedBytes = uc.mem_read(canArmedSym.addr, 4);
+            const armed = armedBytes && armedBytes[0] !== 0;
+            if (armed) {
+                canInjected = can_inject_message(0x40006400, 0 << 21, 2, 0xDEAD, 0);
+            }
+        }
 
         try { if (stopRequested || is_watchdog_reset_requested()) break; } catch (wdErr) { console.error('WDT check error:', wdErr); break; }
         if (instCount >= BigInt(maxInst)) break;

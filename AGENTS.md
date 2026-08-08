@@ -38,13 +38,17 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 ### Test suite: `node tests/test_all.mjs`
 **158/158 unit tests PASS** (GPIO, USART, ADC, RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C, RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX).
 
-### Firmware test — `tests/arduino_periph_test/` (21-peripheral Arduino sketch)
+### Firmware test — `tests/arduino_periph_test/` (24-peripheral Arduino sketch, 37 checks)
 ```
 echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml --max=200000000     # ~79s, 2000 steps
 ```
-- **PASS (28/28)**: all tests green — sync section (GPIO, USART TX, UART Loopback, RCC, FLASH, PWR, BKP, IWDG, WWDG, RTC, CRC, DAC, ADC, AFIO, EXTI reg, CAN, SPI Flash, I2C EEPROM, I2C OLED, touchscreen, LCD) + async section (DMA TX/RX, UART RX, TIM2, EXTI0, SysTick)
+- **PASS (37/37)**: sync section (GPIO, USART TX, UART Loopback, RCC, FLASH, PWR, BKP, IWDG, WWDG, RTC, CRC, DAC, ADC, AFIO, EXTI reg, CAN, SPI Flash, I2C EEPROM, I2C OLED, touchscreen, LCD, I2C2 EEPROM, SPI2 Flash, USART2 Loopback) + async section (DMA TX/RX, UART RX, TIM2, EXTI0, EXTI1, EXTI13, CAN RX, SysTick, TIM3 PWM, TIM4, RTC Alarm IRQ)
+- **CAN RX injection**: cli.mjs polls the firmware's `canRxArmed` RAM global (symbol from ELF), then calls `can_inject_message(0x40006400, 0<<21, 2, 0xDEAD, 0)`. Note the firmware's filter bank 0 is ID-list mode (FS1R=1, FM1R=0, F0=0) → only STDID **0** matches — inject ID 0, not 0x123.
+- **Batch-boundary timing**: emulator ticks peripherals only in `step_batch()` between `emu_start` batches — never mid-batch. Any test that reads CNT/SR/IRQ flags after a `spin()` must be async-style (arm once, poll across batches), else it sees CNT=0.
 - **Important**: 50M instr cap stops mid-print (not a deadlock); use `--max=200000000` for the full run. `A` (0x41) is reserved for the DMA RX test; `B` is the UART RX byte. `uart_rx_pending()` gate in cli.mjs prevents `A` from being consumed by the UART RX test.
 - **USART TX test notes**: firmware test polls SR TXE up to 2M iterations. In emulator TXE re-asserts at batch boundaries, DRW per ISR run → ~1 byte / 100K-instr batch (not byte_time at 6250). Poll of 100K iters previously failed because the 22-byte drain needs ~2.2M instructions. Real HW at 115200: ~1.9ms drain, well under 2M-iteration budget.
+- **I2C2/SPI2 devices**: `build/eeprom2.bin` (0x51, 64K) + `build/spi_flash2.bin` (JEDEC `0xEF4017`, CS PB12) — both must be re-created after an arduino-cli rebuild (build dir gets wiped):
+  `node -e "const fs=require('fs'); const e2=Buffer.alloc(65536); e2[0]=0x42; e2[1]=0x24; fs.writeFileSync('tests/arduino_periph_test/build/eeprom2.bin', e2); fs.writeFileSync('tests/arduino_periph_test/build/spi_flash2.bin', Buffer.alloc(65536));"`
 
 ## What We Did — Current Sprint (uncommitted WIP)
 ### USART byte-time TXE pacing (`src/peripherals/usart.rs`)
@@ -63,6 +67,9 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
 - Removed all `i2c_log`/`debug_*`/`I2C_LOG`/`flash_debug` instrumentation (see Active Workarounds) — machine-parseable `[name] PASS/FAIL` only
 ### Unit tests
 - `tests/test_all.mjs`: UART/DMA tests now use `dma_get_pending_count()`/`dma_set_completed_many()` + `tick()` to model the async bridge — was 157, now **158/158 pass**
+### New firmware tests + cli CAN RX injection (this sprint)
+- `tests/arduino_periph_test/arduino_periph_test.ino`: added `testI2C2()` (register-level I2C2 master on 0x40005800 → EEPROM 0x51 round-trip via repeated START), `testSPI2()` (register-level SPI2 master 0x40003800, JEDEC `EF 40 17` + PP/readback on PB12), `testUSART2()` (HDSEL loopback), plus async TIM3 PWM (CC1IF via OC1M=PWM1), TIM4 CNT, RTC alarm IRQ (custom `extern "C" RTC_IRQHandler`, IRQ3), EXTI1 (PB1) + EXTI13 (PB13) via SWIER, and CAN RX (firmware sets `canRxArmed` RAM flag → cli injects once → firmware reads RFIFO0)
+- `pkg/cli.mjs`: added `can_inject_message` import; main loop polls the ELF symbol `canRxArmed` via `uc.mem_read` and injects a single CAN frame `(ID=0, DLC=2, data=0xDEAD)` — 37/37 firmware checks PASS
 
 ## Active Workarounds (temporary, remove or upstream later)
 1. **`mrs rX, msp` → `mov rX, sp`** (cli.mjs `patchMrsMsp`, ~line 19): Unicorn cannot decode Thumb `mrs`; newlib `_sbrk` uses it; rewrite to 4-byte equivalent + nop (same footprint)
@@ -96,7 +103,7 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 ## Next Phase — What's Left
 
 ### Immediate (get 21/21 — ALL PASS as of this sprint; re-check after any change)
-1. **Verify nothing regressed after instrumentation removal** — rerun `tests/test_all.mjs` (158) + firmware 200M run (28/28) after any edit to `src/` or `pkg/cli.mjs`
+1. **Verify nothing regressed after instrumentation removal** — rerun `tests/test_all.mjs` (158) + firmware 200M run (37/37) after any edit to `src/` or `pkg/cli.mjs`
 
 ### Known issue
 - WASM abort (`Fatal: undefined Stack: undefined`) at ~35M+ instructions (seen once) — investigate if it re-occurs after other fixes
