@@ -35,7 +35,8 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 - `step_batch()` gave 3.15× speedup over per-instruction `step()`
 - `has_tick` flag: 69% tick speedup; `tick_indices` Vec + `AtomicU32` DMA bitmask: minor gains
 - **instCount as plain number, not BigInt** (cli.mjs + pkg/emulator.js codeHook): ~19% faster full run (48.3s → 39.1s); BigInt ops per instruction were measurable at 5M instr/sec. `maxInst` compare + `step_batch` arg are now numbers too. Same change in emulator.js lifted the browser demo from 3.8M → 5.0M Avg IPS (~30%)
-- **Site runLoop**: batch ~5× `step(100000)` per rAF frame (80ms budget), one UI pass per frame — UART TXE pacing needs 100K batches; Speed stat divides real frame instructions, not a fixed 500K
+- **Batch size 20K** (cli.mjs, pkg/emulator.js DEFAULT_MAX_BATCH, site/index.html runLoop): was 100K (legacy from the slow-tick era). Per-batch tick is now cheap, so 5× smaller batches cut IRQ/interrupt delivery latency (~5.4ms → ~1.1ms) at zero measurable cost — 200M run 10.86s vs 10.8s baseline; canary still 37/37. More batch crossings = better UART RX/TIM/EXTI response in the browser demo (live per-frame UART render)
+- **Site runLoop**: batch ~4× `step(20000)` per rAF frame (80ms budget), one UI pass per frame; Speed stat divides real frame instructions, not a fixed 500K
 - **Regression canary**: `node tests/canary.mjs` (or `node tests/canary.mjs <maxInstr>` default 100M) — runs firmware, asserts exit 0, no FAIL lines, SUMMARY pass=37 fail=0, ~6s. Faster than the full 200M run.
 
 ## Current Status (uncommitted WIP — see "What We Did — Current Sprint" below)
@@ -122,7 +123,7 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 
 ## Next Phase — Long-term Optimizations
 1. **Single WASM module** (Emscripten): compile Rust peripheral code + Unicorn C into one `emcc` output (Linux toolchain; `wasm32-unknown-emscripten` target). Recommended-free approach elsewhere in docs
-2. **Replace mem hooks with shared linear memory**: `uc_mem_map_ptr(mem, periph_range)` → Rust reads/writes same region, zero crossing
+2. ~~**Replace mem hooks with shared linear memory**~~ — **retired (moot)**: `uc_mem_map_ptr(mem, periph_range)` would remove the JS crossing, but peripheral access was measured at 0.001 accesses/instruction (~0.1% of runtime) — no measurable win available
 3. **DMA + interrupts fully in Rust** (no JS round-trip; `uc_intr` or stop+re-exec)
 4. **Alternative: pure-Rust Cortex-M emulator** (cargo-cortex-m / mdl) — evaluate vs porting Unicorn
 
