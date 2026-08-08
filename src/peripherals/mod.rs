@@ -47,6 +47,8 @@ pub trait Peripheral {
     fn periph_remap(&self, _sys: &System) -> Option<u32> { None }
     /// Returns the MAPR remap bits for a named peripheral (only AFIO implements meaningfully).
     fn remap_status(&self, _name: &str) -> Option<u32> { None }
+    /// Returns the current PWM duty (0-100) of a timer channel, if this is a timer.
+    fn pwm_duty(&self, _channel: u32) -> Option<u32> { None }
 }
 
 pub struct PeripheralSlot<T> {
@@ -394,6 +396,16 @@ impl Peripherals {
             0x1C => { enrs.2 = value; }
             _ => {},
         }
+    }
+
+    /// PWM duty (0-100) of a timer channel, 0 if the address is not a timer.
+    pub fn pwm_duty(&self, addr: u32, channel: u32) -> u32 {
+        if let Some(p) = Self::get_peripheral(&self.peripherals, addr) {
+            if let Ok(t) = p.peripheral.try_borrow() {
+                return t.pwm_duty(channel).unwrap_or(0);
+            }
+        }
+        0
     }
 
     pub fn read(&self, sys: &System, addr: u32, _size: u8) -> u32 {

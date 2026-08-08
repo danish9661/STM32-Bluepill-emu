@@ -15,3 +15,5 @@ tests/arduino_periph_test/build/libraries/
 tests/arduino_periph_test/build/sketch/
 tests/arduino_periph_test/build/*.cache
 tests/arduino_periph_test/build/*.log
+tests/arduino_echo/build/
+tests/arduino_fade/build/
