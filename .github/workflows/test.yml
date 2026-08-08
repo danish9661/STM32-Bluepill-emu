@@ -1,0 +1,37 @@
+name: Test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - name: Install JS deps
+        run: npm ci
+      - name: Rust sanity check
+        run: cargo check
+      - name: Build peripheral WASM
+        run: wasm-pack build --target web
+      - name: site/ must mirror pkg/ (emulator.js)
+        run: cmp pkg/emulator.js site/emulator.js
+      - name: Prepare firmware ELF + device images (committed copies live in site/)
+        run: |
+          cp site/arduino_periph_test.elf tests/arduino_periph_test/build/arduino_periph_test.ino.elf
+          cp site/arduino_eeprom.bin tests/arduino_periph_test/build/eeprom.bin
+          cp site/arduino_eeprom2.bin tests/arduino_periph_test/build/eeprom2.bin
+          cp site/arduino_spi_flash.bin tests/arduino_periph_test/build/spi_flash.bin
+          cp site/arduino_spi_flash2.bin tests/arduino_periph_test/build/spi_flash2.bin
+      - name: Unit tests
+        run: node tests/test_all.mjs
+      - name: Regression canary (37/37 firmware checks)
+        run: node tests/canary.mjs
