@@ -378,7 +378,7 @@ function runLoop() {
     try {
         let result;
         do {
-            result = emu.step(100000);
+            result = emu.step(20000);
             runSteps++;
         } while (!result.stopped && performance.now() - t0 < 80);
         if (autopilot) {

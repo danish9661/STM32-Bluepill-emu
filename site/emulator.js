@@ -3,7 +3,7 @@ const PERIPH_RANGES = [
     [0xE0000000, 0xE1000000],
 ];
 
-const DEFAULT_MAX_BATCH = 100000;
+const DEFAULT_MAX_BATCH = 20000;
 
 /**
  * Load the Rust peripheral WASM module.
