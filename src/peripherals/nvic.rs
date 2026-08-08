@@ -21,6 +21,7 @@ pub mod irq {
 pub struct Nvic {
     pub systick_period: Option<u32>,
     pub last_systick_trigger: u64,
+    pub systick_debt: u32,
     pending: u128,
     enable: [u32; REG_WORDS],
     pending_reg: [u32; REG_WORDS],
@@ -35,6 +36,7 @@ impl Default for Nvic {
         Self {
             systick_period: None,
             last_systick_trigger: 0,
+            systick_debt: 0,
             pending: 0,
             enable: [0; REG_WORDS],
             pending_reg: [0; REG_WORDS],
@@ -194,11 +196,27 @@ impl Nvic {
     pub fn maybe_set_systick_intr_pending(&mut self) {
         if let Some(systick_period) = self.systick_period {
             let n = INSTRUCTION_COUNT.load(Ordering::Relaxed);
-            let delta = n - self.last_systick_trigger;
-            if delta > systick_period as u64 {
+            let elapsed = n.saturating_sub(self.last_systick_trigger);
+            if elapsed >= systick_period as u64 {
+                // Deliver any number of elapsed 1ms ticks, not just one per
+                // batch — otherwise delay(ms)/millis() run at 1 IRQ per batch.
+                let ticks = (elapsed / systick_period.max(1) as u64).min(16) as u32;
+                self.systick_debt = self.systick_debt.saturating_add(ticks).min(16);
                 self.last_systick_trigger = n;
                 self.set_intr_pending(irq::SYSTICK);
             }
+        }
+    }
+
+    /// Called by JS after each SysTick handler delivery: re-pends while
+    /// unconsumed 1ms ticks remain, so uwTick/millis() track instruction time.
+    pub fn systick_take(&mut self) -> bool {
+        if self.systick_debt > 0 {
+            self.systick_debt -= 1;
+            self.set_intr_pending(irq::SYSTICK);
+            true
+        } else {
+            false
         }
     }
 

@@ -8,7 +8,7 @@ const { periph_read, periph_write, tick, step, step_batch, get_next_pending_inte
 dma_set_completed_many, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen,
 add_lcd, add_i2c_oled, can_inject_message,
 init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
-set_intr_masks, clear_current_interrupt } = periph;
+set_intr_masks, clear_current_interrupt, nvic_systick_take } = periph;
 
 periph.initSync({ module: readFileSync(new URL('./stm32_bluepill_wasm_bg.wasm', import.meta.url)) });
 
@@ -435,6 +435,7 @@ async function main() {
                 // Handler crashed on BX LR (EXC_RETURN not supported)
             }
             clear_current_interrupt();
+            if (irq === 15) { while (nvic_systick_take()) { /* re-pended: more 1ms ticks this batch */ } }
             uc.reg_write_i32(Module.ARM_REG_R0, savedR0);
             uc.reg_write_i32(Module.ARM_REG_R1, savedR1);
             uc.reg_write_i32(Module.ARM_REG_R2, savedR2);
