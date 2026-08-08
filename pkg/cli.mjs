@@ -312,8 +312,9 @@ async function main() {
 
     const memWriteHook = (handle, type, address, size, value, user_data) => {
         const addr32 = Number(address);
-        periph_write(addr32, size, Number(value));
-        if (addr32 === 0x40005410 && (value & 1) === 1) {
+        const valueNum = Number(value);
+        periph_write(addr32, size, valueNum);
+        if (addr32 === 0x40005410 && (valueNum & 1) === 1) {
             try {
                 const hi2c1Ptr = read32(0x20000228);
                 if (hi2c1Ptr && hi2c1Ptr !== 0xFFFFFFFF) {
