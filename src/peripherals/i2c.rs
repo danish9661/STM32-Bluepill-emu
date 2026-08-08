@@ -187,7 +187,18 @@ impl Peripheral for I2c {
                 if stop != 0 {
                     if matches!(self.state, I2cState::Active { .. } | I2cState::AddrSent { .. }) {
                         i2clog!("[I2C] STOP generated, state was {:?}, cr2=0x{:03X}", self.state, self.cr2);
-                        self.reset();
+                        let rxne_pending = self.sr1 & (1 << 6);
+                        if matches!(self.state, I2cState::Active { is_read: true }) && rxne_pending != 0 {
+                            // Master receiver: HAL writes STOP in the ADDR handler
+                            // (single-byte reads: NACK + STOP immediately), then reads
+                            // the byte via RXNE. Keep the pending byte readable.
+                            i2clog!("[I2C] STOP during read: keeping RXNE dr=0x{:02X}", self.dr);
+                            self.state = I2cState::Idle;
+                            self.active_device = None;
+                            self.sr1_addr_flag = false;
+                        } else {
+                            self.reset();
+                        }
                     }
                     self.cr1 &= !(1 << 9); // Clear STOP
                 }
