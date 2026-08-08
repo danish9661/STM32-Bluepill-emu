@@ -86,7 +86,7 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
 2. **i2c_init NVIC patch** (cli.mjs ~line 252): patch offset 0x8001BBC (block 0x8001BBC–0x8001BDB) replaced with inline ISER0/ISER1 writes + preserved `SetPriority` calls (Unicorn skips the two `bl HAL_NVIC_EnableIRQ`)
 3. **hi2c->Mode patch** (cli.mjs `memWriteHook`): when `0x40005410` (I2C1 DR) is written with the R-bit set, patch RAM `*(0x200002d8)+0x3D` to 0x22 — HAL I2C1 ISR requires `hi2c->Mode == 0x22` (MASTER_RX) before reading DR
 4. **Interrupt frame saved in JS closure variables** (not memory): stack frames get clobbered by handler PUSH; save R0-R3,R12,LR,PC,xPSR in JS locals, restore after handler
-5. **16-IRQ loop in `processInterrupts()`**: prevents starvation when high-priority IRQ re-pends itself (e.g. CAN TX IRQ37 prio16 vs I2C EV IRQ31 prio32)
+5. **64-IRQ loop in `processInterrupts()`** (cli.mjs; emulator.js drains all pending): prevents starvation when high-priority IRQ re-pends itself — paired with the NVIC `last_popped` fairness, a hot IRQ (TXE) alternates with other pendings instead of consuming every slot (e.g. CAN TX IRQ37 prio16 vs I2C EV IRQ31 prio32)
 6. **DMA**: batched `dma_get_all_pending()` / `dma_set_completed_many()` — one WASM call instead of 7; JS-side `[DMAP]` direction decode: 0=periph→mem (periph_read), 1=mem→periph (periph_write), 2=mem→mem
 
 ## To Run / Rebuild
