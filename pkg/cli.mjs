@@ -412,7 +412,7 @@ async function main() {
     };
 
     const processInterrupts = () => {
-        for (let i = 0; i < 16; i++) {
+        for (let i = 0; i < 64; i++) {
             const irq = get_next_pending_interrupt();
             if (irq <= -100) return;
 
