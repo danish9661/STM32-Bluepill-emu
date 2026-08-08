@@ -80,7 +80,7 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
 - CAN RX injection: `can_inject_message` import; main loop polls the ELF symbol `canRxArmed` via `uc.mem_read` and injects a single CAN frame `(ID=0, DLC=2, data=0xDEAD)` — 37/37 firmware checks PASS
 - Regression canary: `tests/canary.mjs` (spawns cli with `--max=100000000`, asserts `SUMMARY pass=37 fail=0`, prints `CANARY PASS`) — ~25s, replaces slower full-run checks
 ### WASM abort investigation (this sprint)
-- `Fatal: undefined Stack: undefined` at ~35M instr (seen once) — stress-tested: 7 runs totalling ~2.5B instructions (200M×3, 400M×2, 600M, 300M with `usr/bin/time -v`) — **zero aborts**, max RSS 155MB stable (no leak). Not reproducible; monitor on any re-occurrence
+- `Fatal: undefined Stack: undefined` at ~35M instr (seen once) — stress-tested **after the step_batch/tim rewrite**: 7 runs totalling ~2.5B instructions (200M×3, 400M×2, 600M, 300M with `usr/bin/time -v`) — **zero aborts**, all 37/37, max RSS 148–160MB stable (no leak, no growth with instruction count). Not reproducible; monitor on any re-occurrence
 
 ## Active Workarounds (temporary, remove or upstream later)
 1. **`mrs rX, msp` → `mov rX, sp`** (cli.mjs `patchMrsMsp`, ~line 19): Unicorn cannot decode Thumb `mrs`; newlib `_sbrk` uses it; rewrite to 4-byte equivalent + nop (same footprint)
