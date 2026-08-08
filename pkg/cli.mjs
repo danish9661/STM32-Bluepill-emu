@@ -7,8 +7,8 @@ import * as periph from './stm32_bluepill_wasm.js';
 const { periph_read, periph_write, tick, step, step_batch, get_next_pending_interrupt, dma_get_all_pending, 
 dma_set_completed_many, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen,
 add_lcd, add_i2c_oled,
-init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, gpio_read_output,
-set_intr_masks, clear_current_interrupt, drain_i2c_log } = periph;
+init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
+set_intr_masks, clear_current_interrupt } = periph;
 
 periph.initSync({ module: readFileSync(new URL('./stm32_bluepill_wasm_bg.wasm', import.meta.url)) });
 
@@ -247,10 +247,10 @@ async function main() {
     }
 
     // TEMP WORKAROUND: Unicorn skips the two `bl HAL_NVIC_EnableIRQ` in
-    // i2c_init() (0x8001bb8/0x8001bcc). Replace 0x8001bb0..0x8001bcf with
+    // i2c_init() (0x8001bb8/0x8001bcc). Replace 0x8001bbc..0x8001bdb with
     // inline NVIC ISER0/ISER1 writes (SetPriority calls preserved).
     try {
-        const patchAddr = 0x8001BB0n;
+        const patchAddr = 0x8001BBCn;
         const probe = uc.mem_read(patchAddr, 4);
         if (probe[0] === 0x00 && probe[1] === 0xF0 && probe[2] === 0x92 && probe[3] === 0xFD) {
             uc.mem_write(patchAddr, new Uint8Array([
@@ -316,7 +316,7 @@ async function main() {
         periph_write(addr32, size, valueNum);
         if (addr32 === 0x40005410 && (valueNum & 1) === 1) {
             try {
-                const hi2c1Ptr = read32(0x20000228);
+                const hi2c1Ptr = read32(0x200002d8);
                 if (hi2c1Ptr && hi2c1Ptr !== 0xFFFFFFFF) {
                     uc.mem_write(BigInt(hi2c1Ptr + 0x3D), new Uint8Array([0x22]));
                 }
@@ -382,29 +382,22 @@ async function main() {
                     const data = uc.mem_read(BigInt(src), size);
                     uc.mem_write(BigInt(dst), data);
                 } else if (dir === 0) {
-                    const data = uc.mem_read(BigInt(src), size);
-                    if (peripheral) {
-                        for (let j = 0; j < size; j += 4) {
-                            const chunk = Math.min(4, size - j);
-                            let val = 0;
-                            for (let k = 0; k < chunk; k++) val |= data[j + k] << (k * 8);
-                            periph_write(peri_addr, chunk, val);
-                        }
-                    } else {
-                        uc.mem_write(BigInt(dst), data);
+                    // periph -> mem (DmaDir::Read): pop bytes from peripheral, store in RAM
+                    for (let j = 0; j < size; j += 4) {
+                        const chunk = Math.min(4, size - j);
+                        const val = periph_read(src, chunk);
+                        const bytes = new Uint8Array(chunk);
+                        for (let k = 0; k < chunk; k++) bytes[k] = (val >> (k * 8)) & 0xFF;
+                        uc.mem_write(BigInt(dst + j), bytes);
                     }
                 } else if (dir === 1) {
-                    if (peripheral) {
-                        for (let j = 0; j < size; j += 4) {
-                            const chunk = Math.min(4, size - j);
-                            const val = periph_read(peri_addr, chunk);
-                            const bytes = new Uint8Array(chunk);
-                            for (let k = 0; k < chunk; k++) bytes[k] = (val >> (k * 8)) & 0xFF;
-                            uc.mem_write(BigInt(dst + j), bytes);
-                        }
-                    } else {
-                        const data = uc.mem_read(BigInt(src), size);
-                        uc.mem_write(BigInt(dst), data);
+                    // mem -> periph (DmaDir::Write): read RAM, push bytes into peripheral
+                    const data = uc.mem_read(BigInt(src), size);
+                    for (let j = 0; j < size; j += 4) {
+                        const chunk = Math.min(4, size - j);
+                        let val = 0;
+                        for (let k = 0; k < chunk; k++) val |= data[j + k] << (k * 8);
+                        periph_write(dst, chunk, val);
                     }
                 }
             } catch (e) {
@@ -418,7 +411,6 @@ async function main() {
         for (let i = 0; i < 16; i++) {
             const irq = get_next_pending_interrupt();
             if (irq <= -100) return;
-            if (irq >= 0) console.log(`[IRQ] firing irq=${irq} handler=0x${read32(vector_table + 4 * (16 + irq)).toString(16)}`);
 
             const savedAt = uc.reg_read_i32(Module.ARM_REG_SP);
             const savedR0 = uc.reg_read_i32(Module.ARM_REG_R0);
@@ -439,10 +431,6 @@ async function main() {
                 // Handler crashed on BX LR (EXC_RETURN not supported)
             }
             clear_current_interrupt();
-            if (irq >= 0) {
-                const pcAfter = uc.reg_read_i32(Module.ARM_REG_PC);
-                console.log(`[IRQ] ISR done irq=${irq} pcAfter=0x${pcAfter.toString(16)}`);
-            }
             uc.reg_write_i32(Module.ARM_REG_R0, savedR0);
             uc.reg_write_i32(Module.ARM_REG_R1, savedR1);
             uc.reg_write_i32(Module.ARM_REG_R2, savedR2);
@@ -461,7 +449,8 @@ async function main() {
     const traceResolve = makeResolver(fwSymbols);
 
     while (!stopRequested) {
-        while (stdinQueue.length > 0) { const b = stdinQueue.shift(); uart_rx_byte(uartAddr, b); }
+        const dmaBusy = dma_get_all_pending().length > 0;
+        while (stdinQueue.length > 0 && uart_rx_pending(uartAddr) === 0 && !dmaBusy) { const b = stdinQueue.shift(); uart_rx_byte(uartAddr, b); }
 
         processDma();
         const curPc = uc.reg_read_i32(Module.ARM_REG_PC);
@@ -498,11 +487,6 @@ async function main() {
     const uartOut = get_uart_output();
     if (uartOut) {
         console.log(`\n=== UART Output ===\n${uartOut}`);
-    }
-
-    const i2cLog = drain_i2c_log();
-    if (i2cLog) {
-        console.log(`\n=== I2C Debug Log ===\n${i2cLog}`);
     }
 
     try { if (process.stdin.isTTY) process.stdin.setRawMode(false); } catch (_) {}

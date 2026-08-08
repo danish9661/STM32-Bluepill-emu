@@ -152,13 +152,6 @@ impl Nvic {
                 best_prio = prio;
             }
         }
-        let i2c1ev_pending = pending & (1u128 << (IRQ_OFFSET + 31)) != 0;
-        let i2c1ev_enabled = self.enable[0] & (1 << 31) != 0;
-        if i2c1ev_pending {
-            let current = self.current_priority(basepri);
-            let i2c1ev_prio = self.exception_priority(31);
-            crate::i2c_log(format!("[NVIC] I2C1EV pending! best={:?} best_prio={} i2c1ev_prio={} current={} enabled={}", best, best_prio, i2c1ev_prio, current, i2c1ev_enabled));
-        }
         best
     }
 

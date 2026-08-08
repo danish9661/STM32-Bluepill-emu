@@ -72,7 +72,17 @@ impl Peripheral for Exti {
 
     fn write(&mut self, sys: &System, offset: u32, value: u32) {
         match offset {
-            0x00 => self.imr = value,
+            0x00 => {
+                self.imr = value;
+                for line in 0..32 {
+                    if value & (1 << line) != 0 {
+                        let irq = exti_irq(line);
+                        if irq >= 0 {
+                            sys.p.nvic.borrow_mut().enable_irq(irq);
+                        }
+                    }
+                }
+            }
             0x04 => self.emr = value,
             0x08 => self.rtsr = value,
             0x0C => self.ftsr = value,

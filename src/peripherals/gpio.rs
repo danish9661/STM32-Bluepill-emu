@@ -62,6 +62,16 @@ impl GpioPorts {
         v
     }
 
+    /// Effective pin level: read callback if registered, otherwise the last driven output state.
+    pub fn read_pin_effective(&mut self, sys: &System, port: u8, pin: u8) -> bool {
+        for (p, cb) in &mut self.read_callbacks[port as usize] {
+            if *p == pin {
+                return cb(sys);
+            }
+        }
+        (self.output_states[port as usize] >> pin) & 1 != 0
+    }
+
     pub fn write_port(&mut self, sys: &System, port: u8, pin: u8, value: bool) {
         if value {
             self.output_states[port as usize] |= 1 << pin;

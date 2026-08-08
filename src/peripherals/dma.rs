@@ -114,7 +114,6 @@ impl Peripheral for Dma {
                                 self.channels[ch].cr = value & 0x7F7F;
                                 if value & 1 != 0 {
                                     self.channels[ch].do_xfer(&self.name, sys, ch);
-                                    self.channels[ch].ndtr = 0;
                                     let irq = self.channel_irq(ch);
                                     let cr = self.channels[ch].cr;
                                     let tcie = ((cr >> 4) & 1) as u8;

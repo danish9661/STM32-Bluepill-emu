@@ -218,6 +218,9 @@ impl Peripheral for Timer {
             0x08 => self.smcr = value & 0xFFFF,
             0x0C => {
                 self.dier = value & 0xFFFF;
+                if value & 1 != 0 {
+                    sys.p.nvic.borrow_mut().enable_irq(self.irq_num);
+                }
                 self.update_interrupt(sys);
             }
             0x10 => self.sr &= value,

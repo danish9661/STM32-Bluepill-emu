@@ -3,7 +3,7 @@
   "compiler.optimization_flags": "{build.flags.optimize} {build.flags.debug}",
   "customBuildProperties": "",
   "fqbn": "STMicroelectronics:stm32:GenF1:pnum=BLUEPILL_F103C8",
-  "hardwareFolders": "C:\\Users\\Danish\\AppData\\Local\\Arduino15\\packages",
-  "otherLibrariesFolders": "C:\\Users\\Danish\\Documents\\Arduino\\libraries",
-  "sketchLocation": "C:\\Users\\Danish\\Documents\\stm32-bluepill-wasm\\tests\\arduino_periph_test"
+  "hardwareFolders": "/home/danish1075/.arduino15/packages/STMicroelectronics/hardware/stm32/2.12.0,/home/danish1075/.arduino15/packages/STMicroelectronics/hardware/stm32/2.12.0",
+  "otherLibrariesFolders": "/home/danish1075/Arduino/libraries",
+  "sketchLocation": "/home/danish1075/Documents/stm32 emu blue pill/tests/arduino_periph_test"
 }

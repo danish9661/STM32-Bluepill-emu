@@ -55,7 +55,7 @@ impl Spi {
         let mut gpio = sys.p.gpio.borrow_mut();
         for d in &self.devices {
             let selected = match d.cs {
-                Some((port, pin)) => (gpio.read_port(sys, port) >> pin) & 1 == 0,
+                Some((port, pin)) => !gpio.read_pin_effective(sys, port, pin),
                 None => true,
             };
             if selected { return Some(d.device.clone()); }

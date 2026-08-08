@@ -561,9 +561,13 @@ periph_write(DMA1 + 0x08 + 3*4, 4, 0x20001000); // CMAR
 periph_write(DMA1 + 0x08 + 1*4, 4, 8); // CNDTR = 8
 // Enable with EN bit and DIR=memory-to-memory, MINC, PINC
 periph_write(DMA1 + 0x08 + 0*0x14, 4, (1 << 14) | (1 << 7) | (1 << 6) | 1);
-assert_eq(periph_read(DMA1 + 0x08 + 1*4, 4), 0, 'DMA1 CNDTR decremented to 0 on enable');
 let dma_pending = periph.dma_get_pending_count();
 assert_eq(dma_pending >= 1, true, 'DMA has pending transfers');
+periph.dma_set_completed_many(1 << 0); // JS bridge moves the data, then signals completion
+for (let i = 0; i < 3; i++) periph.tick();
+assert_eq(periph_read(DMA1 + 0x08 + 1*4, 4), 0, 'DMA1 CNDTR 0 after transfer completes');
+let dma_en = periph_read(DMA1 + 0x08 + 0*0x14, 4) & 1;
+assert_eq(dma_en, 0, 'DMA1 EN cleared after transfer completes');
 
 // ============================================================
 // SCB

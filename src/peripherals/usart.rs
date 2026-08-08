@@ -1,4 +1,4 @@
-use crate::system::{System, get_uart_output};
+use crate::system::{System, get_uart_output, instruction_count};
 use crate::ext_devices::ExtDevices;
 use super::Peripheral;
 
@@ -28,6 +28,7 @@ pub struct Usart {
     tx_data: Vec<u8>,
     rx_buf: Vec<u8>,
     irq_num: i32,
+    txe_clear_until: u64,
 }
 
 impl Usart {
@@ -40,8 +41,26 @@ impl Usart {
                 tx_data: Vec::new(),
                 rx_buf: Vec::new(),
                 irq_num: irq,
+                txe_clear_until: 0,
             }) as Box<dyn Peripheral>
         })
+    }
+
+    /// Instructions for one byte to shift out at the programmed baud rate
+    /// (10 bits/frame, 1 instr = 1 cycle @ 72 MHz).
+    fn byte_time(&self) -> u64 {
+        let b = self.brr as u64;
+        if b == 0 { 6250 } else { (b * 10).max(1000) }
+    }
+
+    fn txe_ready(&self) -> bool {
+        self.txe_clear_until == 0 || instruction_count() >= self.txe_clear_until
+    }
+
+    fn refresh_txe(&mut self) {
+        if self.sr & 0x80 == 0 && self.txe_ready() {
+            self.sr |= 0x80;
+        }
     }
 
     fn update_interrupt(&mut self, sys: &System) {
@@ -55,12 +74,12 @@ impl Usart {
     }
 
     fn read_sr(&mut self) -> u32 {
-        let sr = self.sr;
-        self.sr |= 0x00C0; // TXE and TC stay set after reading SR
-        sr
+        self.refresh_txe();
+        self.sr
     }
 
     fn read_dr(&mut self, sys: &System) -> u32 {
+        self.refresh_txe();
         let dr = if self.is_loopback() {
             // HDSEL: RX pin disconnected, DR reflects the looped TX byte;
             // external bytes stay queued for later.
@@ -73,7 +92,7 @@ impl Usart {
         if self.rx_buf.is_empty() && !self.is_loopback() {
             self.sr &= !(1 << 5); // Clear RXNE only when buffer empty
         }
-        self.sr |= 0x00C0; // TXE, TC
+        self.sr |= 0x40; // TC stays set
         self.update_interrupt(sys);
         dr
     }
@@ -83,13 +102,14 @@ impl Usart {
     }
 
     fn rx_push(&mut self, byte: u8, sys: &System) {
+        self.refresh_txe();
         if self.rx_buf.len() < 16 {
             self.rx_buf.push(byte);
             self.sr |= 1 << 5; // RXNE
         } else {
             self.sr |= 1 << 3; // ORE
         }
-        self.sr |= 0x00C0; // TXE, TC
+        self.sr |= 0x40; // TC stays set
         self.update_interrupt(sys);
     }
 
@@ -97,17 +117,31 @@ impl Usart {
         let ch = (value & 0xFF) as u8;
         self.tx_data.push(ch);
         get_uart_output().lock().unwrap().push(ch as char);
-        self.sr |= 0x00C0; // TXE=1, TC=1
+        self.sr |= 0x40; // TC stays set
         if self.is_loopback() {
+            self.sr |= 0x80; // TXE: loopback echoes instantly
             self.dr = ch as u32;
             self.sr |= 1 << 5; // RXNE: receive the looped byte
+            self.update_interrupt(sys);
         } else {
+            // TXE drops until the byte shifts out; the next tick() re-asserts it,
+            // spacing TXE interrupts by one byte time (no back-to-back re-pend storm).
+            self.sr &= !0x80;
+            self.txe_clear_until = instruction_count() + self.byte_time();
             self.update_interrupt(sys);
         }
     }
 }
 
 impl Peripheral for Usart {
+    fn tick(&mut self, sys: &System) {
+        if self.sr & 0x80 != 0 { return; }
+        if self.txe_ready() {
+            self.sr |= 0x80;
+            self.update_interrupt(sys);
+        }
+    }
+
     fn periph_remap(&self, sys: &System) -> Option<u32> {
         sys.p.afio_remap_status(&self.name)
     }
@@ -147,5 +181,9 @@ impl Peripheral for Usart {
 
     fn rx_byte(&mut self, sys: &System, byte: u8) {
         self.rx_push(byte, sys);
+    }
+
+    fn rx_pending(&self) -> u32 {
+        self.rx_buf.len() as u32
     }
 }

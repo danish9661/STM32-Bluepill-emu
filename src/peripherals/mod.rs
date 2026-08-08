@@ -37,6 +37,7 @@ pub trait Peripheral {
     fn write(&mut self, sys: &System, offset: u32, value: u32);
     fn tick(&mut self, _sys: &System) {}
     fn rx_byte(&mut self, _sys: &System, _byte: u8) {}
+    fn rx_pending(&self) -> u32 { 0 }
     fn can_inject_message(&mut self, _sys: &System, _tir: u32, _tdtr: u32, _tdlr: u32, _tdhr: u32) -> bool { false }
     /// Returns the GPIO port letter for the given EXTI line, if this is AFIO.
     fn exti_port(&self, _line: u32) -> Option<char> { None }
@@ -118,6 +119,7 @@ fn extract_svd_max_offset(p: &PeripheralInfo) -> u32 {
 
 fn name_has_tick(name: &str) -> bool {
     name.starts_with("TIM") || name.starts_with("DMA") || name == "RTC" || name.starts_with("ADC")
+        || name.starts_with("USART") || name.starts_with("UART")
 }
 
 impl Peripherals {
@@ -455,6 +457,12 @@ impl Peripherals {
             p.peripheral.borrow_mut().rx_byte(sys, byte);
             true
         } else { false }
+    }
+
+    pub fn rx_pending(&self, addr: u32) -> u32 {
+        if let Some(p) = Self::get_peripheral(&self.peripherals, addr) {
+            p.peripheral.borrow().rx_pending()
+        } else { 0 }
     }
 
     /// Queries the AFIO peripheral for the GPIO port mapped to a given EXTI line (0-15).
