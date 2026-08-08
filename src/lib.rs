@@ -153,6 +153,12 @@ pub fn gpio_read_input(port: u32, pin: u32) -> bool {
     sys().p.gpio.borrow().read_input_pin(port as u8, pin as u8)
 }
 
+/// Current PWM duty (0-100) of a timer channel; 0 if addr is not a timer.
+#[wasm_bindgen]
+pub fn pwm_duty(addr: u32, channel: u32) -> u32 {
+    sys().p.pwm_duty(addr, channel)
+}
+
 #[wasm_bindgen]
 pub fn is_watchdog_reset_requested() -> bool {
     system::is_watchdog_reset_requested()

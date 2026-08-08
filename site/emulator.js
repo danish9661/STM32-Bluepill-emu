@@ -212,7 +212,7 @@ export async function createEmulator(opts = {}) {
     add_spi_flash, add_i2c_eeprom, add_touchscreen, add_lcd, add_i2c_oled, add_software_spi,
     init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
     gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt,
-    can_inject_message, adc_set_sim_value, touchscreen_set_touch } = periph;
+    can_inject_message, adc_set_sim_value, touchscreen_set_touch, pwm_duty } = periph;
 
     // Register external devices BEFORE init()
     for (const d of ext_devices.spi_flash || []) {
@@ -250,6 +250,7 @@ export async function createEmulator(opts = {}) {
     if (firmware instanceof ArrayBuffer) firmware = new Uint8Array(firmware);
     let fwBytes = firmware;
     let fwAddr = flash_addr;
+    let elfRegions = null;
     let symbolList = [];
     let sortedSymbols = null;
 
@@ -281,17 +282,12 @@ export async function createEmulator(opts = {}) {
     } else if (firmware instanceof Uint8Array && firmware.length > 4 &&
                firmware[0] === 0x7F && firmware[1] === 0x45 && firmware[2] === 0x4C && firmware[3] === 0x46) {
         const elf = parseElf(firmware);
+        elfRegions = elf.regions;
         fwBytes = new Uint8Array(0);
-        let wrote = 0;
-        for (const reg of elf.regions) {
-            const inFlash = reg.start >= flash_addr && reg.start < flash_addr + flash_size;
-            const inRam = reg.start >= 0x20000000 && reg.start < 0x20000000 + ram_size;
-            if (inFlash || inRam) { uc.mem_write(BigInt(reg.start), patchMrsMsp(reg.data)); wrote++; }
-        }
         symbolList = elf.symbols;
-        if (verbose) console.log(`ELF: ${elf.regions.length} load segments, ${elf.symbols.length} symbols (${wrote} written)`);
+        if (verbose) console.log(`ELF: ${elf.regions.length} load segments, ${elf.symbols.length} symbols`);
     }
-    if (fwBytes.length > 0) uc.mem_write(BigInt(fwAddr), patchMrsMsp(fwBytes));
+    // fwBytes written after RAM is mapped below
 
     // TEMP WORKAROUND: Unicorn skips the two `bl HAL_NVIC_EnableIRQ` in
     // i2c_init(). Replace 0x8001bbc..0x8001bdb with inline NVIC ISER0/ISER1
@@ -319,6 +315,17 @@ export async function createEmulator(opts = {}) {
     }
 
     uc.mem_map(0x20000000, ram_size, Module.PROT_ALL);
+
+    if (elfRegions) {
+        let wrote = 0;
+        for (const reg of elfRegions) {
+            const inFlash = reg.start >= flash_addr && reg.start < flash_addr + flash_size;
+            const inRam = reg.start >= 0x20000000 && reg.start < 0x20000000 + ram_size;
+            if (inFlash || inRam) { uc.mem_write(BigInt(reg.start), patchMrsMsp(reg.data)); wrote++; }
+        }
+        if (verbose) console.log(`ELF: ${wrote} load segments written`);
+    }
+    if (fwBytes.length > 0) uc.mem_write(BigInt(fwAddr), patchMrsMsp(fwBytes));
 
     for (const [start, end] of PERIPH_RANGES) {
         uc.mem_map(start, end - start, Module.PROT_READ | Module.PROT_WRITE);
@@ -649,6 +656,9 @@ export async function createEmulator(opts = {}) {
         gpioReadOutput(port, pin) { return gpio_read_output(port, pin); },
         gpioReadInput(port, pin) { return gpio_read_input(port, pin); },
         gpioSetInput(port, pin, value) { gpio_set_input(port, pin, value); },
+
+        /** PWM duty (0-100) of a timer channel, e.g. pwmDuty(0x40000000, 0) = TIM2 CH1. */
+        pwmDuty(addr, channel = 0) { return pwm_duty(addr, channel); },
 
         setSimAdc(value) { adc_set_sim_value(value); },
         setTouch(peripheral, x, y, pressure) { touchscreen_set_touch(peripheral, x, y, pressure); },

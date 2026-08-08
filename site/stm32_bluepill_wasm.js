@@ -279,6 +279,17 @@ export function periph_write(addr, width, value) {
 }
 
 /**
+ * Current PWM duty (0-100) of a timer channel; 0 if addr is not a timer.
+ * @param {number} addr
+ * @param {number} channel
+ * @returns {number}
+ */
+export function pwm_duty(addr, channel) {
+    const ret = wasm.pwm_duty(addr, channel);
+    return ret >>> 0;
+}
+
+/**
  * Set PRIMASK and BASEPRI values from Unicorn CPU state.
  * @param {number} primask
  * @param {number} basepri

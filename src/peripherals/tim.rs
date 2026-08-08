@@ -165,6 +165,10 @@ impl Peripheral for Timer {
         sys.p.afio_remap_status(&self.name)
     }
 
+    fn pwm_duty(&self, channel: u32) -> Option<u32> {
+        self.pwm_duty.get(channel as usize).copied()
+    }
+
     fn tick(&mut self, sys: &System) {
         self.advance(sys);
     }
