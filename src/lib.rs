@@ -104,6 +104,12 @@ pub fn clear_current_interrupt() {
     sys().p.nvic.borrow_mut().clear_current_interrupt();
 }
 
+/// Re-pend SysTick if unconsumed 1ms ticks remain (fast millis/delay()).
+#[wasm_bindgen]
+pub fn nvic_systick_take() -> bool {
+    sys().p.nvic.borrow_mut().systick_take()
+}
+
 #[wasm_bindgen]
 pub fn dma_get_pending_count() -> u32 {
     sys().pending_dma_count() as u32

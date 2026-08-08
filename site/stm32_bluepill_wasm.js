@@ -260,6 +260,15 @@ export function is_watchdog_reset_requested() {
 }
 
 /**
+ * Re-pend SysTick if unconsumed 1ms ticks remain (fast millis/delay()).
+ * @returns {boolean}
+ */
+export function nvic_systick_take() {
+    const ret = wasm.nvic_systick_take();
+    return ret !== 0;
+}
+
+/**
  * @param {number} addr
  * @param {number} width
  * @returns {number}

@@ -35,6 +35,7 @@ impl Peripheral for SysTick {
                 self.csr = value & 0x10007;
                 if value & 1 != 0 && self.rvr != 0 {
                     sys.p.nvic.borrow_mut().systick_period = Some(self.rvr);
+                    sys.p.nvic.borrow_mut().systick_debt = 0;
                 } else {
                     sys.p.nvic.borrow_mut().systick_period = None;
                 }
@@ -43,6 +44,7 @@ impl Peripheral for SysTick {
             0x08 => {
                 self.cvr = 0;
                 sys.p.nvic.borrow_mut().last_systick_trigger = crate::system::INSTRUCTION_COUNT.load(std::sync::atomic::Ordering::Relaxed);
+                sys.p.nvic.borrow_mut().systick_debt = 0;
             }
             0x0C => {}
             _ => {}

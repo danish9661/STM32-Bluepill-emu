@@ -211,7 +211,7 @@ export async function createEmulator(opts = {}) {
     dma_get_all_pending, dma_set_completed_many, is_watchdog_reset_requested,
     add_spi_flash, add_i2c_eeprom, add_touchscreen, add_lcd, add_i2c_oled, add_software_spi,
     init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
-    gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt,
+    gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt, nvic_systick_take,
     can_inject_message, adc_set_sim_value, touchscreen_set_touch, pwm_duty } = periph;
 
     // Register external devices BEFORE init()
@@ -497,6 +497,7 @@ export async function createEmulator(opts = {}) {
                 uc.emu_start(handler_pc, 0, 0, DEFAULT_MAX_BATCH);
             } catch (e) { /* BX LR EXC_RETURN handled by intrHook */ }
             clear_current_interrupt();
+            if (irq === 15) { while (nvic_systick_take()) { /* re-pended below */ } }
             const savedFrame = uc.mem_read(BigInt(savedAt - 32), 32);
             const savedSv = new DataView(savedFrame.buffer, savedFrame.byteOffset, savedFrame.byteLength);
             uc.reg_write_i32(Module.ARM_REG_R0, savedSv.getUint32(28, true));
