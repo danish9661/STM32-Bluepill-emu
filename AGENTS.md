@@ -1,148 +1,133 @@
 # STM32 Bluepill WASM Emulation — Context File
 
 ## Project Overview
-Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running Arduino firmware. Two WASM modules bridge through JavaScript:
-1. **Unicorn ARM** (`pkg/unicorn_arm.cjs`/`.js`) — ARM Cortex-M3 CPU emulator (native C + WASM-compiled)
-2. **Rust Peripherals** (`pkg/stm32_bluepill_wasm_bg.wasm`) — All STM32 peripherals (GPIO, USART, TIM, SPI, I2C, DMA, RTC, CRC, CAN, NVIC, etc.)
+Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real Arduino firmware. Two modules bridge through JavaScript:
+1. **Unicorn ARM** (`pkg/unicorn_arm.cjs`) — ARM Cortex-M3 CPU emulator (binary Node addon, unmodifiable)
+2. **Rust Peripherals** WASM (`pkg/stm32_bluepill_wasm_bg.wasm`) — GPIO, USART, TIM, SPI, I2C, DMA, RTC, CRC, CAN, NVIC, EXTI, ADC, DAC, FLASH, PWR, BKP, IWDG, WWDG, etc.
 
-## Architecture
+## Architecture & Emulation Loop
 ```
-┌─────────────────────────── JS (cli.mjs) ───────────────────────────┐
-│                                                                     │
-│  codeHook (per-instruction) → counts instructions (no WASM calls)  │
-│  memReadHook / memWriteHook → periph_read / periph_write  [JIT]   │
-│                                                                     │
-│  Loop:                                                              │
-│    1. emu_start(maxBatch=100K)   ← Unicorn runs N instructions      │
-│    2. step_batch(count)          ← Rust ticks all peripherals      │
-│    3. processDma()               ← DMA data movement via Unicorn   │
-│    4. processInterrupts()        ← NVIC→Unicorn IRQ injection      │
-│                                                                     │
-│  DMA data movement crosses WASM boundary:                           │
-│    Rust queues DmaTransfer → JS reads via dma_get_pending()         │
-│    → uc.mem_read/mem_write to move data → dma_set_completed()       │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-## Current Performance
-- **5.1M IPS** real-world (20M instructions in ~3.9s)
-- `step_batch()` gave **3.15× speedup** over per-instruction `step()`
-- `tick_indices` Vec and single `AtomicU32` DMA bitmask gave minor gains
-- **Bottleneck**: Memory hooks (periph_read/periph_write) are JS callbacks — every peripheral register access crosses WASM→JS→WASM boundary
-
-## Source Layout
-
-### Rust (wasm-pack build → pkg/)
-- `src/lib.rs` — WASM bindings: init, periph_read/write, tick, step, step_batch, DMA, GPIO, UART
-- `src/system.rs` — WasmSystem: tick() iterates tick_indices, DMA completion tracking via AtomicU32
-- `src/peripherals/mod.rs` — Peripheral trait, Peripherals struct, SVD-based construction, tick_indices registration
-- `src/peripherals/*.rs` — One file per peripheral (dma, gpio, usart, tim, rtc, crc, can, nvic, spi, i2c, etc.)
-- `src/ext_devices/` — External devices: SPI flash, I2C EEPROM, LCD, I2C OLED, touchscreen
-
-### JS
-- `pkg/cli.mjs` — Main emulation runner: Unicorn setup, event loop, DMA/interrupt processing
-- `pkg/emulator.js` — Library API (`createEmulator`) used by the npm package
-- `pkg/unicorn_arm.cjs` + `unicorn_arm.js` — Unicorn ARM WASM module (binary, native Node binding)
-- `pkg/index.html` — Browser demo (python -m http.server)
-- `scripts/` — Dev utilities: `build_blink.py`, `extract_wasm.mjs`, `periph_server.mjs`, `uc_bridge.py`, `start.cmd`
-
-### Tests
-- `tests/test_all.mjs` — 157 unit tests (GPIO, USART, ADC, RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C, RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX). Run: `node tests/test_all.mjs`
-- `tests/comprehensive_test/` — 21-peripheral firmware test (Arduino sketch → bin). Run: `node pkg/cli.mjs --config=tests/comprehensive_test/config.yaml`
-- `tests/bench.mjs` — Microbenchmarks comparing tick() vs step() performance
-- `tests/test_unicorn.cjs` — Simple Unicorn smoke test
-
-### Examples & Docs
-- `examples/` — Sample firmwares: `blink_standalone/`, `blink_arduino/`, `blink_test/` (config)
-- `docs/NEXT_PHASE.md` — Single-WASM unification roadmap
-- `docs/summary.md` — Historical project summary
-- `svd/STM32F103.svd` — Device description used by `init_svd`
-- `third_party/` — Unicorn JS source package + tarball
-
-### Config
-- `Cargo.toml` — Rust deps: wasm-bindgen, svd-parser, serde, log, regex
-- Build: `wasm-pack build --target web` (outputs to pkg/)
-
-## What We Did (Optimization Sprint)
-
-### Completed
-1. **`has_tick` flag on peripherals** → 69% tick speedup (10.7M→18.2M IPS). Only tick peripherals that implement `tick()`.
-2. **`tick_indices` Vec** → ~3% gain over iterating all peripherals checking has_tick.
-3. **Single `AtomicU32` DMA bitmask** → ~8% gain, replacing `[AtomicBool; 8]` with bit operations.
-4. **`step_batch(count)`** → 3.15× real-world speedup (13.79s→3.9s / 20M instr). Process N instructions in one WASM call.
-5. **Removed `clock_enabled()` gate from `read()`/`write()`** — tests assume direct register access without RCC setup.
-6. **CRC fix**: Non-reflected `0x04C11DB7` polynomial (removed bogus data reflection).
-7. **DMA fix**: Restore `ndtr = 0` after `do_xfer()` on EN bit.
-8. **RTC alarm**: `cnt >= alarm` instead of `cnt == alarm` (handles multi-tick jumps).
-9. **RTC CRL**: RTOFF at bit 5 (was bit 0).
-10. **RTC/FLASH register offsets** match STM32F103 datasheet.
-11. **SPI test fix**: Read SR before DR (DR read clears RXNE).
-12. **cli.mjs**: Removed stale `initSync(...)` call (module auto-initializes). Note: current wasm-bindgen glue no longer auto-initializes — call `periph.initSync({ module: readFileSync(wasmPath) })` after import (cli.mjs, emulator.js, tests).
-
-### All 157 unit tests + 21 comprehensive tests pass
-Commit: `c5f9dec` (10 files, +283/-78)
-
-## Current Limitations / Architecture Issues
-- **Two separate WASM modules** bridged through JS → memory hooks are JS callbacks, WASM→JS→WASM round-trip on every peripheral register access
-- **DMA data movement**: Rust queues transfer info → JS reads it → JS calls uc.mem_read/write → JS calls dma_set_completed(). 7 JS calls per DMA transfer.
-- **Unicorn ARM module** (`unicorn_arm.cjs`): appears to be a binary Node native addon (not WASM). Cannot be modified without compiling from source.
-- **Interrupt delivery**: JS reads NVIC state from Rust after every batch, injects into Unicorn. Could be latency up to 100K instructions.
-
-## Next Steps (on Linux)
-
-### Phase 1: Compile Unicorn + Rust into a single WASM module
-This eliminates all JS boundary crossings for memory hooks and DMA.
-
-**Required on Linux:**
-1. **Emscripten SDK** — to compile Unicorn C source to WASM
-2. **Unicorn Engine source** — user has it. Need `unicorn/` directory with CMakeLists.txt
-3. **Rust nightly + `wasm32-unknown-emscripten` target** — to compile Rust peripheral code as a static lib linkable with Emscripten
-4. **Python3 + CMake** — build toolchain
-
-**Build approach:**
-```
-emcc -s WASM=1 -s TOTAL_MEMORY=512MB \
-     -s EXPORTED_FUNCTIONS=['_uc_open','_uc_close','_uc_mem_map',...] \
-     -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap'] \
-     unicorn/*.c rust_periph.a \
-     -o unicorn_periph.js
+┌─────────────────────────── JS (pkg/cli.mjs) ─────────────────────────┐
+│                                                                      │
+│  codeHook (per-instruction) → counts instructions (no WASM calls)   │
+│  memReadHook / memWriteHook → periph_read / periph_write  [JIT]     │
+│                                                                      │
+│  Loop (each iteration = 1 batch):                                    │
+│    1. pump stdin → uart_rx_byte()                                    │
+│    2. processDma()            ← move queued DMA data via Unicorn    │
+│    3. uc.emu_start(pc|1, 0, 0, maxBatch=100K)                       │
+│    4. step_batch(batchInstCount)   ← Rust ticks peripherals         │
+│       - status==1 → watchdog reset requested → stop                 │
+│    5. processDma()                                                  │
+│    6. processInterrupts()  ← up to 16 IRQs per batch                │
+│    7. is_watchdog_reset_requested() check                           │
+│                                                                      │
+│  DMA crosses the WASM boundary:                                      │
+│    Rust queues DmaTransfer → JS dma_get_all_pending() →              │
+│    uc.mem_read/mem_write to move data → dma_set_completed_many()    │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-### Phase 2: Replace memory hooks with direct memory access
-Once both are in the same WASM instance:
-- Map a section of WASM linear memory as the STM32 peripheral address space (0x40000000–0xB0000000)
-- `uc_mem_map_ptr(0x40000000, size, PROT_ALL, wasm_memory_ptr)`
-- Rust peripherals read/write the same memory region — no hooks needed
-- DMA data movement becomes a direct memory copy in Rust
+### Performance
+- ~5.1M IPS real-world (20M instructions in ~3.9s)
+- `step_batch()` gave 3.15× speedup over per-instruction `step()`
+- `has_tick` flag: 69% tick speedup; `tick_indices` Vec + `AtomicU32` DMA bitmask: minor gains
+- **Bottleneck**: memory hooks (periph_read/periph_write) are JS callbacks — every peripheral register access crosses WASM→JS→WASM
 
-### Phase 3: Move DMA + interrupt processing into Rust
-- DMA: instead of queueing transfer info for JS, do `memcpy` directly in Rust
-- Interrupts: Rust directly calls Unicorn's `uc_intr` or sets NVIC pending and stops execution
+## Current Status (commit `561a856`)
+### Test suite: `node tests/test_all.mjs`
+**157/157 unit tests PASS** (GPIO, USART, ADC, RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C, RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX).
 
-### Alternative: Pure Rust ARM emulator
-Instead of porting Unicorn, investigate existing pure-Rust Cortex-M emulators:
-- `cargo-cortex-m` / `mdl` — may be simpler than porting Unicorn C to WASM
-- Tradeoff: would need to implement all ARM Thumb instructions, but no JS boundary at all
-- Check: `cortex-m-emulator` crate, `mdl` (Micro-Debug Lab), or `qemu` in Rust bindings
+### Firmware test — `tests/arduino_periph_test/` (21-peripheral Arduino sketch)
+```
+echo "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml --max=50000000
+```
+- **PASS (17)**: GPIO, USART TX, UART Loopback, RCC, FLASH, PWR, BKP, IWDG, WWDG, RTC, CRC, DAC, ADC, AFIO, EXTI reg, CAN, SPI Flash
+- **PASS (2)**: I2C OLED, I2C OLED write
+- **FAIL (1)**: `[I2C] FAIL: eeprom=1 oled=1 val=FF` — EEPROM write works (0x00,0x00,0x42), read returns 0xFF
+- **NOT REACHED:** Touchscreen, LCD, and the async section (DMA TX/RX, UART RX, TIM2, EXTI0, SysTick)
+- `A` (0x41) piped via stdin stays queued for the DMA RX test; `B` is the UART RX byte. Stdin is drained into `uart_rx_byte()` each batch.
 
-### Fallback: Optimize within current architecture
-If WASM port is too complex:
-- Merge DMA processing into Rust (avoid JS round-trip for data movement)
-- Use `SharedArrayBuffer` for zero-copy state sharing between WASM modules
-- Pre-allocate and batch DMA transfer processing
+## What We Did — Latest Sprint (commit `561a856`)
+### I2C peripheral fixes (`src/peripherals/i2c.rs`)
+- **`fire_interrupts` CR2 bit mapping corrected**: ITERREN=bit8, ITEVTEN=bit9, ITBUFEN=bit10 (was cyclically shifted → wrong IRQs fired)
+- **`fire_interrupts` moved inside `if self.sr1_addr_flag` in SR2 read** — previously every SR2 read could re-pend the EV interrupt → infinite ISR loop (this was the original "I2C ISR storm" bug)
+- **CR2 write** enables NVIC IRQ31/32 (via new `nvic.enable_irq()`) and fires interrupts on ITEVTEN bits; BUF-IT-disable sets BTF (SR1 bit 2)
+- **TRA bit fixed**: SR2 TRA is bit 2, not bit 4 (caused ISR to think it was transmitter when receiver)
+- **SR2 read** transitions `AddrSent{is_read}` → `Active{is_read}` on ADDR-clear; sets RXNE (bit 6) + clears TRA for reads, TXE (bit 7) + sets TRA for writes
+- **DR read (0x10)** in `Active{is_read}` auto-preloads next byte from device and re-asserts RXNE
+- **DR write (0x10)**: StartSent → sends address (devices matched by 7-bit addr), preloads first byte on read; Active{is_read:false} → pushes byte to device; NACK path sets SR1 bit 10 (AF)
+- **reset()** clears SR1/SR2/state on SW reset / PE=0 → keeps `hi2c` RAM struct untouched (firmware-side issue, see workarounds)
 
-## Files Most Relevant for Next Phase
-- `src/lib.rs` — WASM API boundary; add DMA-processing functions
-- `src/system.rs` — DMA queue + completion tracking; can be extended for direct data movement
-- `src/peripherals/dma.rs` — DMA peripheral implementation; transfer logic here
-- `pkg/cli.mjs` — Caller; rewrite to remove DMA/interrupt JS bridge
-- `pkg/unicorn_arm.cjs` / `.js` — Binary; need source to recompile
-- `Cargo.toml` — Add `wasm32-unknown-emscripten` target support
+### SPI flash (`src/ext_devices/spi_flash.rs`)
+- Page-program write support: WREN/WRDI, status register returns real WEL bit (0x02), page address+data latching, CS-gated
+- ReadData (4-byte: 3 address bytes latched) and FastRead (5-byte: 1 dummy + 3 addr) address-latch fixes
+- `SpiFlashConfig.cs` now accepted; `cli.mjs` passes `d.cs` through
 
-## Build Commands (Windows, for reference)
+### USART (`src/peripherals/usart.rs`)
+- HDSEL loopback fix: `read_dr()` returns looped TX byte from `self.dr` instead of a queued external byte; external stdin bytes stay queued for the UART RX test
+
+### NVIC (`src/peripherals/nvic.rs`)
+- Added `enable_irq()`, `is_enabled()`, `is_pending()` helpers; debug log in `find_highest_pending()` (see below)
+
+### WASM JS bridge (`src/lib.rs`, `pkg/cli.mjs`, `pkg/emulator.js`)
+- **Debug log buffer**: `static I2C_LOG` + `i2c_log()` + `drain_i2c_log()` export — used via `[I2C]`/`[NVIC]` trace lines in the firmware run
+- SysTick: reads of 0xE000100 (reports `instCount & 0xFFFFFFFF`)
+- **ELF LMA fix** (`emulator.js` `parseElf`): also loads the LMA (p_paddr) copy of each segment — firmware's startup code copies `.data` from its load address; without both, .data is zero
+- `i2c_init` firmware patch + Mode patching in `cli.mjs` (see Workarounds)
+
+## Active Workarounds (temporary, remove or upstream later)
+1. **`mrs rX, msp` → `mov rX, sp`** (cli.mjs `patchMrsMsp`, ~line 19): Unicorn cannot decode Thumb `mrs`; newlib `_sbrk` uses it; rewrite to 4-byte equivalent + nop (same footprint)
+2. **i2c_init NVIC patch** (cli.mjs ~line 252): Unicorn skips the two `bl HAL_NVIC_EnableIRQ` in `i2c_init` → replace the block at 0x8001bb0–0x8001bcf with inline ISER0/ISER1 writes + preserved `SetPriority` calls
+3. **hi2c->Mode patch** (cli.mjs `memWriteHook`, ~line 313): HAL I2C ISR requires `hi2c->Mode == 0x22` (MASTER_RX) to read DR; Wire calls a transmit-HAL which leaves 0x21 — when DR is written with R-bit set (0x40005410), patch RAM `*(0x20000228)+0x3D` to 0x22
+4. **Interrupt frame saved in JS closure variabless** (not memory): stack frames get clobbered by handler PUSH; save R0-R3,R12,LR,PC,xPSR in JS locals, restore after handler
+5. **16-IRQ loop in `processInterrupts()`**: prevents starvation when high-priority IRQ re-pends itself (e.g. CAN TX IRQ37 prio16 vs I2C EV IRQ31 prio32)
+6. **DMA**: batched `dma_get_all_pending()` / `dma_set_completed_many()` — one WASM call instead of 7
+
+## Firmware Analysis Notes (HAL ISR / disassembly)
+- EEPROM uses I2C1 addr 0x50 on SMBUS-compatible driver; internal debug log trace confirmed: write = START→ADDR(0x50|W)→bytes 0x00 0x00 0x42→BTF→STOP (OK); read = START→ADDR(0x50|R)→clears ADDR→RXNE→**STOP without DR read** → root cause is `hi2c->Mode` check at ISR 0x80034c2
+- `[I2C]` trace shows full state machine transitions; `[NVIC]` trace shows IRQ31/IRQ37 pending/prio race
+
+## To Run / Rebuild
 ```bash
-wasm-pack build --target web    # builds Rust → pkg/
-node tests/test_all.mjs         # 157 unit tests
-node tests/bench.mjs            # benchmarks
-node pkg/cli.mjs firmware.bin   # run firmware
+cargo check                          # Rust sanity (fast)
+cargo wasmpack build --target web    # rebuild pkg/stm32_bluepill_wasm_bg* (Rust → wasm)
+node tests/test_all.mjs              # 157 unit tests
+node tests/bench.mjs                 # benchmarks
+node pkg/cli.mjs tests/arduino_periph_test/build/arduino_periph_test.ino.elf   # run firmware
+echo "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml --max=50000000
+# rebuild firmware (Windows, if arduino-cli):
+arduino-cli compile --fqbn STMicroelectronics:stm32:GenF1:pnum=BLUEPILL_F103C8 --build-path tests/arduino_periph_test/build tests/arduino_periph_test
+# browser demo:
+python -m http.server -d pkg   # then open localhost:8000
 ```
+
+### Disassembly for ISR debugging (Windows PowerShell)
+```
+arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino.elf > isr.asm
+# find HAL_I2C_EV_IRQHandler / HAL_I2C_Master_*_IT symbols
+```
+
+## Next Phase — What's Left
+
+### Immediate (get 21/21)
+1. **Finish I2C EEPROM read** — the `Mode` patch (#3 above) was committed but **not yet re-verified after the last edit** (removed `size===1` check on the DR-write hook). Re-run test first; if FF persists, verify with logs: (a) `hi2c->XferOptions`/`XferCount`/`XferSize`/`pBuffPtr` (offset 0x50/0x2A/0x28/0x24) — HAL ISR may STOP because count==0; (b) `PreviousState`/`State` transitions
+2. **Touchscreen test** (currently not reached, expected SPI values wrong: `x=2992 y=4095 p=0`) — after I2C passes, debug SPI touch readings
+3. **Async section**: DMA TX/RX, UART RX, TIM2, EXTI0, SysTick — after the above; `A` byte is reserved for DMA RX in this section
+4. **Remove all debug instrumentation** before finishing: `i2clog!`/`[I2C]`/`[NVIC]` logs, `I2C_LOG/i2c_log/drain_i2c_log`, `flash_debug/flash_cs_count/flash_trace`, cli.mjs `[IRQ]` prints, and the `nvics` `debug_log` — keep machine-parseable `[name] PASS/FAIL`
+
+### Known issue
+- WASM abort (`Fatal: undefined Stack: undefined`) at ~35M+ instructions (seen once) — investigate if it re-occurs after other fixes
+
+## Next Phase — Long-term Optimizations
+1. **Single WASM module** (Emscripten): compile Rust peripheral code + Unicorn C into one `emcc` output (Linux toolchain; `wasm32-unknown-emscripten` target). Recommended-free approach elsewhere in docs
+2. **Replace mem hooks with shared linear memory**: `uc_mem_map_ptr(mem, periph_range)` → Rust reads/writes same region, zero crossing
+3. **DMA + interrupts fully in Rust** (no JS round-trip; `uc_intr` or stop+re-exec)
+4. **Alternative: pure-Rust Cortex-M emulator** (cargo-cortex-m / mdl) — evaluate vs porting Unicorn
+
+## Files Most Relevant
+- `src/peripherals/i2c.rs` — I2C state machine (the failing read)
+- `src/lib.rs` — WASM API; debug log; new exports
+- `pkg/cli.mjs` — DR Mode patch, workarounds, loop
+- `src/ext_devices/spi_flash.rs`, `src/peripherals/spi.rs` — touchscreen SPI reads
+- `tests/arduino_periph_test/` — the 21-test firmware + config
