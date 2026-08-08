@@ -321,6 +321,10 @@ export function step(primask, basepri) {
 
 /**
  * Process a batch of N instructions in one WASM call.
+ * Peripheral ticks are instruction-delta based (each reads INSTRUCTION_COUNT
+ * and accumulates elapsed time), so one tick after advancing the count by N
+ * is equivalent to N per-instruction ticks — but ~N× cheaper (tick() was
+ * ~55% of runtime via 100K iterations per batch).
  * Returns: 0=continue, 1=watchdog reset.
  * @param {number} count
  * @returns {number}

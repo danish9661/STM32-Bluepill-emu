@@ -29,13 +29,14 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 ```
 
 ### Performance
-- ~5.1M IPS real-world (200M instructions in ~39s; 100M in ~25s)
+- ~18.5M IPS real-world (200M instructions in ~10.8s; 100M in ~5.6s); browser periph37 full run: 0.5s wall
+- **step_batch ticks once per batch, not per instruction** (`src/lib.rs`): all peripheral `tick()`s are instruction-delta based, so advancing INSTRUCTION_COUNT by `count` + one `sys.tick()` is equivalent but ~100K× cheaper — was ~55% of runtime (wasm-function[36]/[364] under `step_batch` in cpu-prof); **3.8× speedup** (21.2s → 5.6s for 100M). Requires per-batch tickers to process ALL accumulated ticks — `tim.rs advance()` had a `ticks.min(1000)` cap that dropped timer events (TIM2 IRQ never fired: CNT stuck at 12K of ARR=36K); removed.
+- Peripheral access hooks are NOT a bottleneck anymore: measured 0.001 accesses/instruction (~27K per 50M instr) for the periph37 firmware
 - `step_batch()` gave 3.15× speedup over per-instruction `step()`
 - `has_tick` flag: 69% tick speedup; `tick_indices` Vec + `AtomicU32` DMA bitmask: minor gains
 - **instCount as plain number, not BigInt** (cli.mjs + pkg/emulator.js codeHook): ~19% faster full run (48.3s → 39.1s); BigInt ops per instruction were measurable at 5M instr/sec. `maxInst` compare + `step_batch` arg are now numbers too. Same change in emulator.js lifted the browser demo from 3.8M → 5.0M Avg IPS (~30%)
 - **Site runLoop**: batch ~5× `step(100000)` per rAF frame (80ms budget), one UI pass per frame — UART TXE pacing needs 100K batches; Speed stat divides real frame instructions, not a fixed 500K
-- **Bottleneck**: memory hooks (periph_read/periph_write) are JS callbacks — every peripheral register access crosses WASM→JS→WASM. `node --cpu-prof` shows ~55% of time inside wasm functions (Rust peripheral dispatch), 3.1% in wasm-to-js glue, ~4.5% JS `get` — per-access Uint8Array reuse was neutral (binding reallocates anyway)
-- **Regression canary**: `node tests/canary.mjs` (or `node tests/canary.mjs <maxInstr>` default 100M) — runs firmware, asserts exit 0, no FAIL lines, SUMMARY pass=37 fail=0, ~25s. Faster than the full 200M run.
+- **Regression canary**: `node tests/canary.mjs` (or `node tests/canary.mjs <maxInstr>` default 100M) — runs firmware, asserts exit 0, no FAIL lines, SUMMARY pass=37 fail=0, ~6s. Faster than the full 200M run.
 
 ## Current Status (uncommitted WIP — see "What We Did — Current Sprint" below)
 ### Test suite: `node tests/test_all.mjs`

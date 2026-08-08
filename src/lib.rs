@@ -66,14 +66,16 @@ pub fn step(primask: u32, basepri: u32) -> u32 {
 }
 
 /// Process a batch of N instructions in one WASM call.
+/// Peripheral ticks are instruction-delta based (each reads INSTRUCTION_COUNT
+/// and accumulates elapsed time), so one tick after advancing the count by N
+/// is equivalent to N per-instruction ticks — but ~N× cheaper (tick() was
+/// ~55% of runtime via 100K iterations per batch).
 /// Returns: 0=continue, 1=watchdog reset.
 #[wasm_bindgen]
 pub fn step_batch(count: u32) -> u32 {
     let sys = sys();
-    for _ in 0..count {
-        system::INSTRUCTION_COUNT.fetch_add(1, Ordering::Relaxed);
-        sys.tick();
-    }
+    system::INSTRUCTION_COUNT.fetch_add(count as u64, Ordering::Relaxed);
+    sys.tick();
     if is_watchdog_reset_requested() { 1 } else { 0 }
 }
 
