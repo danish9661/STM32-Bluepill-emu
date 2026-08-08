@@ -22,6 +22,10 @@ impl Pin {
         assert!(pin < 16);
         Self { port, pin }
     }
+
+    pub fn new(port: u8, pin: u8) -> Self {
+        Self { port, pin }
+    }
 }
 
 #[derive(Default)]

@@ -92,7 +92,14 @@ impl Peripheral for Adc {
             0x00 => self.sr = value & 0x3F,
             0x04 => { self.cr1 = value; self.fire_interrupts(sys); }
             0x08 => {
-                self.cr2 = value;
+                // CAL (bit 2) and RSTCAL (bit 3) self-clear on real hardware
+                self.cr2 = value & !((1 << 2) | (1 << 3));
+                if value & (1 << 2) != 0 {
+                    // calibration completes instantly: produce a sample + EOC
+                    self.dr = ADC_SIM_VALUE.load(Ordering::Relaxed) as u32;
+                    self.sr |= 1 << 1; // EOC
+                    self.fire_interrupts(sys);
+                }
                 if value & (1 << 22) != 0 {
                     self.dr = ADC_SIM_VALUE.load(Ordering::Relaxed) as u32;
                     self.sr |= 1 << 1; // EOC

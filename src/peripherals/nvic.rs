@@ -53,6 +53,12 @@ impl Nvic {
         if idx >= REG_WORDS { None } else { Some((idx, mask)) }
     }
 
+    pub fn enable_irq(&mut self, irq: i32) {
+        if let Some((idx, mask)) = Self::irq_reg_idx(irq) {
+            self.enable[idx] |= mask;
+        }
+    }
+
     pub fn set_intr_pending(&mut self, irq: i32) {
         if irq < 0 {
             self.pending |= 1u128 << (IRQ_OFFSET + irq);
@@ -66,6 +72,22 @@ impl Nvic {
         self.pending &= !(1u128 << (IRQ_OFFSET + irq));
         if let Some((idx, mask)) = Self::irq_reg_idx(irq) {
             self.pending_reg[idx] &= !mask;
+        }
+    }
+
+    pub fn is_enabled(&self, irq: i32) -> bool {
+        if let Some((idx, mask)) = Self::irq_reg_idx(irq) {
+            self.enable[idx] & mask != 0
+        } else {
+            false
+        }
+    }
+
+    pub fn is_pending(&self, irq: i32) -> bool {
+        if let Some((idx, mask)) = Self::irq_reg_idx(irq) {
+            self.pending_reg[idx] & mask != 0
+        } else {
+            false
         }
     }
 
@@ -129,6 +151,13 @@ impl Nvic {
                 best = Some(irq);
                 best_prio = prio;
             }
+        }
+        let i2c1ev_pending = pending & (1u128 << (IRQ_OFFSET + 31)) != 0;
+        let i2c1ev_enabled = self.enable[0] & (1 << 31) != 0;
+        if i2c1ev_pending {
+            let current = self.current_priority(basepri);
+            let i2c1ev_prio = self.exception_priority(31);
+            crate::i2c_log(format!("[NVIC] I2C1EV pending! best={:?} best_prio={} i2c1ev_prio={} current={} enabled={}", best, best_prio, i2c1ev_prio, current, i2c1ev_enabled));
         }
         best
     }

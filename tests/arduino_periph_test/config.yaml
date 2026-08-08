@@ -1,0 +1,31 @@
+cpu:
+  vector_table: 0x08000000
+  svd: "../../svd/STM32F103.svd"
+regions:
+  - start: 0x08000000
+    size: 0x20000
+    load: "build/arduino_periph_test.ino.elf"
+  - start: 0x20000000
+    size: 0x5000
+devices:
+  i2c_eeprom:
+    - peripheral: "I2C1"
+      addr: "0x50"
+      file: "build/eeprom.bin"
+  i2c_oled:
+    - peripheral: "I2C1"
+      addr: "0x3C"
+      width: 128
+      height: 64
+  spi_flash:
+    - peripheral: "SPI1"
+      jedec_id: "0xEF4016"
+      file: "build/spi_flash.bin"
+      cs: "PA4"
+  lcd:
+    - peripheral: "SPI1"
+      cs: "PA1"
+  touchscreen:
+    - peripheral: "SPI1"
+      touch_detected_pin: "PA3"
+      cs: "PA2"

@@ -61,12 +61,16 @@ impl Usart {
     }
 
     fn read_dr(&mut self, sys: &System) -> u32 {
-        let dr = if !self.rx_buf.is_empty() {
+        let dr = if self.is_loopback() {
+            // HDSEL: RX pin disconnected, DR reflects the looped TX byte;
+            // external bytes stay queued for later.
+            self.dr
+        } else if !self.rx_buf.is_empty() {
             self.rx_buf.remove(0) as u32
         } else {
             self.dr
         };
-        if self.rx_buf.is_empty() {
+        if self.rx_buf.is_empty() && !self.is_loopback() {
             self.sr &= !(1 << 5); // Clear RXNE only when buffer empty
         }
         self.sr |= 0x00C0; // TXE, TC
@@ -95,7 +99,8 @@ impl Usart {
         get_uart_output().lock().unwrap().push(ch as char);
         self.sr |= 0x00C0; // TXE=1, TC=1
         if self.is_loopback() {
-            self.rx_push(ch, sys);
+            self.dr = ch as u32;
+            self.sr |= 1 << 5; // RXNE: receive the looped byte
         } else {
             self.update_interrupt(sys);
         }

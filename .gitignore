@@ -8,3 +8,10 @@ third_party/unicorn/
 *.o
 *.elf
 third_party/alexaltea-unicorn-js-*.tgz
+examples/serial_echo_test/build/
+examples/timer_serial_test/build/
+tests/arduino_periph_test/build/core/
+tests/arduino_periph_test/build/libraries/
+tests/arduino_periph_test/build/sketch/
+tests/arduino_periph_test/build/*.cache
+tests/arduino_periph_test/build/*.log
