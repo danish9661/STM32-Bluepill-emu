@@ -104,6 +104,7 @@ select:focus { outline: none; border-color: #7dd3fc; }
                 <span>Instructions <b id="instCount">0</b></span>
                 <span>Steps <b id="stepCount">0</b></span>
                 <span>Speed <b id="speed">—</b></span>
+                <span>Avg MIPS <b id="avgMips">—</b></span>
                 <span>PC <b id="statPc">--------</b></span>
                 <span>SP <b id="statSp">--------</b></span>
             </div>
@@ -130,6 +131,9 @@ let firmwareData = null;
 let symbolsData = null;
 let animId = null;
 let running = false;
+let runStartTs = 0;
+let runStartInst = 0;
+let totalInst = 0;
 
 const PORTS = ['A', 'B', 'C', 'D'];
 const PIN_NAMES = ['0','1','2','3','4','5','6','7','8','9','10','11','12','13','14','15'];
@@ -294,6 +298,10 @@ async function initEmulator(data, name, extDevices = {}) {
     $('instCount').textContent = '0';
     $('stepCount').textContent = '0';
     $('speed').textContent = '—';
+    $('avgMips').textContent = '—';
+    runStartTs = 0;
+    runStartInst = 0;
+    totalInst = 0;
     firmwareData = data;
     setState('Initializing…');
     try {
@@ -329,8 +337,13 @@ function runLoop() {
         const result = emu.run(500000);
         const dt = (performance.now() - t0) / 1000;
         if (dt > 0) $('speed').textContent = (500000 / dt / 1e6).toFixed(1) + 'M IPS';
-        $('instCount').textContent = result.instCount.toLocaleString();
-        $('stepCount').textContent = result.totalSteps.toLocaleString();
+        const elapsed = runStartTs ? (performance.now() - runStartTs) / 1000 : 0;
+        if (elapsed > 0.5) {
+            $('avgMips').textContent = ((result.instCount - runStartInst) / elapsed / 1e6).toFixed(1) + 'M IPS';
+        }
+    $('instCount').textContent = result.instCount.toLocaleString();
+    totalInst = result.instCount;
+    $('stepCount').textContent = result.totalSteps.toLocaleString();
         if (result.stopped) {
             running = false;
             log('Emulation stopped.', 't-err');
@@ -411,6 +424,8 @@ $('mapInput').addEventListener('change', async (e) => {
 $('runBtn').addEventListener('click', () => {
     if (!emu) return;
     running = true;
+    runStartTs = performance.now();
+    runStartInst = totalInst;
     setState('Running');
     $('runBtn').disabled = true;
     $('stopBtn').disabled = false;
