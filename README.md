@@ -1,13 +1,26 @@
-# STM32 Bluepill Emulator (WASM)
+# STM32 Bluepill Emulator (STM32F103C8) — run Arduino firmware in the browser
 
-[![Demo](https://img.shields.io/badge/live%20demo-github%20pages-38bdf8)](https://danish9661.github.io/STM32-Bluepill-emu/)
+[![Live Demo](https://img.shields.io/badge/live%20demo-github%20pages-38bdf8)](https://danish9661.github.io/STM32-Bluepill-emu/)
+[![About](https://img.shields.io/badge/about-github%20pages-7dd3fc)](https://danish9661.github.io/STM32-Bluepill-emu/about.html)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-Full-system emulation of an **STM32F103C8 (Bluepill)** running Arduino firmware, in Node.js or the browser. Uses the Unicorn ARM Cortex-M3 CPU emulator (WASM) + a Rust peripheral emulator (GPIO, USART, SPI, I2C, TIM, ADC, DMA, CAN, RTC, CRC, NVIC, EXTI, and more — all registers implemented, only USB is a stub).
+A **full-system emulator for the STM32F103C8 "Blue Pill" microcontroller** that runs
+**real, unmodified Arduino firmware** (STM32duino) — as well as libopencm3 and STM32Cube
+HAL programs — in **Node.js or the browser**. Powered by the **Unicorn ARM Cortex-M3 CPU
+emulator compiled to WebAssembly (WASM)** + a **Rust peripheral emulator** implementing
+the chip's registers with realistic timing, interrupts, and electrical behavior.
 
 - **Try it live**: [danish9661.github.io/STM32-Bluepill-emu](https://danish9661.github.io/STM32-Bluepill-emu/) — run blink with a board + LED visualization and a UART terminal, or upload your own `.bin`
-- **~5.1M instructions/sec** real-world (20M instructions in ~3.9s)
+- **~5.1M instructions/sec** in the browser, **~22M instructions/sec** headless (200M instructions in ~9 s)
 - Runs firmware compiled for the real chip: Arduino core (STM32duino), libopencm3, STM32Cube HAL
-- Verified: `Serial.println()`, `digitalWrite()`, `millis()`, SPI, I2C, CAN, DMA all work
+- Verified: `Serial.println()`, `digitalWrite()`, `millis()`, SPI, I2C, CAN, DMA, ADC, timers and interrupts all work
+
+## Features
+
+- **Full peripheral set** — GPIO (A–D) with an electrical model (pull-ups, open-drain, output slew), USART1–3, SPI1–2, I2C1–2, TIM1–14 (PWM, input capture, external ADC triggers), ADC1–2 (real conversion timing + RC sample-and-hold, DAC→ADC loopback, external triggers), DAC1–2, DMA1 (7 channels), CAN1 (RX injection), RTC alarm, CRC, NVIC priority dispatch, SysTick, EXTI, AFIO, BKP, WWDG, IWDG, PWR, FLASH, FSMC (NOR/NAND/PC-Card)
+- **Realistic analog & interrupts** — SVC/PendSV/fault escalation, deep-sleep gating, timer-driven ADC triggers (TIM1–4 TRGO/CC events, EXTI 11/15)
+- **203/203 unit tests** and a **39/39 integration canary** running a real 24-peripheral Arduino sketch (~9 s)
+- **Library + CLI + browser demo** — embed it, script it, or demo it
 
 ## Install
 
@@ -96,13 +109,17 @@ npx bluepill-emu --config=config.yaml
 </script>
 ```
 
-A full demo site (board + LED visualization, UART terminal, run/step controls) lives in `site/` and is deployed to GitHub Pages via `.github/workflows/pages.yml`.
+A full demo site (board + LED visualization, UART terminal, run/step controls) and an [About page](https://danish9661.github.io/STM32-Bluepill-emu/about.html) live in `site/` and are deployed to GitHub Pages via `.github/workflows/pages.yml`.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
 
 ## Development
 
 ```bash
 wasm-pack build --target web --out-dir pkg   # rebuild Rust peripherals
-node tests/test_all.mjs                      # 157 unit tests
+node tests/test_all.mjs                      # 203 unit tests
 node tests/bench.mjs                         # benchmarks
 node pkg/cli.mjs firmware.bin                # run firmware
 ```

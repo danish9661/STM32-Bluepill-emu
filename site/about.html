@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="google-site-verification" content="yH2SxaqtVuBYjoe79B_58FLHgpKmMXsgBzzNdM7ACTk" />
+<meta name="description" content="About the STM32F103C8 Bluepill emulator — a full-system microcontroller emulator that runs real Arduino firmware in the browser and Node.js, powered by WebAssembly (WASM) and the Unicorn ARM CPU emulator.">
+<meta name="keywords" content="STM32 emulator, Bluepill emulator, STM32F103C8 emulator, ARM Cortex-M3, Arduino firmware emulation, run Arduino in browser, embedded emulator, WASM emulator">
+<meta property="og:title" content="About — STM32 Bluepill Emulator">
+<meta property="og:description" content="Full-system STM32F103C8 emulation running real Arduino firmware in the browser via WASM + Unicorn ARM.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://danish9661.github.io/STM32-Bluepill-emu/about.html">
+<link rel="canonical" href="https://danish9661.github.io/STM32-Bluepill-emu/about.html">
+<title>About — STM32 Bluepill Emulator (STM32F103C8 in WASM)</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.65; }
+header { background: #1e293b; border-bottom: 1px solid #334155; padding: 14px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+header h1 { font-size: 17px; color: #38bdf8; font-weight: 600; }
+header .sub { font-size: 12px; color: #94a3b8; }
+header .spacer { flex: 1; }
+header a { font-size: 12px; color: #7dd3fc; text-decoration: none; border: 1px solid #0ea5e9; padding: 3px 10px; border-radius: 999px; }
+main { max-width: 860px; margin: 0 auto; padding: 28px 24px 60px; }
+h2 { font-size: 15px; color: #7dd3fc; margin: 26px 0 10px; text-transform: uppercase; letter-spacing: 1px; }
+p, li { font-size: 14px; color: #cbd5e1; }
+ul { padding-left: 22px; }
+li { margin: 5px 0; }
+code { background: #1e293b; border: 1px solid #334155; border-radius: 4px; padding: 1px 6px; font-size: 13px; color: #7dd3fc; }
+a { color: #38bdf8; }
+.badge-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0; }
+.badge { font-size: 12px; background: #0ea5e9; color: #082f49; padding: 4px 12px; border-radius: 999px; font-weight: 600; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 14px 0; }
+.stat { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 14px; }
+.stat b { display: block; font-size: 20px; color: #38bdf8; font-family: Consolas, monospace; }
+.stat span { font-size: 12px; color: #94a3b8; }
+footer { border-top: 1px solid #334155; padding: 18px 24px; text-align: center; font-size: 12px; color: #64748b; }
+</style>
+</head>
+<body>
+<header>
+    <h1>STM32 Bluepill Emulator</h1>
+    <span class="sub">About this project</span>
+    <span class="spacer"></span>
+    <a href="index.html">← Live Demo</a>
+</header>
+
+<main>
+<h2>What is this?</h2>
+<p>The <strong>STM32 Bluepill Emulator</strong> is a full-system emulator for the
+<strong>STM32F103C8 "Blue Pill"</strong> microcontroller. It executes <strong>real,
+unmodified firmware</strong> — compiled Arduino sketches (STM32duino), libopencm3 and
+STM32Cube HAL programs — in your browser or in Node.js, without any hardware.</p>
+
+<p>Instead of a simplified instruction-interpreter, it combines two real engines:
+<strong>Unicorn</strong>, the ARM <strong>Cortex-M3</strong> CPU emulator (compiled to
+WebAssembly), and a <strong>Rust peripheral emulator</strong> that implements the chip's
+registers — GPIO, USART, SPI, I2C, TIM, ADC, DAC, DMA, CAN, RTC, CRC, NVIC, EXTI, FSMC
+and more — with realistic timing, interrupts and electrical behavior.</p>
+
+<div class="badge-row">
+    <span class="badge">WASM / WebAssembly</span>
+    <span class="badge">ARM Cortex-M3</span>
+    <span class="badge">Rust</span>
+    <span class="badge">Runs in browser</span>
+</div>
+
+<h2>Why use an STM32 emulator?</h2>
+<ul>
+    <li><strong>Test Arduino firmware without hardware</strong> — blink, UART, SPI Flash, I2C EEPROM, OLED, touchscreen, CAN and DMA sketches run in a tab.</li>
+    <li><strong>CI &amp; automated testing</strong> — run firmware headlessly with assertions (39 peripheral checks pass in ~9 s).</li>
+    <li><strong>Debug with full visibility</strong> — inspect registers, memory, GPIO states, interrupts and the CPU state live.</li>
+    <li><strong>Learn embedded systems</strong> — see how timers, DMA and interrupts actually interact, instruction by instruction.</li>
+</ul>
+
+<h2>What's emulated?</h2>
+<p>Fully implemented: <code>GPIO (A–D)</code> with electrical model (pull-ups, open-drain,
+slew), <code>USART1–3</code>, <code>SPI1–2</code>, <code>I2C1–2</code>, <code>TIM1–14</code>
+(PWM, input capture, external ADC triggers), <code>ADC1–2</code> with real conversion
+timing and an RC sample-and-hold analog model, <code>DAC1–2</code> (DAC→ADC loopback),
+<code>DMA1</code> (7 channels), <code>CAN1</code> (mailboxes + filters + RX injection),
+<code>RTC</code> (alarm IRQ), <code>CRC</code>, <code>NVIC</code> (priority dispatch,
+SVC/PendSV/fault handling), <code>SysTick</code>, <code>SCB</code>, <code>EXTI</code>,
+<code>AFIO</code>, <code>BKP</code>, <code>WWDG</code>, <code>IWDG</code>, <code>PWR</code>,
+<code>FLASH</code>, and <code>FSMC</code> (NOR/NAND/PC-Card banks). Only <strong>USB</strong>
+is a stub.</p>
+
+<h2>Performance</h2>
+<div class="stat-grid">
+    <div class="stat"><b>~22M IPS</b><span>real-world throughput (headless CLI)</span></div>
+    <div class="stat"><b>~5.1M IPS</b><span>in the browser demo</span></div>
+    <div class="stat"><b>203/203</b><span>peripheral unit tests</span></div>
+    <div class="stat"><b>39/39</b><span>firmware integration checks</span></div>
+</div>
+
+<h2>How it works</h2>
+<p>The CPU executes in batches inside Unicorn; between batches the Rust peripheral model
+ticks — timers advance, ADC conversions complete, UART drains — and pending interrupts
+are injected back into the CPU. This batch model keeps the emulation accurate while
+staying fast enough for interactive use.</p>
+
+<h2>Project links</h2>
+<ul>
+    <li><a href="https://danish9661.github.io/STM32-Bluepill-emu/">Live demo</a> — run blink, UART echo and a 24-peripheral test firmware in the browser</li>
+    <li><a href="https://github.com/danish9661/STM32-Bluepill-emu">GitHub repository</a> — source, CLI, library API and documentation</li>
+    <li><a href="https://www.npmjs.com/package/stm32-bluepill-emu">npm package</a> — <code>npm install stm32-bluepill-emu</code></li>
+</ul>
+</main>
+
+<footer>
+STM32 Bluepill Emulator · STM32F103C8 · Arduino firmware emulation in the browser via WebAssembly — open source on GitHub.
+</footer>
+</body>
+</html>
