@@ -38,6 +38,8 @@ emu.gpioReadOutput(port, pin); emu.gpioReadInput(port, pin); emu.gpioSetInput(..
 emu.gpioSetSlew(n);         // output slew delay in instructions (0 = instant) — IDR readback shows the old level until the transition settles
 emu.pwmDuty(timerAddr, channel);    // duty 0-100, e.g. (0x40000000, 0) = TIM2 CH1
 emu.setSimAdc(value);      // ADC conversion result firmware will read (conversion timing is real)
+emu.gpioSetAnalog(port, pin, level); // wire a 12-bit analog voltage onto a GPIO pin: ADC channels mapped to that pin sample it via an RC sample-and-hold instead of the sim value; level 0xFFFF disconnects
+emu.adcSetRcTau(cycles);   // RC sample-and-hold time constant in ADC cycles (1 instr = 1 cycle), default 12
 emu.setTouch(periphAddr, x, y, pressure);  // ADS7846 touch injection
 emu.periphRead(addr, width); emu.periphWrite(addr, width, value); // raw register access
 emu.memRead32(addr);       // read emulated RAM/Flash word (e.g. firmware flags)

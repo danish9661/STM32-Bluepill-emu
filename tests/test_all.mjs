@@ -6,7 +6,7 @@ const { init, periph_read, periph_write, tick, step_batch, has_pending_interrupt
         get_next_pending_interrupt, clear_current_interrupt, gpio_read_output, gpio_set_input,
         gpio_read_input, get_uart_output, uart_rx_byte, adc_set_sim_value,
         is_watchdog_reset_requested, can_inject_message, gpio_set_slew, raise_fault,
-        add_fsmc_bank } = periph;
+        add_fsmc_bank, gpio_set_analog, adc_set_rc_tau } = periph;
 
 let passed = 0, failed = 0;
 
@@ -184,6 +184,45 @@ sradc = periph_read(ADC1 + 0x00, 4);
 assert_eq(sradc & (1 << 1), 1 << 1, 'ADC SR EOC after second SWSTART');
 dr_val = periph_read(ADC1 + 0x4C, 4) & 0xFFF;
 assert_eq(dr_val, 0x155, 'ADC DR second value');
+
+// RC sample-and-hold: wire 3.3V analog to PA0 (channel 0), sample with a
+// large RC tau so the cap does NOT reach the target within one sample window.
+// A newly reset cap (0 V) converts to a fraction of the full scale.
+reset();
+periph_write(0x40021018, 4, 1 << 9); // ADC1EN
+periph_write(ADC1 + 0x08, 4, 1);     // ADON
+adc_set_sim_value(0x000);            // sim source unused for wired pins
+gpio_set_analog(0, 0, 0xFFF);        // PA0 = 3.3V (12-bit full scale)
+adc_set_rc_tau(100);                 // very slow cap -> huge undershoot
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 22)); // ADON + SWSTART
+step_batch(14);
+const rc_full = periph_read(ADC1 + 0x4C, 4) & 0xFFF;
+assert(rc_full < 0xFFF - 64, `ADC RC cap does not reach target in one sample (${rc_full})`);
+assert(rc_full > 0, `ADC RC cap charges off zero (${rc_full})`);
+
+// A second conversion directly after settles further toward the target
+// (the cap holds the previous result and keeps charging).
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 22));
+step_batch(14);
+const rc_second = periph_read(ADC1 + 0x4C, 4) & 0xFFF;
+assert(rc_second > rc_full, `ADC RC cap continues charging toward target (${rc_full} -> ${rc_second})`);
+
+// With a tiny tau the cap tracks the wire within the sample window
+// (still taking the RC path; result near the target but allowed to undershoot).
+periph_write(ADC1 + 0x0C, 4, 7 << 0); // SMP0 = 239.5 cycles window
+adc_set_rc_tau(1);
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 22));
+step_batch(252);
+const rc_fast = periph_read(ADC1 + 0x4C, 4) & 0xFFF;
+assert(rc_fast > 0xF00, `RC cap settles near full scale with tau=1 (${rc_fast})`);
+
+// Per-pin disconnection: clear the analog wire, RC path reverts to the
+// exact simulated value.
+gpio_set_analog(0, 0, 0xFFFF);
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 22));
+step_batch(14);
+const rc_sim = periph_read(ADC1 + 0x4C, 4) & 0xFFF;
+assert_eq(rc_sim, 0x000, 'ADC without wired pin returns exact sim value');
 
 // ============================================================
 // RCC

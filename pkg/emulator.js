@@ -212,7 +212,8 @@ export async function createEmulator(opts = {}) {
     add_spi_flash, add_i2c_eeprom, add_touchscreen, add_lcd, add_i2c_oled, add_software_spi,
     init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
     gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt, nvic_systick_take,
-    can_inject_message, adc_set_sim_value, touchscreen_set_touch, pwm_duty, raise_fault } = periph;
+    can_inject_message, adc_set_sim_value, gpio_set_analog, adc_set_rc_tau,
+    touchscreen_set_touch, pwm_duty, raise_fault } = periph;
 
     // Register external devices BEFORE init()
     for (const d of ext_devices.spi_flash || []) {
@@ -738,6 +739,8 @@ export async function createEmulator(opts = {}) {
         pwmDuty(addr, channel = 0) { return pwm_duty(addr, channel); },
 
         setSimAdc(value) { adc_set_sim_value(value); },
+        gpioSetAnalog(port, pin, level) { gpio_set_analog(port, pin, level); },
+        adcSetRcTau(cycles) { adc_set_rc_tau(cycles); },
         setTouch(peripheral, x, y, pressure) { touchscreen_set_touch(peripheral, x, y, pressure); },
 
         /** Low-level register access (width: 1, 2, or 4). */
