@@ -1,5 +1,9 @@
 ## Progress
 
+> Stale log from the early 10-peripheral era (Aug 8). Superseded by
+> `tests/arduino_periph_test` (24 peripherals, 39 checks), `docs/PERIPHERALS.md`,
+> and `docs/USAGE.md`. Kept for git history context only.
+
 ### Done
 - **Comprehensive firmware** (`tests/comprehensive_test/comprehensive_test.ino`) — register-level Arduino sketch testing all 10 peripherals
 - **10 peripheral tests**:

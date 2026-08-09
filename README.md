@@ -125,4 +125,5 @@ Fully implemented: GPIO (A–D), USART1–3, SPI1–2, I2C1–2, TIM1–7 (PWM, 
 └────────────────────────────────────────────────────────────┘
 ```
 
-See `NEXT_PHASE.md` for the roadmap to unify both WASM modules into one (eliminating the JS bridge for ~5–10× more speed).
+See `docs/NEXT_PHASE.md` for the roadmap (the historical "merge WASM modules for 5–10×"
+goal was retired — the JS bridge was never the bottleneck; ~22M IPS measured today).
