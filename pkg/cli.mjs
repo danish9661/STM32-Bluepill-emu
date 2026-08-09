@@ -470,7 +470,7 @@ async function main() {
                 // Handler crashed on BX LR (EXC_RETURN not supported)
             }
             clear_current_interrupt();
-            if (irq === 15) { while (nvic_systick_take()) { /* re-pended: more 1ms ticks this batch */ } }
+            if (irq === -1) { while (nvic_systick_take()) { /* re-pended: more 1ms ticks this batch */ } }
             uc.reg_write_i32(Module.ARM_REG_R0, savedR0);
             uc.reg_write_i32(Module.ARM_REG_R1, savedR1);
             uc.reg_write_i32(Module.ARM_REG_R2, savedR2);

@@ -234,7 +234,13 @@ impl Nvic {
                 // Deliver any number of elapsed 1ms ticks, not just one per
                 // batch — otherwise delay(ms)/millis() run at 1 IRQ per batch.
                 let ticks = (elapsed / systick_period.max(1) as u64).min(16) as u32;
-                self.systick_debt = self.systick_debt.saturating_add(ticks).min(16);
+                // The pending SysTick IRQ (set below) delivers the FIRST tick;
+                // debt holds only the REMAINING ticks, which systick_take()
+                // re-pends one per delivery. Adding `ticks` wholesale double-
+                // delivered every tick once the JS drain was wired to irq=-1.
+                let already_pending = self.pending & (1u128 << (IRQ_OFFSET + irq::SYSTICK)) != 0;
+                let extra = if already_pending { ticks } else { ticks.saturating_sub(1) };
+                self.systick_debt = self.systick_debt.saturating_add(extra).min(16);
                 self.last_systick_trigger = n;
                 self.set_intr_pending(irq::SYSTICK);
             }
