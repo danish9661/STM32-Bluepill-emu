@@ -27,6 +27,8 @@ pub struct Nvic {
     pending_reg: [u32; REG_WORDS],
     active: [u32; REG_WORDS],
     priority: [u8; IRQ_COUNT],
+    /// System exception priorities for exceptions 4..15 (SHPR1-3). Default 0x80.
+    sys_handler_priority: [u8; 16],
     /// Active exception priorities stack (top = current priority)
     active_prio_stack: Vec<u8>,
     /// Last IRQ popped by get_next_pending_intr (for same-batch fairness)
@@ -44,6 +46,7 @@ impl Default for Nvic {
             pending_reg: [0; REG_WORDS],
             active: [0; REG_WORDS],
             priority: [0; IRQ_COUNT],
+            sys_handler_priority: [0x80; 16],
             active_prio_stack: Vec::new(),
             last_popped: None,
         }
@@ -108,11 +111,23 @@ impl Nvic {
         if let Some(p) = Self::fixed_exception_priority(irq) {
             return p;
         }
-        // System exceptions with programmable priority default to 0x80
+        // System exceptions with programmable priority: read SHPR (via
+        // set_sys_handler_prio from SCB writes), default 0x80.
         if irq < 0 {
+            let exc = (irq + 16) as usize;
+            if (4..16).contains(&exc) {
+                return self.sys_handler_priority[exc];
+            }
             return 0x80;
         }
         self.priority.get(irq as usize).copied().unwrap_or(0xFF)
+    }
+
+    /// SCB SHPR writes route here: set the priority of system exception `exc` (4..15).
+    pub fn set_sys_handler_prio(&mut self, exc: usize, priority: u8) {
+        if (4..16).contains(&exc) {
+            self.sys_handler_priority[exc] = priority;
+        }
     }
 
     pub fn current_priority(&self, basepri: u32) -> u8 {

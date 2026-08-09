@@ -36,6 +36,15 @@ pub trait Peripheral {
     fn read(&mut self, sys: &System, offset: u32) -> u32;
     fn write(&mut self, sys: &System, offset: u32, value: u32);
     fn tick(&mut self, _sys: &System) {}
+    /// Width-aware read (memory-mapped devices like FSMC need the access size
+    /// to assemble bytes); defaults to plain read().
+    fn read_sized(&mut self, sys: &System, offset: u32, _size: u8) -> u32 {
+        self.read(sys, offset)
+    }
+    /// Width-aware write; defaults to plain write().
+    fn write_sized(&mut self, sys: &System, offset: u32, _size: u8, value: u32) {
+        self.write(sys, offset, value);
+    }
     fn rx_byte(&mut self, _sys: &System, _byte: u8) {}
     fn rx_pending(&self) -> u32 { 0 }
     fn can_inject_message(&mut self, _sys: &System, _tir: u32, _tdtr: u32, _tdlr: u32, _tdhr: u32) -> bool { false }
@@ -49,6 +58,18 @@ pub trait Peripheral {
     fn remap_status(&self, _name: &str) -> Option<u32> { None }
     /// Returns the current PWM duty (0-100) of a timer channel, if this is a timer.
     fn pwm_duty(&self, _channel: u32) -> Option<u32> { None }
+    /// Peripheral DMA request (e.g. ADC end-of-conversion): triggers a configured
+    /// DMA channel transfer if it is enabled.
+    fn dma_request(&mut self, _sys: &System, _channel: u32) {}
+    /// True when the CPU is in a deep-sleep mode (STOP/STANDBY), gating peripheral ticks.
+    fn in_deep_sleep(&self) -> bool { false }
+    /// Called instead of tick() while the peripheral is frozen in STOP/STANDBY.
+    /// Instruction-delta peripherals must advance their delta base here without
+    /// processing state, so they don't catch up when the CPU wakes.
+    fn tick_frozen(&mut self, _sys: &System) {}
+    /// Raise a fault (kind: 0=fetch, 1=read, 2=write, 3=undef instruction), setting
+    /// SCB fault status registers and pending the fault exception with escalation.
+    fn raise_fault(&mut self, _sys: &System, _kind: u32, _addr: u32) {}
 }
 
 pub struct PeripheralSlot<T> {
@@ -407,7 +428,7 @@ impl Peripherals {
         0
     }
 
-    pub fn read(&self, sys: &System, addr: u32, _size: u8) -> u32 {
+    pub fn read(&self, sys: &System, addr: u32, size: u8) -> u32 {
         if let Some((addr, bit_number)) = Self::bitbanding(addr) {
             return (self.read(sys, addr, 1) >> bit_number) & 1;
         }
@@ -422,7 +443,7 @@ impl Peripherals {
         let value = if Self::NVIC_REGS_BASE <= addr && addr < Self::NVIC_REGS_END {
             self.nvic.borrow_mut().read(sys, addr - Self::NVIC_REGS_BASE)
         } else if let Some(p) = Self::get_peripheral(&self.peripherals, addr) {
-            p.peripheral.borrow_mut().read(sys, addr - p.start)
+            p.peripheral.borrow_mut().read_sized(sys, addr - p.start, size)
         } else { 0 };
         if is_reg { value << (8 * byte_offset) } else { value }
     }
@@ -453,7 +474,7 @@ impl Peripherals {
         if Self::NVIC_REGS_BASE <= addr && addr < Self::NVIC_REGS_END {
             self.nvic.borrow_mut().write(sys, addr - Self::NVIC_REGS_BASE, value);
         } else if let Some(p) = Self::get_peripheral(&self.peripherals, addr) {
-            p.peripheral.borrow_mut().write(sys, addr - p.start, value);
+            p.peripheral.borrow_mut().write_sized(sys, addr - p.start, _size, value);
         }
     }
 
@@ -477,8 +498,7 @@ impl Peripherals {
     }
 
     /// Queries the AFIO peripheral for the GPIO port mapped to a given EXTI line (0-15).
-    pub fn exti_port_for_line(&self, line: u32) -> Option<char> {
-        for slot in &self.peripherals {
+    pub fn exti_port_for_line(&self, line: u32) -> Option<char> {        for slot in &self.peripherals {
             if slot.start == 0x4001_0000 {
                 return slot.peripheral.borrow().exti_port(line);
             }
@@ -505,6 +525,31 @@ impl Peripherals {
                 slot.peripheral.borrow_mut().gpio_pin_changed(sys, port, pin, rising);
                 return;
             }
+        }
+    }
+
+    /// Peripheral DMA request: fires the enabled DMA channel if configured.
+    pub fn dma_request(&self, sys: &System, channel: u32) {
+        if let Some(p) = Self::get_peripheral(&self.peripherals, 0x4000_6000) {
+            p.peripheral.borrow_mut().dma_request(sys, channel);
+        }
+    }
+
+    /// STOP/STANDBY detection: SCB SCR SLEEPDEEP (bit 2). In deep sleep the core is
+    /// halted; only LSI/LSE-clocked peripherals (IWDG, RTC) keep running.
+    pub fn in_deep_sleep(&self) -> bool {
+        if let Some(p) = Self::get_peripheral(&self.peripherals, 0xE000_ED00) {
+            if let Ok(s) = p.peripheral.try_borrow() {
+                return s.in_deep_sleep();
+            }
+        }
+        false
+    }
+
+    /// Raise a fault through the SCB (CFSR/HFSR/BFAR + NVIC escalation).
+    pub fn raise_fault(&self, sys: &System, kind: u32, addr: u32) {
+        if let Some(p) = Self::get_peripheral(&self.peripherals, 0xE000_ED00) {
+            p.peripheral.borrow_mut().raise_fault(sys, kind, addr);
         }
     }
 

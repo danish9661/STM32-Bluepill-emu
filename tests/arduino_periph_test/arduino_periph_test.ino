@@ -50,6 +50,7 @@
 #define EXTI_B      0x40010400u
 #define DMA1_B      0x40020000u
 #define NVIC_ISER0  0xE000E100u
+#define SCB_B       0xE000ED00u
 
 #define reg(addr) (*(volatile uint32_t *)(addr))
 
@@ -439,6 +440,28 @@ void testRTCAlarmIRQ() {
     /* configured in loopAsyncChecks (tick-gated at batch boundaries) */
 }
 
+/* 10. SVC (software interrupt) + PendSV (lower-priority exception) */
+static volatile uint32_t svcCount = 0;
+static volatile uint32_t pendsvCount = 0;
+
+extern "C" void SVC_Handler(void) {
+    svcCount++;
+}
+
+extern "C" void PendSV_Handler(void) {
+    pendsvCount++;
+}
+
+void testSVC() {
+    /* PendSV (0x80) lower priority than SVCall (0x40): PendSV fires after SVC returns */
+    reg(SCB_B + 0x20) = (0x80 << 16) | 0x40; /* SHPR3 */
+    __asm volatile("svc #2");
+    reg(SCB_B + 0x04) = (1 << 28);           /* ICSR: PENDSVSET */
+    char buf[48];
+    snprintf(buf, sizeof(buf), "count=%lu", (unsigned long)svcCount);
+    report("SVC", svcCount == 1, buf);
+}
+
 void testOLED() {
     Wire.beginTransmission(0x3C);
     Wire.write(0x00); Wire.write(0xAE);   /* display off */
@@ -509,6 +532,7 @@ static bool rtcAlarmDone = false;
 static uint32_t tim3Armed = 0;
 static uint32_t tim4Armed = 0;
 static uint32_t rtcAlarmArmed = 0;
+static bool pendsvDone = false;
 
 void loopAsyncChecks() {
     asyncCount++;
@@ -738,6 +762,19 @@ void loopAsyncChecks() {
             rtcAlarmDone = true;
         }
     }
+
+    /* 10. PendSV: pended by testSVC() (ICSR PENDSVSET after the SVC returns) */
+    if (!pendsvDone) {
+        if (pendsvCount > 0) {
+            char buf[48];
+            snprintf(buf, sizeof(buf), "count=%lu", (unsigned long)pendsvCount);
+            report("PendSV", true, buf);
+            pendsvDone = true;
+        } else if (asyncCount > 40) {
+            report("PendSV", false, "PendSV never fired after SVC");
+            pendsvDone = true;
+        }
+    }
 }
 
 /* ============================ setup/loop =============================== */
@@ -776,6 +813,7 @@ void setup() {
     testUSART2();
     testTIM3_PWM();
     testRTCAlarmIRQ();
+    testSVC();
     timer2.setOverflow(1000, MICROSEC_FORMAT); /* 1 ms */
     timer2.attachInterrupt(onTimer);
     timer2.resume();
@@ -786,7 +824,8 @@ void setup() {
 void loop() {
     loopAsyncChecks();
     if (uartRxDone && dmaRxDone && timDone && extiDone && sysTickDone && dmaTxDone
-        && exti1Done && exti13Done && canRxDone && tim3Done && tim4Done && rtcAlarmDone) {
+        && exti1Done && exti13Done && canRxDone && tim3Done && tim4Done && rtcAlarmDone
+        && pendsvDone) {
         Serial.println();
         char buf[48];
         snprintf(buf, sizeof(buf), "SUMMARY pass=%lu fail=%lu", (unsigned long)passCount, (unsigned long)failCount);

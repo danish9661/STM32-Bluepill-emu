@@ -35,8 +35,9 @@ emu.getUartOutput();        // everything the firmware ever printed
 emu.uartRx(byte); emu.uartRxBytes(bytes); emu.rxPending();
 emu.canInjectMessage(addr, tir, tdtr, tdlr, tdhr);
 emu.gpioReadOutput(port, pin); emu.gpioReadInput(port, pin); emu.gpioSetInput(...);
+emu.gpioSetSlew(n);         // output slew delay in instructions (0 = instant) — IDR readback shows the old level until the transition settles
 emu.pwmDuty(timerAddr, channel);    // duty 0-100, e.g. (0x40000000, 0) = TIM2 CH1
-emu.setSimAdc(value);      // ADC conversion result firmware will read
+emu.setSimAdc(value);      // ADC conversion result firmware will read (conversion timing is real)
 emu.setTouch(periphAddr, x, y, pressure);  // ADS7846 touch injection
 emu.periphRead(addr, width); emu.periphWrite(addr, width, value); // raw register access
 emu.memRead32(addr);       // read emulated RAM/Flash word (e.g. firmware flags)
@@ -52,8 +53,16 @@ ext_devices: {
   lcd:         [{ peripheral, cs }],                             // SPI TFT
   touchscreen: [{ peripheral, touch_detected_pin, cs }],         // ADS7846 (cs on the GPIO pin driving CS)
   software_spi:[{ name, cs, clk, miso, mosi }],                  // bit-banged SPI via GPIO transitions
+  fsmc:        [{ name, data }],                                 // FSMC NOR/PSRAM: 'FSMC.BANK1..4' (NE1–4), 'FSMC.BANK5..6' (NAND), 'FSMC.BANK7' (PC Card); byte image
 }
 ```
+
+FSMC banks are read/written by the firmware at their memory windows (NE1–4 @ 0x6000_0000…,
+NAND2/3 @ 0x7000_0000/0x8000_0000, PC Card @ 0x9000_0000) once the bank controller is
+enabled (`BCR.MBKEN`; NOR writes also require `BCR.WREN`). Unmapped data accesses
+(no bank backing or bank disabled) are raised as faults, and SVC/PendSV/hard-fault
+handlers in firmware work normally (faults escalate to HardFault unless the SHCSR
+enable bits are set via `SCB.SHCSR`).
 
 ## CLI (`pkg/cli.mjs`)
 
@@ -95,11 +104,11 @@ patches:
   - addr: 0x08001BBC           # instruction-level patches (see workarounds)
 ```
 
-### Firmware test (37 checks, the canary)
+### Firmware test (39 checks, the canary)
 
 ```bash
 echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml --max=200000000
-node tests/canary.mjs          # same thing with --max=100000000, asserts 37/37, ~25s
+node tests/canary.mjs          # same thing with --max=100000000, asserts 39/39, ~25s
 ```
 
 - `A` (0x41) is reserved for the DMA RX test; `B` is the UART RX byte.
@@ -108,7 +117,9 @@ node tests/canary.mjs          # same thing with --max=100000000, asserts 37/37,
   ID-list mode → only STDID **0** matches — inject ID 0, not 0x123.
 - **Batch-boundary timing**: peripherals tick only in `step_batch()` between `emu_start`
   batches — never mid-batch. Tests that read CNT/SR/IRQ flags after a `spin()` must be
-  async-style (arm once, poll across batches).
+  async-style (arm once, poll across batches). The one exception: `svc` fires
+  synchronously inside a batch (the hook jumps straight to `SVC_Handler`), so a
+  synchronous SVC check works in `setup()`.
 - Use `--max=200000000` for the full run (50M stops mid-print, which is not a deadlock).
 
 ## Browser demo
@@ -117,17 +128,17 @@ node tests/canary.mjs          # same thing with --max=100000000, asserts 37/37,
 python -m http.server -d pkg    # open http://localhost:8000
 ```
 
-The demo runs the periph37 firmware live with a run loop that batches
+The demo runs the periph39 firmware live with a run loop that batches
 `step(20000)` per rAF frame, renders UART output per frame, and reports real IPS.
-Full periph37 run: ~0.5 s wall in-browser.
+Full periph39 run: ~0.5 s wall in-browser.
 
 ## Development
 
 ```bash
 cargo check                          # Rust sanity (fast)
 wasm-pack build --target web         # rebuild pkg/stm32_bluepill_wasm_bg* (Rust → wasm)
-node tests/test_all.mjs              # 158 unit tests
-node tests/canary.mjs                # regression canary: 37/37 firmware checks, ~25s
+node tests/test_all.mjs              # 189 unit tests
+node tests/canary.mjs                # regression canary: 39/39 firmware checks, ~25s
 node tests/bench.mjs                 # benchmarks
 ```
 

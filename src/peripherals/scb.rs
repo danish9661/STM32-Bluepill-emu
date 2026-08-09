@@ -36,6 +36,26 @@ impl Scb {
 
     pub fn vtor(&self) -> u32 { self.vtor }
 
+    fn write_shpr(&mut self, sys: &System, offset: u32, value: u32) {
+        let mut nvic = sys.p.nvic.borrow_mut();
+        match offset {
+            0x18 => { // SHPR1: MemManage(4), BusFault(5), UsageFault(6)
+                nvic.set_sys_handler_prio(4, (value & 0xFF) as u8);
+                nvic.set_sys_handler_prio(5, ((value >> 8) & 0xFF) as u8);
+                nvic.set_sys_handler_prio(6, ((value >> 16) & 0xFF) as u8);
+            }
+            0x1C => { // SHPR2: SVCall(11)
+                nvic.set_sys_handler_prio(11, (value & 0xFF) as u8);
+            }
+            0x20 => { // SHPR3: PendSV(14), SysTick(15)
+                nvic.set_sys_handler_prio(14, (value & 0xFF) as u8);
+                nvic.set_sys_handler_prio(15, ((value >> 8) & 0xFF) as u8);
+            }
+            _ => {}
+        }
+        self.shpr[(offset - 0x18) as usize / 4] = value;
+    }
+
     fn write_aircr(&mut self, value: u32) {
         if (value & 0xFFFF) == 0x05FA {
             self.aircr = (value & 0xFFFF_0000) | 0x05FA_0000;
@@ -70,6 +90,39 @@ impl Scb {
 }
 
 impl Peripheral for Scb {
+    /// STOP/STANDBY: SCR SLEEPDEEP (bit 2) selects deep sleep on WFI/WFE.
+    fn in_deep_sleep(&self) -> bool {
+        self.scr & (1 << 2) != 0
+    }
+
+    /// Raise a fault with full SCB bookkeeping and NVIC escalation.
+    /// kind: 0 = instruction fetch, 1 = data read, 2 = data write, 3 = undefined instruction.
+    /// The fault status (CFSR/BFAR) is always recorded; the pending target
+    /// depends on the SHCSR enable bits (else the fault escalates to HardFault).
+    fn raise_fault(&mut self, sys: &System, kind: u32, addr: u32) {
+        use crate::peripherals::nvic::irq;
+        let (cfsr, target, enabled) = match kind {
+            0 | 1 | 2 => {
+                self.cfsr |= if kind == 0 { 1 << 8 } else { 1 << 9 }; // IBUSERR | PRECISERR
+                self.bfar = addr;
+                self.cfsr |= 1 << 15; // BFARVALID
+                (0, irq::BUS_FAULT, self.shcsr & (1 << 18) != 0) // BUSFAULTENA
+            }
+            _ => {
+                self.cfsr |= 1 << 16; // UNDEFINSTR
+                (0, irq::USAGE_FAULT, self.shcsr & (1 << 16) != 0) // USGFAULTENA
+            }
+        };
+        let mut nvic = sys.p.nvic.borrow_mut();
+        if enabled {
+            nvic.set_intr_pending(target);
+        } else {
+            // fault exception disabled: escalate to HardFault
+            self.hfsr |= 1 << 30; // FORCED
+            nvic.set_intr_pending(irq::HARD_FAULT);
+        }
+    }
+
     fn read(&mut self, _sys: &System, offset: u32) -> u32 {
         match offset {
             0x00 => {
@@ -113,10 +166,10 @@ impl Peripheral for Scb {
             0x0C => self.write_aircr(value),
             0x10 => self.scr = value & 0x1E,
             0x14 => self.ccr = value & 0xFFFF,
-            0x18 => self.shpr[0] = value,
-            0x1C => self.shpr[1] = value,
-            0x20 => self.shpr[2] = value,
-            0x24 => self.shcsr = value & 0xFFFF,
+             0x18 => self.write_shpr(sys, 0x18, value),
+             0x1C => self.write_shpr(sys, 0x1C, value),
+             0x20 => self.write_shpr(sys, 0x20, value),
+            0x24 => self.shcsr = value & 0x7FFFF,
             0x28 => self.cfsr = value & 0xFFFF_FFFF,
             0x2C => self.hfsr = value & 0x7FFF,
             0x30 => self.dfsr = value & 0xFFFF,

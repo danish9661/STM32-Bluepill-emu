@@ -176,6 +176,12 @@ impl Peripheral for Timer {
         self.advance(sys);
     }
 
+    /// Frozen in STOP/STANDBY: sync the instruction-delta base without
+    /// advancing the counter (the timer clock is gated in deep sleep).
+    fn tick_frozen(&mut self, _sys: &System) {
+        self.last_tick = instruction_count();
+    }
+
     fn read(&mut self, sys: &System, offset: u32) -> u32 {
         if offset == 0x24 { return self.cnt; }
         self.advance(sys);

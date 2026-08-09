@@ -5,6 +5,7 @@ pub mod lcd;
 pub mod touchscreen;
 pub mod display;
 pub mod i2c_oled;
+pub mod fsmc_nor;
 
 pub use spi_flash::SpiFlash;
 pub use i2c_eeprom::I2cEeprom;
@@ -13,6 +14,7 @@ pub use lcd::Lcd;
 pub use touchscreen::Touchscreen;
 pub use display::Display;
 pub use i2c_oled::I2cOled;
+pub use fsmc_nor::FsmcNor;
 
 use std::{rc::Rc, cell::RefCell};
 
@@ -38,6 +40,7 @@ pub struct ExtDevices {
     pub touchscreens: Vec<Rc<RefCell<Touchscreen>>>,
     pub displays: Vec<Rc<RefCell<Display>>>,
     pub i2c_oleds: Vec<Rc<RefCell<I2cOled>>>,
+    pub fsmc_nors: Vec<Rc<RefCell<FsmcNor>>>,
 }
 
 impl ExtDevices {
@@ -132,6 +135,11 @@ impl ExtDevices {
             .filter(|d| d.borrow().config.peripheral == peri_name)
             .next()
             .map(|d| d.clone() as Rc<RefCell<dyn ExtDevice<u32, u32>>>)
+        .or_else(||
+        self.fsmc_nors.iter()
+            .filter(|d| d.borrow().name() == peri_name)
+            .next()
+            .map(|d| d.clone() as Rc<RefCell<dyn ExtDevice<u32, u32>>>))
     }
 }
 

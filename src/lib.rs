@@ -148,7 +148,14 @@ pub fn dma_set_completed_many(bits: u32) {
 
 #[wasm_bindgen]
 pub fn gpio_read_output(port: u32, pin: u32) -> bool {
-    sys().p.gpio.borrow().read_output_pin(port as u8, pin as u8)
+    sys().p.gpio.borrow_mut().read_output_pin(&*sys(), port as u8, pin as u8)
+}
+
+/// Set the GPIO output slew delay in instructions (0 = instant). Affects IDR
+/// readback only; device callbacks stay instant.
+#[wasm_bindgen]
+pub fn gpio_set_slew(inst: u32) {
+    peripherals::gpio::set_gpio_slew(inst);
 }
 
 #[wasm_bindgen]
@@ -227,6 +234,24 @@ pub fn add_i2c_eeprom(peripheral: &str, address: u8, data: &[u8]) {
     let eeprom = I2cEeprom::new(config);
     system::get_ext_devices().lock().unwrap().i2c_eeproms
         .push(std::rc::Rc::new(std::cell::RefCell::new(eeprom)));
+}
+
+/// Raise a fault (kind: 0=fetch, 1=data read, 2=data write, 3=undef instruction).
+/// Sets SCB CFSR/HFSR/BFAR and pends the fault exception (with SHCSR escalation
+/// to HardFault when the specific fault handler is disabled).
+#[wasm_bindgen]
+pub fn raise_fault(kind: u32, addr: u32) {
+    sys().p.raise_fault(&*sys(), kind, addr);
+}
+
+/// Add an FSMC NOR/PSRAM memory device backed by `data` (byte image).
+/// `name` must be FSMC.BANK1..4 (NE1-4), FSMC.BANK5..6 (NAND), or FSMC.BANK7
+/// (PC Card). Must be called before init().
+#[wasm_bindgen]
+pub fn add_fsmc_bank(name: &str, data: &[u8]) {
+    use crate::ext_devices::fsmc_nor::FsmcNor;
+    let bank = std::rc::Rc::new(std::cell::RefCell::new(FsmcNor::new(name, data)));
+    system::get_ext_devices().lock().unwrap().fsmc_nors.push(bank);
 }
 
 #[wasm_bindgen]

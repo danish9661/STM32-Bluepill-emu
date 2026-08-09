@@ -212,7 +212,7 @@ export async function createEmulator(opts = {}) {
     add_spi_flash, add_i2c_eeprom, add_touchscreen, add_lcd, add_i2c_oled, add_software_spi,
     init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
     gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt, nvic_systick_take,
-    can_inject_message, adc_set_sim_value, touchscreen_set_touch, pwm_duty } = periph;
+    can_inject_message, adc_set_sim_value, touchscreen_set_touch, pwm_duty, raise_fault } = periph;
 
     // Register external devices BEFORE init()
     for (const d of ext_devices.spi_flash || []) {
@@ -252,7 +252,6 @@ export async function createEmulator(opts = {}) {
     let fwAddr = flash_addr;
     let elfRegions = null;
     let symbolList = [];
-    let sortedSymbols = null;
 
     // Unicorn ARM cannot decode `mrs rX, msp` (used by newlib _sbrk). In thread
     // mode MSP == SP, so rewrite to `mov rX, sp` + nop (same 4-byte footprint).
@@ -398,6 +397,9 @@ export async function createEmulator(opts = {}) {
     // for normal batches and off by <1 batch on rare faults. Handler runs (inside
     // processInterrupts) are not credited — instruction-delta peripherals self-correct.
 
+    // SVC frames live here while their handler runs. The frame is also written
+    // to the real stack so handler code can inspect it (Cortex-M ABI).
+    const svcStack = [];
     const intrHook = (handle, intno, user_data) => {
         if (intno === 8) {
             // BX LR with EXC_RETURN: pop the interrupt frame
@@ -412,6 +414,38 @@ export async function createEmulator(opts = {}) {
             uc.reg_write_i32(Module.ARM_REG_LR, sv.getUint32(8, true));
             uc.reg_write_i32(Module.ARM_REG_PC, sv.getUint32(4, true) | 1);
             uc.reg_write_i32(Module.ARM_REG_SP, sp + 32);
+        } else if (intno === 2 && svcStack.length < 8) {
+            // SVC: stack the interrupted context, enter handler mode (LR = EXC_RETURN),
+            // jump to the SVCall vector. Return happens when the handler executes
+            // `bx lr` (Unicorn faults fetching 0xFFFFFFFx, caught in run()/step()).
+            const sp = uc.reg_read_i32(Module.ARM_REG_SP);
+            const saved = {
+                sp,
+                r0: uc.reg_read_i32(Module.ARM_REG_R0),
+                r1: uc.reg_read_i32(Module.ARM_REG_R1),
+                r2: uc.reg_read_i32(Module.ARM_REG_R2),
+                r3: uc.reg_read_i32(Module.ARM_REG_R3),
+                r12: uc.reg_read_i32(Module.ARM_REG_R12),
+                lr: uc.reg_read_i32(Module.ARM_REG_LR),
+                pc: uc.reg_read_i32(Module.ARM_REG_PC),
+                xpsr: uc.reg_read_i32(Module.ARM_REG_XPSR),
+            };
+            svcStack.push(saved);
+            const frame = new Uint8Array(32);
+            const sv = new DataView(frame.buffer);
+            sv.setUint32(0, saved.xpsr, true);
+            sv.setUint32(4, saved.pc, true); // return PC = instruction after svc
+            sv.setUint32(8, saved.lr, true);
+            sv.setUint32(12, saved.r12, true);
+            sv.setUint32(16, saved.r3, true);
+            sv.setUint32(20, saved.r2, true);
+            sv.setUint32(24, saved.r1, true);
+            sv.setUint32(28, saved.r0, true);
+            uc.mem_write(BigInt(sp - 32), frame);
+            uc.reg_write_i32(Module.ARM_REG_SP, sp - 32);
+            const control = uc.reg_read_i32(Module.ARM_REG_CONTROL);
+            uc.reg_write_i32(Module.ARM_REG_LR, control & 1 ? 0xFFFFFFFD : 0xFFFFFFF9);
+            uc.reg_write_i32(Module.ARM_REG_PC, read32(vector_table + 4 * 11));
         }
     };
     uc.hook_add(Module.HOOK_INTR, intrHook, null);
@@ -516,6 +550,65 @@ export async function createEmulator(opts = {}) {
         }
     };
 
+    // Resolve an address to the nearest preceding ELF symbol (or null when
+    // no symbol table is available, e.g. hex-only firmware).
+    let symSorted = null;
+    const resolveSym = (addr) => {
+        if (!symbolList.length) return null;
+        if (!symSorted) {
+            symSorted = symbolList.slice().sort((a, b) => a.addr - b.addr);
+        }
+        const a = addr & ~1;
+        let lo = 0, hi = symSorted.length - 1, best = -1;
+        while (lo <= hi) {
+            const mid = (lo + hi) >> 1;
+            if (symSorted[mid].addr <= a) { best = mid; lo = mid + 1; } else hi = mid - 1;
+        }
+        if (best < 0) return null;
+        const s = symSorted[best];
+        const off = a - s.addr;
+        if (off > 0x20000) return null;
+        return off > 0 ? `${s.name}+0x${off.toString(16)}` : s.name;
+    };
+
+    // Handle an emu_start fault: SVC return (EXC_RETURN pop), the known
+    // Unicorn `bl` artifact at HAL_NVIC_EnableIRQ (skip), real faults (raise
+    // them — the fault handler runs via processInterrupts), or no symbol table
+    // (legacy tolerant skip). Returns true if the fault was consumed.
+    const handleFault = (msg) => {
+        const pc2 = uc.reg_read_i32(Module.ARM_REG_PC);
+        if (msg.includes('UC_ERR_FETCH_UNMAPPED') && ((pc2 & ~1) >>> 0) >= 0xFFFFFFF0 && svcStack.length > 0) {
+            const st = svcStack.pop();
+            uc.reg_write_i32(Module.ARM_REG_R0, st.r0);
+            uc.reg_write_i32(Module.ARM_REG_R1, st.r1);
+            uc.reg_write_i32(Module.ARM_REG_R2, st.r2);
+            uc.reg_write_i32(Module.ARM_REG_R3, st.r3);
+            uc.reg_write_i32(Module.ARM_REG_R12, st.r12);
+            uc.reg_write_i32(Module.ARM_REG_LR, st.lr);
+            uc.reg_write_i32(Module.ARM_REG_PC, st.pc | 1);
+            uc.reg_write_i32(Module.ARM_REG_SP, st.sp);
+            return true;
+        }
+        if (msg.includes('UC_ERR_READ_UNMAPPED') || msg.includes('UC_ERR_FETCH_UNMAPPED') || msg.includes('UC_ERR_WRITE_UNMAPPED')) {
+            const sym = resolveSym(pc2);
+            if (sym && sym.includes('HAL_NVIC_EnableIRQ')) {
+                // Known Unicorn `bl` decode artifact at HAL_NVIC_EnableIRQ+0xf:
+                // not a real fault, skip the faulting instruction like before.
+                uc.reg_write_i32(Module.ARM_REG_PC, (pc2 + 2) | 1);
+            } else if (symbolList.length) {
+                // Real fault: raise it. CFSR/HFSR/BFAR are populated and the
+                // fault handler runs via processInterrupts.
+                const kind = msg.includes('FETCH_UNMAPPED') ? 0 : (msg.includes('WRITE_UNMAPPED') ? 2 : 1);
+                raise_fault(kind, 0);
+            } else {
+                // No symbol table: keep the legacy tolerant skip.
+                uc.reg_write_i32(Module.ARM_REG_PC, (pc2 + 2) | 1);
+            }
+            return true;
+        }
+        return false;
+    };
+
     return {
         uc, Module, read32, write32,
 
@@ -531,12 +624,7 @@ export async function createEmulator(opts = {}) {
                     uc.emu_start(curPc | 1, 0, 0, DEFAULT_MAX_BATCH);
                 } catch (e) {
                     const msg = String(e);
-                    if (msg.includes('UC_ERR_READ_UNMAPPED') || msg.includes('UC_ERR_FETCH_UNMAPPED') || msg.includes('UC_ERR_WRITE_UNMAPPED')) {
-                        const pc2 = uc.reg_read_i32(Module.ARM_REG_PC);
-                        uc.reg_write_i32(Module.ARM_REG_PC, (pc2 + 2) | 1);
-                    } else {
-                        throw e;
-                    }
+                    if (!handleFault(msg)) throw e;
                 }
                 instCount += DEFAULT_MAX_BATCH;
                 batchInstCount += DEFAULT_MAX_BATCH;
@@ -565,13 +653,7 @@ export async function createEmulator(opts = {}) {
             try {
                 uc.emu_start(curPc | 1, 0, 0, maxBatch);
             } catch (e) {
-                const msg = String(e);
-                if (msg.includes('UC_ERR_READ_UNMAPPED') || msg.includes('UC_ERR_FETCH_UNMAPPED') || msg.includes('UC_ERR_WRITE_UNMAPPED')) {
-                    const pc2 = uc.reg_read_i32(Module.ARM_REG_PC);
-                    uc.reg_write_i32(Module.ARM_REG_PC, (pc2 + 2) | 1);
-                } else {
-                    throw e;
-                }
+                if (!handleFault(String(e))) throw e;
             }
             instCount += maxBatch;
             batchInstCount += maxBatch;
@@ -611,7 +693,7 @@ export async function createEmulator(opts = {}) {
         /** Set symbol table (from .elf or .map) for resolveSymbol(). */
         setSymbols(list) {
             symbolList = list || [];
-            sortedSymbols = null;
+            symSorted = null;
         },
 
         getSymbolCount() { return symbolList.length; },
@@ -621,21 +703,7 @@ export async function createEmulator(opts = {}) {
          * @returns {string|null}
          */
         resolveSymbol(addr) {
-            if (!symbolList.length) return null;
-            if (!sortedSymbols) {
-                sortedSymbols = symbolList.slice().sort((a, b) => a.addr - b.addr);
-            }
-            const a = addr & ~1;
-            let lo = 0, hi = sortedSymbols.length - 1, best = -1;
-            while (lo <= hi) {
-                const mid = (lo + hi) >> 1;
-                if (sortedSymbols[mid].addr <= a) { best = mid; lo = mid + 1; } else hi = mid - 1;
-            }
-            if (best < 0) return null;
-            const s = sortedSymbols[best];
-            const off = a - s.addr;
-            if (off > 0x20000) return null;
-            return off > 0 ? `${s.name}+0x${off.toString(16)}` : s.name;
+            return resolveSym(addr);
         },
 
         getUartOutput() { return get_uart_output(); },

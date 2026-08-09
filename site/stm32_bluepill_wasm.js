@@ -8,6 +8,21 @@ export function adc_set_sim_value(val) {
 }
 
 /**
+ * Add an FSMC NOR/PSRAM memory device backed by `data` (byte image).
+ * `name` must be FSMC.BANK1..4 (NE1-4), FSMC.BANK5..6 (NAND), or FSMC.BANK7
+ * (PC Card). Must be called before init().
+ * @param {string} name
+ * @param {Uint8Array} data
+ */
+export function add_fsmc_bank(name, data) {
+    const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    wasm.add_fsmc_bank(ptr0, len0, ptr1, len1);
+}
+
+/**
  * Add an SPI flash device. Must be called before init().
  * @param {string} peripheral
  * @param {number} address
@@ -223,6 +238,15 @@ export function gpio_set_input(port, pin, value) {
 }
 
 /**
+ * Set the GPIO output slew delay in instructions (0 = instant). Affects IDR
+ * readback only; device callbacks stay instant.
+ * @param {number} inst
+ */
+export function gpio_set_slew(inst) {
+    wasm.gpio_set_slew(inst);
+}
+
+/**
  * Check if any interrupt is pending, respecting PRIMASK/BASEPRI.
  * @returns {boolean}
  */
@@ -296,6 +320,17 @@ export function periph_write(addr, width, value) {
 export function pwm_duty(addr, channel) {
     const ret = wasm.pwm_duty(addr, channel);
     return ret >>> 0;
+}
+
+/**
+ * Raise a fault (kind: 0=fetch, 1=data read, 2=data write, 3=undef instruction).
+ * Sets SCB CFSR/HFSR/BFAR and pends the fault exception (with SHCSR escalation
+ * to HardFault when the specific fault handler is disabled).
+ * @param {number} kind
+ * @param {number} addr
+ */
+export function raise_fault(kind, addr) {
+    wasm.raise_fault(kind, addr);
 }
 
 /**

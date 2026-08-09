@@ -2,10 +2,11 @@ import { readFileSync } from 'fs';
 import * as periph from '../pkg/stm32_bluepill_wasm.js';
 periph.initSync({ module: readFileSync(new URL('../pkg/stm32_bluepill_wasm_bg.wasm', import.meta.url)) });
 
-const { init, periph_read, periph_write, tick, has_pending_interrupt,
+const { init, periph_read, periph_write, tick, step_batch, has_pending_interrupt,
         get_next_pending_interrupt, clear_current_interrupt, gpio_read_output, gpio_set_input,
         gpio_read_input, get_uart_output, uart_rx_byte, adc_set_sim_value,
-        is_watchdog_reset_requested, can_inject_message } = periph;
+        is_watchdog_reset_requested, can_inject_message, gpio_set_slew, raise_fault,
+        add_fsmc_bank } = periph;
 
 let passed = 0, failed = 0;
 
@@ -155,9 +156,15 @@ periph_write(ADC1 + 0x08, 4, 1);
 let cr2 = periph_read(ADC1 + 0x08, 4);
 periph_write(ADC1 + 0x08, 4, cr2 | (1 << 22));
 
-// Check EOC in SR bit 1
+// Conversion takes (SMP + 12.5) ADC cycles; default SMP=0 -> 14 instructions.
+// EOC must NOT be set before the conversion completes.
 let sradc = periph_read(ADC1 + 0x00, 4);
-assert_eq(sradc & (1 << 1), 1 << 1, 'ADC SR EOC after SWSTART');
+assert_eq(sradc & (1 << 1), 0, 'ADC EOC not set before conversion completes');
+
+// Check EOC in SR bit 1
+step_batch(14);
+sradc = periph_read(ADC1 + 0x00, 4);
+assert_eq(sradc & (1 << 1), 1 << 1, 'ADC SR EOC after SWSTART + 14 cycles');
 
 // Read DR (0x4C)
 let dr_val = periph_read(ADC1 + 0x4C, 4) & 0xFFF;
@@ -170,6 +177,9 @@ assert_eq(sradc & (1 << 1), 0, 'ADC EOC cleared after DR read');
 // Second conversion with different value
 adc_set_sim_value(0x155); // 341
 periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 22)); // ADON + SWSTART
+sradc = periph_read(ADC1 + 0x00, 4);
+assert_eq(sradc & (1 << 1), 0, 'ADC EOC not set before second conversion completes');
+step_batch(14);
 sradc = periph_read(ADC1 + 0x00, 4);
 assert_eq(sradc & (1 << 1), 1 << 1, 'ADC SR EOC after second SWSTART');
 dr_val = periph_read(ADC1 + 0x4C, 4) & 0xFFF;
@@ -1038,6 +1048,155 @@ assert_eq(cnt6, 30, 'TIM6 CNT = 30 after 30 ticks');
 for (let i = 0; i < 30; i++) tick();
 cnt6 = periph_read(T6 + 0x24, 4);
 assert_eq(cnt6, 10, 'TIM6 CNT wrapped to 10');
+
+// ============================================================
+// GPIO electrical model (pull-ups, open-drain, slew readback)
+// ============================================================
+group('GPIO electrical');
+
+reset();
+const GPIOA = 0x40010800;
+
+// PA0 input pull-up: CNF=01 (pull), MODE=00, ODR bit0 = 1
+periph_write(GPIOA + 0x00, 4, (0b01 << 2) | 0); // CRL[3:0] = 0b01xx? -> CNF=01, MODE=00
+periph_write(GPIOA + 0x0C, 4, 0x0001);          // ODR bit0 = 1 (pull-up)
+assert_eq(periph_read(GPIOA + 0x08, 4) & 1, 1, 'GPIO PA0 pull-up reads 1');
+
+// PA0 input pull-down: ODR bit0 = 0
+periph_write(GPIOA + 0x0C, 4, 0x0000);
+assert_eq(periph_read(GPIOA + 0x08, 4) & 1, 0, 'GPIO PA0 pull-down reads 0');
+
+// PA0 input floating, no external driver -> 0
+periph_write(GPIOA + 0x00, 4, 0b0100);          // CNF=00 (floating), MODE=00
+assert_eq(periph_read(GPIOA + 0x08, 4) & 1, 0, 'GPIO PA0 floating reads 0');
+
+// PA1 push-pull output: CNF=00, MODE=10 (2MHz); ODR drives IDR
+periph_write(GPIOA + 0x00, 4, 0b0010 << 4);     // PA1 = push-pull out
+periph_write(GPIOA + 0x0C, 4, 0x0002);          // ODR bit1 = 1
+assert_eq(periph_read(GPIOA + 0x08, 4) >> 1 & 1, 1, 'GPIO PA1 push-pull high reads 1');
+periph_write(GPIOA + 0x0C, 4, 0x0000);
+assert_eq(periph_read(GPIOA + 0x08, 4) >> 1 & 1, 0, 'GPIO PA1 push-pull low reads 0');
+
+// PA2 open-drain: CNF=11, MODE=10. Released (ODR=1) + external pull-up -> 1
+periph_write(GPIOA + 0x00, 4, (0b1110 << 8) | (0b0010 << 4) | 0b0100);
+gpio_set_input(0, 2, true);                     // external pull-up on PA2
+periph_write(GPIOA + 0x0C, 4, 0x0004);          // released
+assert_eq(periph_read(GPIOA + 0x08, 4) >> 2 & 1, 1, 'GPIO PA2 open-drain released + pull-up reads 1');
+periph_write(GPIOA + 0x0C, 4, 0x0000);          // drive low
+assert_eq(periph_read(GPIOA + 0x08, 4) >> 2 & 1, 0, 'GPIO PA2 open-drain driven low reads 0');
+
+// External driver wins over push-pull output
+periph_write(GPIOA + 0x0C, 4, 0x0002);          // PA1 push-pull high
+gpio_set_input(0, 1, false);                    // external driver pulls low
+assert_eq(periph_read(GPIOA + 0x08, 4) >> 1 & 1, 0, 'GPIO external driver beats push-pull');
+assert_eq(gpio_read_output(0, 1), false, 'gpio_read_output honors external driver');
+
+// Slew: transitions take N instructions; IDR shows the old level meanwhile
+// (PA3 push-pull, no external driver registered)
+periph_write(GPIOA + 0x00, 4, 0b0010 << 12);    // PA3 = push-pull out
+gpio_set_slew(100);
+periph_write(GPIOA + 0x10, 4, 1 << 3);          // BSRR set PA3
+assert_eq(periph_read(GPIOA + 0x08, 4) >> 3 & 1, 0, 'GPIO slew: IDR still old level during transition');
+step_batch(100);
+assert_eq(periph_read(GPIOA + 0x08, 4) >> 3 & 1, 1, 'GPIO slew: IDR settled after transition');
+gpio_set_slew(0);
+
+// ============================================================
+// FSMC external memory (NOR banks, MBKEN/WREN gating)
+// ============================================================
+group('FSMC');
+
+add_fsmc_bank('FSMC.BANK1', new Uint8Array([0x11, 0x22, 0x33, 0x44]));
+reset();
+const FSMC_BCR1 = 0xA0000000;
+const NE1 = 0x60000000;
+
+// Disabled: reads return 0
+assert_eq(periph_read(NE1, 4), 0, 'FSMC NE1 reads 0 when MBKEN=0');
+
+// Enable BCR1 (MBKEN) + WREN, write and read back
+periph_write(FSMC_BCR1, 4, 0x3);                // MBKEN | WREN
+periph_write(NE1, 4, 0x44332211);
+assert_eq(periph_read(NE1, 4), 0x44332211, 'FSMC NE1 32-bit write/read round-trip');
+
+// Byte access
+periph_write(NE1 + 1, 1, 0xAB);
+assert_eq(periph_read(NE1, 4), 0x4433AB11, 'FSMC NE1 byte write preserves other bytes');
+assert_eq(periph_read(NE1 + 1, 1), 0xAB, 'FSMC NE1 byte read');
+
+// Writes ignored without WREN
+periph_write(FSMC_BCR1, 4, 0x1);                // MBKEN only
+periph_write(NE1, 4, 0xDEADBEEF);
+assert_eq(periph_read(NE1, 4), 0x4433AB11, 'FSMC NE1 write ignored without WREN');
+
+// ============================================================
+// Sleep state timing (STOP/STANDBY gating)
+// ============================================================
+group('Sleep');
+
+reset();
+const SCB_SCR = 0xE000ED10;
+const TIM2S = 0x40000000;
+
+periph_write(0x4002101C, 4, 1 << 0);            // TIM2EN
+periph_write(TIM2S + 0x28, 4, 0);               // PSC = 0
+periph_write(TIM2S + 0x2C, 4, 0xFFFF);          // ARR
+periph_write(TIM2S + 0x00, 4, 1);               // CEN
+for (let i = 0; i < 50; i++) tick();
+assert_eq(periph_read(TIM2S + 0x24, 4), 50, 'TIM2 CNT = 50 while running');
+
+// Enter STOP: SCR SLEEPDEEP, WFI handled by the core
+periph_write(SCB_SCR, 4, 0x4);                  // SLEEPDEEP
+for (let i = 0; i < 100; i++) tick();
+assert_eq(periph_read(TIM2S + 0x24, 4), 50, 'TIM2 frozen in STOP');
+
+// RTC (LSI/LSE clocked) keeps counting during STOP
+periph_write(0x4002101C, 4, 0x200);             // RTCEN
+periph_write(0x40002808, 4, 0);                 // PRLH
+periph_write(0x4000280C, 4, 9);                 // PRLL: +1 per 10 instr
+periph_write(0x4000281C, 4, 0);                 // CNTL = 0
+for (let i = 0; i < 100; i++) tick();
+const rtcCnt = periph_read(0x4000281C, 4);
+assert(rtcCnt >= 8, `RTC keeps counting in STOP (CNT=${rtcCnt})`);
+
+// Wake: clear SLEEPDEEP, timer resumes
+periph_write(SCB_SCR, 4, 0x0);
+for (let i = 0; i < 20; i++) tick();
+assert_eq(periph_read(TIM2S + 0x24, 4), 70, 'TIM2 resumes after wake');
+
+// ============================================================
+// Fault exceptions (BusFault/HardFault escalation, SCB state)
+// ============================================================
+group('Faults');
+
+reset();
+const SCB_CFSR = 0xE000ED28;
+const SCB_HFSR = 0xE000ED2C;
+const SCB_BFAR = 0xE000ED38;
+
+// Fault with BUSFAULTENA disabled -> escalate to HardFault
+raise_fault(1, 0x40001234);                     // data read fault
+assert_eq(get_next_pending_interrupt(), -13, 'Fault escalates to HardFault when BusFault disabled');
+assert_eq(periph_read(SCB_HFSR, 4) >> 30 & 1, 1, 'HFSR FORCED set');
+assert_eq(periph_read(SCB_CFSR, 4) & (1 << 15), 1 << 15, 'CFSR BFARVALID set');
+assert_eq(periph_read(SCB_BFAR, 4), 0x40001234, 'BFAR holds faulting address');
+clear_current_interrupt();
+
+// With BUSFAULTENA enabled -> BusFault handler pends directly
+periph_write(0xE000ED24, 4, 1 << 18);           // SHCSR BUSFAULTENA
+raise_fault(1, 0x5000ABCD);
+assert_eq(get_next_pending_interrupt(), -11, 'BusFault pends when BUSFAULTENA set');
+assert_eq(periph_read(SCB_CFSR, 4) & (1 << 9), 1 << 9, 'CFSR PRECISERR set');
+assert_eq(periph_read(SCB_BFAR, 4), 0x5000ABCD, 'BFAR updated');
+clear_current_interrupt();
+
+// Fetch fault -> IBUSERR
+raise_fault(0, 0);
+assert_eq(periph_read(SCB_CFSR, 4) & (1 << 8), 1 << 8, 'CFSR IBUSERR set');
+
+// SysTick priority is programmable via SCB SHPR
+periph_write(0xE000ED20, 4, 0xFF00FF00);        // SHPR3: SysTick=0, PendSV=0xFF, SVCall=0
+assert_eq(periph_read(0xE000ED20, 4) & 0xFF, 0, 'SHPR3 SVCall prio routed through SCB');
 
 // ============================================================
 // Summary

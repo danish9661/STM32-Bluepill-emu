@@ -1,9 +1,18 @@
 use crate::system::System;
 use super::Peripheral;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use regex::Regex;
 
 const NUM_PORTS: usize = 8;
+
+/// Optional output slew (rise/fall) delay in instructions, 0 = instant.
+/// Affects IDR readback only (device callbacks stay instant).
+static GPIO_SLEW: AtomicU32 = AtomicU32::new(0);
+
+pub fn set_gpio_slew(inst: u32) {
+    GPIO_SLEW.store(inst, Ordering::Relaxed);
+}
 
 #[derive(Clone, Copy)]
 pub struct Pin {
@@ -34,6 +43,8 @@ pub struct GpioPorts {
     write_callbacks: [Vec<(u8, Box<dyn FnMut(&System, bool)>)>; NUM_PORTS],
     output_states: [u16; NUM_PORTS],
     input_states: [u16; NUM_PORTS],
+    /// Pending output transitions for slew emulation: (pin, transition_at, old_level)
+    pending_transitions: [Vec<(u8, u64, bool)>; NUM_PORTS],
 }
 
 impl GpioPorts {
@@ -52,6 +63,7 @@ impl GpioPorts {
         self.write_callbacks[pin.port as usize].push((pin.pin, Box::new(cb)));
     }
 
+    #[allow(dead_code)]
     pub fn read_port(&mut self, sys: &System, port: u8) -> u16 {
         let mut v = 0;
         for (pin, cb) in &mut self.read_callbacks[port as usize] {
@@ -60,6 +72,16 @@ impl GpioPorts {
             }
         }
         v
+    }
+
+    /// External driver level for a pin (read callback), if one is registered.
+    pub fn read_pin_option(&mut self, sys: &System, port: u8, pin: u8) -> Option<bool> {
+        for (p, cb) in &mut self.read_callbacks[port as usize] {
+            if *p == pin {
+                return Some(cb(sys));
+            }
+        }
+        None
     }
 
     /// Effective pin level: read callback if registered, otherwise the last driven output state.
@@ -73,6 +95,14 @@ impl GpioPorts {
     }
 
     pub fn write_port(&mut self, sys: &System, port: u8, pin: u8, value: bool) {
+        let slew = GPIO_SLEW.load(Ordering::Relaxed) as u64;
+        if slew > 0 {
+            let old = (self.output_states[port as usize] >> pin) & 1 != 0;
+            if old != value {
+                self.pending_transitions[port as usize]
+                    .push((pin, crate::system::instruction_count() + slew, old));
+            }
+        }
         if value {
             self.output_states[port as usize] |= 1 << pin;
         } else {
@@ -85,8 +115,33 @@ impl GpioPorts {
         }
     }
 
-    pub fn read_output_pin(&self, port: u8, pin: u8) -> bool {
-        (self.output_states[port as usize] >> pin) & 1 != 0
+    /// Wire level of an output pin, honoring pending slew transitions.
+    /// External drivers (read callbacks) always win over driven state.
+    pub fn read_output_pin(&mut self, sys: &System, port: u8, pin: u8) -> bool {
+        if let Some(v) = self.read_pin_option(sys, port, pin) {
+            return v;
+        }
+        self.driven_pin_level(port, pin)
+    }
+
+    /// Driven output level of a pin, honoring pending slew transitions and
+    /// ignoring external drivers (used where the drive state always wins,
+    /// e.g. an open-drain output driving low).
+    pub fn driven_pin_level(&mut self, port: u8, pin: u8) -> bool {
+        let now = crate::system::instruction_count();
+        let mut v = (self.output_states[port as usize] >> pin) & 1 != 0;
+        self.pending_transitions[port as usize].retain(|(p, at, old)| {
+            if *p != pin {
+                return true;
+            }
+            if now >= *at {
+                false // transition complete: final level is the driven state in v
+            } else {
+                v = *old;
+                true
+            }
+        });
+        v
     }
 
     pub fn set_input_pin(&mut self, port: u8, pin: u8, value: bool) {
@@ -156,8 +211,40 @@ impl Gpio {
         self.pin_mode(pin) != 0
     }
 
+    #[allow(dead_code)]
     fn pin_is_analog(&self, pin: u8) -> bool {
         self.pin_mode(pin) == 0 && self.pin_cnf(pin) == 0
+    }
+
+    /// Electrical wire level of a pin:
+    /// - external driver (read callback) wins whenever present;
+    /// - input floating: external or 0;
+    /// - input with pull-up/down: ODR bit selects pull direction;
+    /// - output push-pull: ODR drives both levels;
+    /// - output open-drain: low is driven, high releases the line (external/pull/0);
+    /// - analog: always 0.
+    fn pin_level(&self, sys: &System, gpio: &mut GpioPorts, pin: u8) -> bool {
+        let mode = self.pin_mode(pin);
+        let cnf = self.pin_cnf(pin);
+        let odr = (self.odr >> pin) & 1 != 0;
+        if mode == 0 {
+            match cnf {
+                0 => gpio.read_pin_option(sys, self.port, pin).unwrap_or(false), // floating
+                1 => gpio.read_pin_option(sys, self.port, pin).unwrap_or(odr),   // pull-up if ODR=1
+                _ => false, // reserved or analog
+            }
+        } else if cnf == 0 {
+            // push-pull: ODR drives both levels; honor pending slew transitions
+            gpio.read_output_pin(sys, self.port, pin)
+        } else {
+            // open-drain: 0 drives low; 1 releases the line
+            if odr {
+                gpio.read_pin_option(sys, self.port, pin).unwrap_or(false)
+            } else {
+                // driven low (wins over any external pull); honor pending slew
+                gpio.driven_pin_level(self.port, pin)
+            }
+        }
     }
 
     fn iter_port_reg_changes(old_value: u32, new_value: u32, stride: u8, mut f: impl FnMut(u8, u8)) {
@@ -187,18 +274,13 @@ impl Peripheral for Gpio {
             0x04 => self.crh,
             0x08 => {
                 let mut gpio = sys.p.gpio.borrow_mut();
-                let mut v = gpio.read_port(sys, self.port) as u32;
+                let mut v = 0u16;
                 for pin in 0..16 {
-                    if self.pin_is_analog(pin) {
-                        v &= !(1 << pin);
-                    } else if !self.pin_is_output(pin) {
-                        // input mode: keep callback value
-                    } else {
-                        // output mode: read ODR instead
-                        if (self.odr >> pin) & 1 != 0 { v |= 1 << pin; } else { v &= !(1 << pin); }
+                    if self.pin_level(sys, &mut gpio, pin) {
+                        v |= 1 << pin;
                     }
                 }
-                v
+                v as u32
             }
             0x0C => self.odr,
             0x10 => self.bsrr,
@@ -222,8 +304,8 @@ impl Peripheral for Gpio {
                         sys.p.gpio_exti_trigger(sys, self.port, pin, v != 0);
                     }
                 });
-                let output_mask = (0..16).filter(|p| self.pin_is_output(*p)).fold(0, |m, p| m | (1 << p));
-                self.odr = (self.odr & !output_mask) | (value & output_mask);
+                // Full register write: input pins use ODR to select pull-up/down
+                self.odr = value;
             }
             0x10 => {
                 let reset = value >> 16;
@@ -241,8 +323,7 @@ impl Peripheral for Gpio {
                         sys.p.gpio_exti_trigger(sys, self.port, pin, false);
                     }
                 });
-                let output_mask = (0..16).filter(|p| self.pin_is_output(*p)).fold(0, |m, p| m | (1 << p));
-                self.odr = (self.odr & !reset) | (set & output_mask);
+                self.odr = (self.odr & !reset) | set;
                 self.bsrr = value;
             }
             0x14 => {

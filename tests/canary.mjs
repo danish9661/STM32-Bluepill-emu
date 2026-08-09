@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /*
  * Quick regression canary for the Arduino firmware test.
- * Runs the full 37-check firmware suite at a reduced instruction budget
- * (~25s vs ~50s for the 200M run) and asserts a clean 37/37 SUMMARY.
+ * Runs the full 39-check firmware suite at a reduced instruction budget
+ * (~25s vs ~50s for the 200M run) and asserts a clean 39/39 SUMMARY.
  *
  * Usage:
  *   node tests/canary.mjs                 # default --max=100000000
@@ -38,7 +38,7 @@ child.on('close', (code) => {
     const summary = stdout.match(/SUMMARY pass=(\d+) fail=(\d+)/);
     const fatal = stderr.split('\n').filter(l => l && !l.startsWith('[INFO')).slice(-6).join('\n');
 
-    let ok = code === 0 && failCount === 0 && summary && summary[1] === '37' && summary[2] === '0';
+    let ok = code === 0 && failCount === 0 && summary && summary[1] === '39' && summary[2] === '0';
 
     if (ok) {
         console.log(`CANARY PASS: ${passCount} checks green, SUMMARY pass=${summary[1]} fail=${summary[2]} (${maxInst} instr)`);
