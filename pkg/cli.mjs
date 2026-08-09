@@ -477,6 +477,7 @@ async function main() {
             uc.reg_write_i32(Module.ARM_REG_R3, savedR3);
             uc.reg_write_i32(Module.ARM_REG_R12, savedR12);
             uc.reg_write_i32(Module.ARM_REG_LR, savedLR);
+            uc.reg_write_i32(Module.ARM_REG_XPSR, savedXPSR);
             uc.reg_write_i32(Module.ARM_REG_PC, savedPC | 1);
             uc.reg_write_i32(Module.ARM_REG_SP, savedAt);
             processDma();
