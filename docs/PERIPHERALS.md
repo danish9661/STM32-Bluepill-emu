@@ -61,7 +61,7 @@ including interrupt generation, status flags, and timing. Support levels:
 
 | Unit | Level | Notes |
 |---|---|---|
-| ADC1–2 | Full | Real conversion state machine: per-sequence channels (SQR/JSQR), sample-time timing (`Tconv = SMP + 12.5` ADC cycles, 1 instr = 1 cycle), EOC/STRT/JEOC/JSTRT flags, EOCS, AWD with HTR/LTR, CONT auto-restart, ADC1→DMA1 ch1 / ADC2→DMA1 ch2 requests. The sampled value still comes from `adc_set_sim_value()` — there is no analog input model. |
+| ADC1–2 | Full | Real conversion state machine: per-sequence channels (SQR/JSQR), sample-time timing (`Tconv = SMP + 12.5` cycles, 1 instr = 1 cycle), EOC/STRT/JEOC/JSTRT flags, EOCS, AWD with HTR/LTR, CONT auto-restart, ADC1→DMA1 ch1 / ADC2→DMA1 ch2 requests. Sources: `adc_set_sim_value()` serves exact readings (legacy), or `gpioSetAnalog()` wires a 12-bit pin voltage sampled through an RC sample-and-hold (`adcSetRcTau`). |
 | CRC | Full | CRC32 computation over written bytes, DR readback. |
 
 ## External devices (emulated bus devices)
@@ -80,8 +80,12 @@ These are *extra* peripherals the STM32 talks to over SPI/I2C — the "rest of t
 ## What is NOT emulated
 
 - **USB** (stub).
-- **Real analog input model** — ADC converts with real timing/flags but samples
-  the injected `adc_set_sim_value()`; no capacitor/discharge model, comparators.
+- **Real analog input model** — ADC converts with real timing/flags. By default
+  it samples the injected `adc_set_sim_value()` exactly, but wiring a pin with
+  `gpioSetAnalog(port, pin, level)` engages an RC sample-and-hold: the sampling
+  cap charges from its held voltage over the SMP window (`adcSetRcTau` time
+  constant) and holds its charge across conversions; channels 16/17/18 use
+  nominal internal values. No comparator peripherals.
 - **Cortex-M fault-preemption details** — faults are raised with CFSR/HFSR/BFAR
   bookkeeping and run through the same handler dispatch as IRQs (with SHCSR
   escalation to HardFault), but precise stack/return-address semantics of a

@@ -1,6 +1,14 @@
 /* @ts-self-types="./stm32_bluepill_wasm.d.ts" */
 
 /**
+ * RC sample-and-hold time constant in ADC cycles (1 instr = 1 cycle).
+ * @param {number} cycles
+ */
+export function adc_set_rc_tau(cycles) {
+    wasm.adc_set_rc_tau(cycles);
+}
+
+/**
  * @param {number} val
  */
 export function adc_set_sim_value(val) {
@@ -226,6 +234,18 @@ export function gpio_read_input(port, pin) {
 export function gpio_read_output(port, pin) {
     const ret = wasm.gpio_read_output(port, pin);
     return ret !== 0;
+}
+
+/**
+ * Set an analog wire voltage on a GPIO pin (12-bit, 0xFFFF clears it).
+ * ADC channels mapped to the pin then sample this voltage with an RC
+ * sample-and-hold model instead of the injected simulation value.
+ * @param {number} port
+ * @param {number} pin
+ * @param {number} level
+ */
+export function gpio_set_analog(port, pin, level) {
+    wasm.gpio_set_analog(port, pin, level);
 }
 
 /**

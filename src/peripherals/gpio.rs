@@ -37,7 +37,6 @@ impl Pin {
     }
 }
 
-#[derive(Default)]
 pub struct GpioPorts {
     read_callbacks: [Vec<(u8, Box<dyn FnMut(&System) -> bool>)>; NUM_PORTS],
     write_callbacks: [Vec<(u8, Box<dyn FnMut(&System, bool)>)>; NUM_PORTS],
@@ -45,6 +44,23 @@ pub struct GpioPorts {
     input_states: [u16; NUM_PORTS],
     /// Pending output transitions for slew emulation: (pin, transition_at, old_level)
     pending_transitions: [Vec<(u8, u64, bool)>; NUM_PORTS],
+    /// Analog wire voltage per pin (12-bit, 0xFFFF = no analog source).
+    /// When set, ADC channels mapped to the pin sample this voltage with an
+    /// RC sample-and-hold instead of the injected simulation value.
+    analog_states: [u16; NUM_PORTS * 16],
+}
+
+impl Default for GpioPorts {
+    fn default() -> Self {
+        Self {
+            read_callbacks: Default::default(),
+            write_callbacks: Default::default(),
+            output_states: [0; NUM_PORTS],
+            input_states: [0; NUM_PORTS],
+            pending_transitions: Default::default(),
+            analog_states: [0xFFFF; NUM_PORTS * 16],
+        }
+    }
 }
 
 impl GpioPorts {
@@ -92,6 +108,17 @@ impl GpioPorts {
             }
         }
         (self.output_states[port as usize] >> pin) & 1 != 0
+    }
+
+    /// Set an analog wire voltage on a pin (12-bit). 0xFFFF clears it.
+    pub fn set_analog(&mut self, port: u8, pin: u8, level: u16) {
+        self.analog_states[port as usize * 16 + pin as usize] = level;
+    }
+
+    /// Analog voltage present on the pin, if one is wired.
+    pub fn analog_pin_value(&self, port: u8, pin: u8) -> Option<u16> {
+        let v = self.analog_states[port as usize * 16 + pin as usize];
+        if v == 0xFFFF { None } else { Some(v) }
     }
 
     pub fn write_port(&mut self, sys: &System, port: u8, pin: u8, value: bool) {

@@ -168,6 +168,20 @@ pub fn gpio_read_input(port: u32, pin: u32) -> bool {
     sys().p.gpio.borrow().read_input_pin(port as u8, pin as u8)
 }
 
+/// Set an analog wire voltage on a GPIO pin (12-bit, 0xFFFF clears it).
+/// ADC channels mapped to the pin then sample this voltage with an RC
+/// sample-and-hold model instead of the injected simulation value.
+#[wasm_bindgen]
+pub fn gpio_set_analog(port: u32, pin: u32, level: u32) {
+    sys().p.gpio.borrow_mut().set_analog(port as u8, pin as u8, level as u16);
+}
+
+/// RC sample-and-hold time constant in ADC cycles (1 instr = 1 cycle).
+#[wasm_bindgen]
+pub fn adc_set_rc_tau(cycles: u32) {
+    peripherals::adc::set_adc_rc_tau(cycles.min(0xFFFF) as u16);
+}
+
 /// Current PWM duty (0-100) of a timer channel; 0 if addr is not a timer.
 #[wasm_bindgen]
 pub fn pwm_duty(addr: u32, channel: u32) -> u32 {

@@ -6,8 +6,17 @@ const ADC_IRQ: i32 = 18;
 
 static ADC_SIM_VALUE: AtomicU16 = AtomicU16::new(0x3FF);
 
+/// RC sample-and-hold time constant in instructions (ADC cycles).
+/// The sampling capacitor charges toward the pin voltage as
+/// V(t) = Vc0 + (Vpin - Vc0) * (1 - e^(-t/tau)). Default 12 cycles.
+static ADC_RC_TAU: AtomicU16 = AtomicU16::new(12);
+
 pub fn set_adc_value(val: u16) {
     ADC_SIM_VALUE.store(val, Ordering::Relaxed);
+}
+
+pub fn set_adc_rc_tau(cycles: u16) {
+    ADC_RC_TAU.store(if cycles == 0 { 1 } else { cycles }, Ordering::Relaxed);
 }
 
 /// Conversion cycles for a sample-time code: Tconv = (SMP + 12.5) ADC cycles.
@@ -25,12 +34,35 @@ fn conv_cycles(smp: u32) -> u32 {
     }
 }
 
+/// Map an ADC channel to its GPIO pin (F103: ch0-7 = PA0-7, ch8-9 = PB0-1,
+/// ch10-15 = PC0-5, 16 = temp sensor, 17 = VREFINT, 18 = VBAT).
+fn channel_pin(ch: u8) -> Option<(u8, u8)> {
+    match ch {
+        0..=7 => Some((0, ch)),
+        8..=9 => Some((1, ch - 8)),
+        10..=15 => Some((2, ch - 10)),
+        _ => None,
+    }
+}
+
+/// Nominal internal-channel values: temp sensor ~25C (0x1F8), VREFINT 1.2 V
+/// (0x5D2), VBAT (0xC7F) — emulated statistically, not modeled.
+fn nominal_channel(ch: u8) -> Option<u32> {
+    match ch {
+        16 => Some(0x1F8),
+        17 => Some(0x5D2),
+        18 => Some(0xC7F),
+        _ => None,
+    }
+}
+
 #[derive(Default, Clone)]
 struct Conv {
     end_at: u64,     // instruction count when the current conversion completes
     pos: usize,      // index into the current sequence
     len: usize,      // sequence length
-    dr: u32,         // sampled value of the channel under conversion
+    cycles: u32,     // conversion cycles for this channel (sample + convert)
+    cap_start: u32,  // sampling capacitor voltage at the start of the sample window
 }
 
 impl Default for Adc {
@@ -54,6 +86,7 @@ impl Default for Adc {
             conv: None,
             jconv: None,
             dma_channel: 0,
+            cap_voltage: 0,
         }
     }
 }
@@ -77,6 +110,9 @@ pub struct Adc {
     conv: Option<Conv>,
     jconv: Option<Conv>,
     dma_channel: u8,
+    /// Sampling-capacitor voltage (12-bit) held between conversions — the
+    /// first sample after reset charges from 0 toward the source voltage.
+    cap_voltage: u32,
 }
 
 impl Adc {
@@ -138,33 +174,80 @@ impl Adc {
         }
     }
 
-    fn start_regular(&mut self) {
+    /// Target voltage (0..4095) for a channel at sample time.
+    /// If an analog voltage is configured on the mapped pin (or the channel
+    /// is internal 16/17/18), the RC sample-and-hold path engages; otherwise
+    /// the injected simulation value is sampled directly (legacy behavior).
+    fn channel_voltage(&self, sys: &System, ch: u8) -> (u32, bool) {
+        if let Some((port, pin)) = channel_pin(ch) {
+            let gpio = sys.p.gpio.borrow();
+            if let Some(v) = gpio.analog_pin_value(port, pin) {
+                return (v as u32 & 0xFFF, true);
+            }
+        }
+        if let Some(v) = nominal_channel(ch) {
+            return (v, true);
+        }
+        (ADC_SIM_VALUE.load(Ordering::Relaxed) as u32 & 0xFFF, false)
+    }
+
+    /// RC sample-and-hold settle: the cap charges from its held voltage toward
+    /// the source over `cycles` (1 instr = 1 cycle). Returns the 12-bit
+    /// voltage the converter samples and updates the held cap level.
+    fn rc_settle(&mut self, from: u32, to: u32, cycles: u32) -> u32 {
+        let tau = ADC_RC_TAU.load(Ordering::Relaxed) as u32;
+        let frac = 1.0 - (-(cycles as f64) / (tau as f64)).exp();
+        let v = from as f64 + (to as f64 - from as f64) * frac;
+        let v = v.round().max(0.0).min(4095.0) as u32;
+        self.cap_voltage = v;
+        v
+    }
+
+    fn start_regular(&mut self, sys: &System) {
         if !self.adc_on() || self.conv.is_some() { return; }
         let len = ((self.sqr1 >> 16) & 0xF) as usize + 1;
         let ch = self.regular_channel(0);
+        let cycles = self.sample_time(ch);
+        let _ = self.channel_voltage(sys, ch); // source resolved at completion
         self.conv = Some(Conv {
-            end_at: instruction_count() + self.sample_time(ch) as u64,
+            end_at: instruction_count() + cycles as u64,
             pos: 0,
             len,
-            dr: ADC_SIM_VALUE.load(Ordering::Relaxed) as u32 & 0xFFF,
+            cycles,
+            cap_start: self.cap_voltage,
         });
     }
 
-    fn start_injected(&mut self) {
+    fn start_injected(&mut self, sys: &System) {
         if !self.adc_on() || self.jconv.is_some() { return; }
         let len = ((self.jsqr >> 20) & 0x3) as usize + 1;
         let ch = self.injected_channel(0);
+        let cycles = self.sample_time(ch);
+        let (target, _real) = self.channel_voltage(sys, ch);
         self.jconv = Some(Conv {
-            end_at: instruction_count() + self.sample_time(ch) as u64,
+            end_at: instruction_count() + cycles as u64,
             pos: 0,
             len,
-            dr: ADC_SIM_VALUE.load(Ordering::Relaxed) as u32 & 0xFFF,
+            cycles,
+            cap_start: self.cap_voltage,
         });
     }
 
     /// Complete the conversion `c` and schedule the next one in the sequence.
     fn advance_regular(&mut self, sys: &System, c: &Conv, now: u64) {
-        self.dr = c.dr;
+        // For any channel the value settles via RC from the cap's held level;
+        // the simulation source (adc_set_sim_value) is served exactly, so the
+        // legacy tests and firmware keep their deterministic readings.
+        let (target, real) = {
+            let ch = self.regular_channel(c.pos);
+            self.channel_voltage(sys, ch)
+        };
+        let _ = c;
+        self.dr = if real {
+            self.rc_settle(c.cap_start, target, c.cycles)
+        } else {
+            target
+        };
         let last = c.pos + 1 >= c.len;
         // EOC: per conversion unless EOCS (CR2 bit 10) moves it to sequence end
         if self.cr2 & (1 << 10) == 0 || last {
@@ -174,7 +257,7 @@ impl Adc {
             self.sr |= 1 << 4; // STRT at sequence start
         }
         // Analog watchdog: compare conversion result against HTR/LTR
-        if self.cr1 & 1 != 0 && (c.dr > self.htr || c.dr < self.ltr) {
+        if self.cr1 & 1 != 0 && (self.dr > self.htr || self.dr < self.ltr) {
             self.sr |= 1; // AWD
         }
         self.fire_interrupts(sys);
@@ -185,28 +268,39 @@ impl Adc {
         if last {
             self.conv = None;
             if self.cr2 & (1 << 16) != 0 {
-                self.start_regular(); // CONT: restart the sequence
+                self.start_regular(sys); // CONT: restart the sequence
             }
         } else {
             let ch = self.regular_channel(c.pos + 1);
+            let cycles = self.sample_time(ch);
             self.conv = Some(Conv {
-                end_at: now + self.sample_time(ch) as u64,
+                end_at: now + cycles as u64,
                 pos: c.pos + 1,
                 len: c.len,
-                dr: ADC_SIM_VALUE.load(Ordering::Relaxed) as u32 & 0xFFF,
+                cycles,
+                cap_start: self.cap_voltage,
             });
         }
     }
 
     fn advance_injected(&mut self, sys: &System, c: &Conv, now: u64) {
+        let (target, real) = {
+            let ch = self.injected_channel(c.pos);
+            self.channel_voltage(sys, ch)
+        };
+        let dr = if real {
+            self.rc_settle(c.cap_start, target, c.cycles)
+        } else {
+            target
+        };
         if c.pos < 4 {
-            self.jdata[c.pos] = c.dr;
+            self.jdata[c.pos] = dr;
         }
         self.sr |= 1 << 2; // JEOC
         if c.pos == 0 {
             self.sr |= 1 << 3; // JSTRT at sequence start
         }
-        if self.cr1 & 1 != 0 && (c.dr > self.htr || c.dr < self.ltr) {
+        if self.cr1 & 1 != 0 && (dr > self.htr || dr < self.ltr) {
             self.sr |= 1; // AWD
         }
         self.fire_interrupts(sys);
@@ -214,15 +308,17 @@ impl Adc {
         if last {
             self.jconv = None;
             if self.cr2 & (1 << 16) != 0 {
-                self.start_injected();
+                self.start_injected(sys);
             }
         } else {
             let ch = self.injected_channel(c.pos + 1);
+            let cycles = self.sample_time(ch);
             self.jconv = Some(Conv {
-                end_at: now + self.sample_time(ch) as u64,
+                end_at: now + cycles as u64,
                 pos: c.pos + 1,
                 len: c.len,
-                dr: ADC_SIM_VALUE.load(Ordering::Relaxed) as u32 & 0xFFF,
+                cycles,
+                cap_start: self.cap_voltage,
             });
         }
     }
@@ -286,10 +382,10 @@ impl Peripheral for Adc {
                 // CAL (bit 2) and RSTCAL (bit 3) self-clear on real hardware
                 self.cr2 = value & !((1 << 2) | (1 << 3));
                 if value & (1 << 22) != 0 {
-                    self.start_regular(); // SWSTART
+                    self.start_regular(sys); // SWSTART
                 }
                 if value & (1 << 21) != 0 {
-                    self.start_injected(); // JSWSTART
+                    self.start_injected(sys); // JSWSTART
                 }
             }
             0x0C => self.smpr1 = value,
