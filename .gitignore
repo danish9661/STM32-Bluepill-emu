@@ -19,3 +19,17 @@ tests/arduino_echo/build/
 tests/arduino_fade/build/
 tests/arduino_periph_test/build/compile_commands.json
 tests/arduino_periph_test/build/build.options.json
+tests/arduino_timer_uart/build/core/
+tests/arduino_timer_uart/build/libraries/
+tests/arduino_timer_uart/build/sketch/
+tests/arduino_timer_uart/build/*.cache
+tests/arduino_timer_uart/build/*.log
+tests/arduino_timer_uart/build/compile_commands.json
+tests/arduino_timer_uart/build/build.options.json
+tests/arduino_adc_uart/build/core/
+tests/arduino_adc_uart/build/libraries/
+tests/arduino_adc_uart/build/sketch/
+tests/arduino_adc_uart/build/*.cache
+tests/arduino_adc_uart/build/*.log
+tests/arduino_adc_uart/build/compile_commands.json
+tests/arduino_adc_uart/build/build.options.json
