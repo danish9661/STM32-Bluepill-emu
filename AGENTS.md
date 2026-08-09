@@ -7,6 +7,8 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 
 > **Staging rule (CI incident 2026-08-09):** always `git add -A` or stage BOTH `pkg/` and `site/` together. Commit `7040bd0` staged only `site/` (fresh `pkg/emulator.js` stayed uncommitted at 100K batches) — CI's `cmp pkg/emulator.js site/emulator.js` guard failed on the next commit and caught it. Local working trees mask this; fresh checkouts don't.
 
+> **SVD vs hardcoded layout (verified 2026-08-09):** `Peripherals::from_svd()` (via `init_svd`, used by cli.mjs's config.yaml) registers REAL STM32F103 addresses (DMA1@0x40020000, CAN1@0x40006400). The fallback `Peripherals::new()` (via `init()`, used by emulator.js when no `svd` option is passed) uses the quirky hardcoded table in `src/peripherals/mod.rs` where **DMA1 = 0x40006000** (the real CAN1 address!) and CAN1 = 0x40006400. Real-address firmware (arduino_periph_test writes DMA1_B=0x40020000) FAILS its DMA tests under the no-SVD map — writes silently dropped. site/index.html fetches STM32F103.svd and passes it, so the browser demo is fine; any standalone `createEmulator()` smoke test must pass `svd` too.
+
 ## Architecture & Emulation Loop
 ```
 ┌─────────────────────────── JS (pkg/cli.mjs) ─────────────────────────┐
@@ -32,60 +34,64 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 ```
 
 ### Performance
-- ~18.5M IPS real-world (200M instructions in ~10.8s; 100M in ~5.6s); browser periph37 full run: 0.5s wall
+- ~22M IPS real-world (200M instructions in ~9.0s; browser periph39 full run: 0.5s wall)
 - **step_batch ticks once per batch, not per instruction** (`src/lib.rs`): all peripheral `tick()`s are instruction-delta based, so advancing INSTRUCTION_COUNT by `count` + one `sys.tick()` is equivalent but ~100K× cheaper — was ~55% of runtime (wasm-function[36]/[364] under `step_batch` in cpu-prof); **3.8× speedup** (21.2s → 5.6s for 100M). Requires per-batch tickers to process ALL accumulated ticks — `tim.rs advance()` had a `ticks.min(1000)` cap that dropped timer events (TIM2 IRQ never fired: CNT stuck at 12K of ARR=36K); removed.
 - Peripheral access hooks are NOT a bottleneck anymore: measured 0.001 accesses/instruction (~27K per 50M instr) for the periph37 firmware
 - `step_batch()` gave 3.15× speedup over per-instruction `step()`
 - `has_tick` flag: 69% tick speedup; `tick_indices` Vec + `AtomicU32` DMA bitmask: minor gains
 - **instCount as plain number, not BigInt** (cli.mjs + pkg/emulator.js): ~19% faster full run (48.3s → 39.1s); BigInt ops per instruction were measurable at 5M instr/sec. `maxInst` compare + `step_batch` arg are now numbers too. Same change in emulator.js lifted the browser demo from 3.8M → 5.0M Avg IPS (~30%)
-- **Hookless instruction counting** (cli.mjs + pkg/emulator.js): the per-instruction JS codeHook (2 increments) cost ~20% of runtime — measured by running 200M with the hook removed (10.86s → 8.7–9.1s; ~18.5 → ~22M IPS). Since `emu_start(begin,0,0,maxBatch)` stops exactly at maxBatch, each batch is credited in full: exact for normal batches; a faulted batch (unmapped access, ~0.01% of batches — 1 in 9988 measured) is skipped (PC+2) and credited full anyway, overcounting <1 batch — invisible. Handler runs inside `processInterrupts` are not credited (instruction-delta peripherals self-correct; canary stays 37/37). This also settles the "single WASM module / C-level codeHook" idea: the JS boundary was the whole cost, and it's now gone without any rebuild
-- **Batch size 20K** (cli.mjs, pkg/emulator.js DEFAULT_MAX_BATCH, site/index.html runLoop): was 100K (legacy from the slow-tick era). Per-batch tick is now cheap, so 5× smaller batches cut IRQ/interrupt delivery latency (~5.4ms → ~1.1ms) at zero measurable cost — 200M run 10.86s vs 10.8s baseline; canary still 37/37. More batch crossings = better UART RX/TIM/EXTI response in the browser demo (live per-frame UART render)
+- **Hookless instruction counting** (cli.mjs + pkg/emulator.js): the per-instruction JS codeHook (2 increments) cost ~20% of runtime — measured by running 200M with the hook removed (10.86s → 8.7–9.1s; ~18.5 → ~22M IPS). Since `emu_start(begin,0,0,maxBatch)` stops exactly at maxBatch, each batch is credited in full: exact for normal batches; a faulted batch (unmapped access, ~0.01% of batches — 1 in 9988 measured) is skipped (PC+2) and credited full anyway, overcounting <1 batch — invisible. Handler runs inside `processInterrupts` are not credited (instruction-delta peripherals self-correct; canary stays 39/39). This also settles the "single WASM module / C-level codeHook" idea: the JS boundary was the whole cost, and it's now gone without any rebuild
+- **Batch size 20K** (cli.mjs, pkg/emulator.js DEFAULT_MAX_BATCH, site/index.html runLoop): was 100K (legacy from the slow-tick era). Per-batch tick is now cheap, so 5× smaller batches cut IRQ/interrupt delivery latency (~5.4ms → ~1.1ms) at zero measurable cost — 200M run 10.86s vs 10.8s baseline; canary still 39/39. More batch crossings = better UART RX/TIM/EXTI response in the browser demo (live per-frame UART render)
 - **Site runLoop**: batch ~4× `step(20000)` per rAF frame (80ms budget), one UI pass per frame; Speed stat divides real frame instructions, not a fixed 500K
-- **Regression canary**: `node tests/canary.mjs` (or `node tests/canary.mjs <maxInstr>` default 100M) — runs firmware, asserts exit 0, no FAIL lines, SUMMARY pass=37 fail=0, ~6s. Faster than the full 200M run.
+- **Regression canary**: `node tests/canary.mjs` (or `node tests/canary.mjs <maxInstr>` default 100M) — runs firmware, asserts exit 0, no FAIL lines, SUMMARY pass=39 fail=0, ~25s. Faster than the full 200M run.
 
 ## Current Status (uncommitted WIP — see "What We Did — Current Sprint" below)
 ### Test suite: `node tests/test_all.mjs`
-**158/158 unit tests PASS** (GPIO, USART, ADC, RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C, RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX).
+**189/189 unit tests PASS** (GPIO incl. electrical model, USART, ADC, RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C, RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX, FSMC, deep-sleep gating, fault escalation).
 
-### Firmware test — `tests/arduino_periph_test/` (24-peripheral Arduino sketch, 37 checks)
+### Firmware test — `tests/arduino_periph_test/` (24-peripheral Arduino sketch, 39 checks)
 ```
-echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml --max=200000000     # ~40s, 2000 steps
+echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml --max=200000000     # ~9s, 10000 steps
 ```
-- **PASS (37/37)**: sync section (GPIO, USART TX, UART Loopback, RCC, FLASH, PWR, BKP, IWDG, WWDG, RTC, CRC, DAC, ADC, AFIO, EXTI reg, CAN, SPI Flash, I2C EEPROM, I2C OLED, touchscreen, LCD, I2C2 EEPROM, SPI2 Flash, USART2 Loopback) + async section (DMA TX/RX, UART RX, TIM2, EXTI0, EXTI1, EXTI13, CAN RX, SysTick, TIM3 PWM, TIM4, RTC Alarm IRQ)
+- **PASS (39/39)**: sync section (GPIO, USART TX, UART Loopback, RCC, FLASH, PWR, BKP, IWDG, WWDG, RTC, CRC, DAC, ADC, AFIO, EXTI reg, CAN, SPI Flash, I2C EEPROM, I2C OLED, touchscreen, LCD, I2C2 EEPROM, SPI2 Flash, USART2 Loopback, SVC) + async section (DMA TX/RX, UART RX, TIM2, EXTI0, EXTI1, EXTI13, CAN RX, SysTick, TIM3 PWM, TIM4, RTC Alarm IRQ, PendSV)
+- **SVC + PendSV test**: `testSVC()` in setup() does `__asm volatile("svc #2")` (fires synchronously mid-batch via the JS INTR hook), sets SHPR3 (SVCall=0x40, PendSV=0x80), then pendSVC via ICSR PENDSVSET; PendSV fires at the next batch boundary.
 - **CAN RX injection**: cli.mjs polls the firmware's `canRxArmed` RAM global (symbol from ELF), then calls `can_inject_message(0x40006400, 0<<21, 2, 0xDEAD, 0)`. Note the firmware's filter bank 0 is ID-list mode (FS1R=1, FM1R=0, F0=0) → only STDID **0** matches — inject ID 0, not 0x123.
-- **Batch-boundary timing**: emulator ticks peripherals only in `step_batch()` between `emu_start` batches — never mid-batch. Any test that reads CNT/SR/IRQ flags after a `spin()` must be async-style (arm once, poll across batches), else it sees CNT=0.
+- **Batch-boundary timing**: emulator ticks peripherals only in `step_batch()` between `emu_start` batches — never mid-batch. Any test that reads CNT/SR/IRQ flags after a `spin()` must be async-style (arm once, poll across batches), else it sees CNT=0. Exception: `svc` fires synchronously inside a batch.
 - **Important**: 50M instr cap stops mid-print (not a deadlock); use `--max=200000000` for the full run. `A` (0x41) is reserved for the DMA RX test; `B` is the UART RX byte. `uart_rx_pending()` gate in cli.mjs prevents `A` from being consumed by the UART RX test.
 - **USART TX test notes**: firmware test polls SR TXE up to 2M iterations. In emulator TXE re-asserts at batch boundaries, DRW per ISR run → ~1 byte / 100K-instr batch (not byte_time at 6250). Poll of 100K iters previously failed because the 22-byte drain needs ~2.2M instructions. Real HW at 115200: ~1.9ms drain, well under 2M-iteration budget.
 - **I2C2/SPI2 devices**: `build/eeprom2.bin` (0x51, 64K) + `build/spi_flash2.bin` (JEDEC `0xEF4017`, CS PB12) — both must be re-created after an arduino-cli rebuild (build dir gets wiped):
   `node -e "const fs=require('fs'); const e2=Buffer.alloc(65536); e2[0]=0x42; e2[1]=0x24; fs.writeFileSync('tests/arduino_periph_test/build/eeprom2.bin', e2); fs.writeFileSync('tests/arduino_periph_test/build/spi_flash2.bin', Buffer.alloc(65536));"`
 
 ## What We Did — Current Sprint (uncommitted WIP)
-### UART TX speedup — immediate TXE + NVIC re-pend fairness (`src/peripherals/usart.rs`, `src/peripherals/nvic.rs`)
-- **Root cause of slow UART**: `txe_clear_until = instr + byte_time()` was compared against `instruction_count()`, which only updates at batch boundaries → stale mid-batch → TXE re-asserted ~1 byte per 100K batch ≈ 50 B/s. Also the core's `Serial` (STMicro core 2.12) is ring-buffer + `HAL_UART_Transmit_IT` driven: `write()` spins in `availableForWrite()` until the TXE ISR drains the ring — a pure software loop, so nothing re-pended mid-drain.
-- `write_dr()` now re-asserts TXE immediately (polling firmware drains at instruction rate); `tick()` always calls `update_interrupt()` (was early-returning when TXE set — deadlock with TXEIE enabled).
-- **NVIC fairness**: `get_next_pending_intr` yields when the same IRQ re-pends itself (`last_popped`): a hot self-re-pending IRQ (TXE draining the ring) alternates with other pending IRQs instead of consuming all 16 batch slots → EXTI13/CAN/etc. still fire during long prints; TXE drains ~8 bytes/batch (was 1). periph37 full run in browser: 15.8s wall (previously exceeded the 60s harness cap)
-- `refresh_txe()` on SR/DR reads, `rx_pending()` for the DMA gate
-### SPI device selection (`src/peripherals/spi.rs`, `src/peripherals/gpio.rs`)
-- `active_device()` now uses new `gpio.read_pin_effective()` (read callback, else driven output state) — previously `read_port` ignored output-only pins, so the flash CS settled non-selected; touchscreen CS (PA2) now correctly selects the ADS7846
-### Touchscreen ADS7846 protocol (`src/ext_devices/touchscreen.rs`)
-- `deferred_reply` — the emulator returns the reply one SPI transfer (8 more clocks) after the command byte, matching the real part; cmd `0x94` (pressure/slave select) mapped to touch_pressure
-### Exti / Tim (`src/peripherals/exti.rs`, `src/peripherals/tim.rs`)
-- EXTI IMR writes and TIM DIER UIE writes now call `nvic.enable_irq()` for the mapped IRQ (sync section IRQs were never enabled → EXTI0/TIM2 IRQs could not fire)
-### DMA (`src/peripherals/dma.rs`, `src/system.rs`)
-- **`channels[ch].ndtr = 0` after `do_xfer()` removed** (async semantics: CNDTR holds until `tick` + JS-side `dma_set_completed_many`). The old zero-on-enable line made firmware re-arms immediately → second DMA transfer consumed the next stdin byte in `[DMAP]` (bug: UART RX FAIL)
-- `queue_dma_transfer` dedupes on `stream_idx` (re-armed channel while a transfer is still queued is ignored — same root cause vs THE DUPLICATE)
-### `src/peripherals/nvic.rs` / `src/lib.rs` cleanups
-- Removed all `i2c_log`/`debug_*`/`I2C_LOG`/`flash_debug` instrumentation (see Active Workarounds) — machine-parseable `[name] PASS/FAIL` only
-### Unit tests
-- `tests/test_all.mjs`: UART/DMA tests now use `dma_get_pending_count()`/`dma_set_completed_many()` + `tick()` to model the async bridge — was 157, now **158/158 pass**
-### New firmware tests + cli CAN RX injection (this sprint)
-- `tests/arduino_periph_test/arduino_periph_test.ino`: added `testI2C2()` (register-level I2C2 master on 0x40005800 → EEPROM 0x51 round-trip via repeated START), `testSPI2()` (register-level SPI2 master 0x40003800, JEDEC `EF 40 17` + PP/readback on PB12), `testUSART2()` (HDSEL loopback), plus async TIM3 PWM (CC1IF via OC1M=PWM1), TIM4 CNT, RTC alarm IRQ (custom `extern "C" RTC_IRQHandler`, IRQ3), EXTI1 (PB1) + EXTI13 (PB13) via SWIER, and CAN RX (firmware sets `canRxArmed` RAM flag → cli injects once → firmware reads RFIFO0)
-### cli.mjs perf (`pkg/cli.mjs`)
-- **instCount/batchInstCount as plain numbers** (was BigInt): ~19% faster full run (48.3s → 39.1s at 200M); per-instruction hook increments were the hottest JS path — **replaced by hookless batch crediting** (see Performance section)
-- CAN RX injection: `can_inject_message` import; main loop polls the ELF symbol `canRxArmed` via `uc.mem_read` and injects a single CAN frame `(ID=0, DLC=2, data=0xDEAD)` — 37/37 firmware checks PASS
-- Regression canary: `tests/canary.mjs` (spawns cli with `--max=100000000`, asserts `SUMMARY pass=37 fail=0`, prints `CANARY PASS`) — ~25s, replaces slower full-run checks
-### WASM abort investigation (this sprint)
-- `Fatal: undefined Stack: undefined` at ~35M instr (seen once) — stress-tested **after the step_batch/tim rewrite**: 7 runs totalling ~2.5B instructions (200M×3, 400M×2, 600M, 300M with `usr/bin/time -v`) — **zero aborts**, all 37/37, max RSS 148–160MB stable (no leak, no growth with instruction count). Not reproducible; monitor on any re-occurrence
+### 1. Real GPIO/electrical behaviour (`src/peripherals/gpio.rs`)
+- **Pin-level electrical model** for IDR readback: input pull-up/down (CNF=01, ODR bit selects direction), floating input (external driver or 0), push-pull output readback (slew-aware), open-drain (low driven; high released → external pull or 0), external drivers (JS read callbacks) win over driven state, analog → 0.
+- **Slew** (`GPIO_SLEW` + `gpio_set_slew(n)`): output transitions land in `pending_transitions` (pin, settle_at, old_level); IDR shows the old level until settle. Open-drain driven-low ignores external drivers (`driven_pin_level`).
+- **ODR/BSRR/BRR write the full register** (input pins use ODR for pull selection — the old `output_mask` filter silently broke INPUT_PULLUP); output-mode side effects (device callbacks, EXTI) still only fire for output pins.
+### 2. Sleep state timing (`src/system.rs`, `src/peripherals/scb.rs`, `src/peripherals/mod.rs`, `src/peripherals/tim.rs`)
+- `SCR.SLEEPDEEP` (SCB 0xE000ED10 bit 2) → deep sleep: `system.tick()` calls `tick_frozen()` on every peripheral except RTC (0x40002800) + IWDG (0x40003000), and skips SysTick accrual.
+- **New trait method `tick_frozen()`** (default no-op): instruction-delta peripherals advance their delta base WITHOUT processing state. TIM overrides it — without this, frozen timers CATCH UP on wake (a 200-tick sleep produced a +220 CNT jump).
+- Wake is immediate: UART RX pends from JS at the next batch boundary.
+### 3. Exceptions other than IRQs (SVC, PendSV, faults) (`src/peripherals/nvic.rs`, `src/peripherals/scb.rs`, `pkg/cli.mjs`, `pkg/emulator.js`)
+- **Unicorn probe**: `svc` fires HOOK_INTR intno 2 (execution continues after svc if not redirected); `bx lr` to 0xFFFFFFF9 THROWS UC_ERR_FETCH_UNMAPPED (no hook); MODE_BIG → UC_ERR_ARCH (must use THUMB|LITTLE_ENDIAN). The old `intno === 8` INTR branch is dead code (kept intact).
+- **SVC**: JS stacks a 32-byte frame (xPSR, PC+2, LR, R12, R0-3) — written to the real stack AND mirrored in a JS `svcStack` — sets LR = EXC_RETURN (0xFFFFFFF9, or 0xFFFFFFFD when `CONTROL.SPSEL`), PC = SVCall vector (exception 11 → vector_table + 44). Return: the main-loop catch sees PC in 0xFFFFFFF0..0xFFFFFFFF with svcStack non-empty → pops the mirror. Depth capped at 8.
+- **PendSV**: `ICSR.PENDSVSET` (SCB write) → NVIC pending → dispatched by the normal `processInterrupts` path.
+- **Faults**: unmapped faults are now REAL except the known Unicorn `bl` artifact at `HAL_NVIC_EnableIRQ` (resolved via ELF symbols; skip PC+2). `raise_fault(kind, addr)` (Rust export) sets CFSR (IBUSERR/PRECISERR/UNDEFINSTR), BFAR+BFARVALID, HFSR FORCED, and pends BusFault (-11)/UsageFault (-10) if the SHCSR enable bit is set, else **escalates to HardFault (-13)**.
+- **System-handler priorities**: SCB SHPR1-3 writes route to the NVIC `sys_handler_priority[16]` (default 0x80; fixed: NMI 0, HardFault 0, MemManage 1, BusFault 2, UsageFault 3). SHCSR write mask fixed (`& 0xFFFF` dropped bit 18).
+- **Fault dispatch caveat**: STM32duino's default fault handler is `while(1)` — a genuinely faulting firmware hangs the run (realistic; the artifact skip + symbol gating keeps periph39 clean). No symbol table (hex-only browser firmware) → legacy tolerant skip.
+### 4. Real ADC conversion (`src/peripherals/adc.rs`)
+- Full rewrite: conversion state machine with real timing (`Tconv = SMP + 12.5` cycles, 1 instr = 1 ADC cycle; SMP codes 0-7 → 14/20/26/41/54/68/84/252), per-sequence channels (SQ1-16 from SQR3/2/1, JSQ1-4), `end_at`-based completion in `tick()`, EOC per conversion unless EOCS (CR2 bit 10), STRT at sequence start, AWD vs HTR/LTR, CONT (bit 16) auto-restart, SWSTART (bit 22)/JSWSTART (bit 21), CAL/RSTCAL self-clear, ADC1→DMA1 ch1 / ADC2→DMA1 ch2 requests via the new `dma_request()` trait method.
+- ADC unit test now waits `step_batch(14)` after SWSTART (was: instant EOC).
+### 5. Full FSMC (`src/peripherals/fsmc.rs`, `src/ext_devices/fsmc_nor.rs`)
+- All 7 external-memory banks: NE1-4 @ 0x6000_0000/0x6400_0000/0x6800_0000/0x6C00_0000 (NOR), NAND2/3 @ 0x7000_0000/0x8000_0000, PC-Card @ 0x9000_0000. BCR1-4 @ 0xA000_0000.. (BTR/BWTR at +8/+10/+18), PCR/PMEM/PATT 2-4 at +0x60/+0x80/+0xA0 (+8 stride).
+- NOR banks gate on BCR MBKEN (bit 0); NOR writes also need WREN (bit 1). NAND/PC always enabled. `read_sized`/`write_sized` assemble bytes per access width.
+- Backing: `FsmcNor` ext device with a JS `Uint8Array` image; `add_fsmc_bank('FSMC.BANK1', data)` (must precede init()); ext_devices lookup in `find_mem_device` matches `fsmc_nors` by name (`FSMC.BANK1..7`).
+### Unit tests / firmware / misc
+- `tests/test_all.mjs`: 160 → **189 pass** (ADC timing + GPIO electrical + FSMC + sleep + faults; FSMC byte-write constant is `0x4433AB11` — 0xAB lands at offset 1, little-endian).
+- Firmware: +SVC (synchronous, `svc #2` in setup()) +PendSV (ICSR-pended, fires next batch) → **39/39**; canary asserts 39.
+- cli.mjs/emulator.js: SVC hook, EXC_RETURN pop, symbol-gated fault raise; emulator.js `faultSym` merged into the existing `resolveSymbol` path (`resolveSym` shared helper, `setSymbols` resets it).
+- site/: synced (emulator.js + wasm + unicorn_arm.js), refreshed `arduino_periph_test.elf` (39 checks) + eeprom2/spi_flash2 images.
+- docs/: PERIPHERALS.md (FSMC/ADC Full, GPIO electrical, sleep, exceptions, 189 tests, 39 checks), ARCHITECTURE.md (Exceptions/Sleep/GPIO/FSMC sections), USAGE.md (gpioSetSlew + fsmc ext_devices + 39), README links.
+- 200M full run: 39/39 in **9.00s** (~22M IPS).
 
 ## Active Workarounds (temporary, remove or upstream later)
 1. **`mrs rX, msp` → `mov rX, sp`** (cli.mjs `patchMrsMsp`, ~line 19): Unicorn cannot decode Thumb `mrs`; newlib `_sbrk` uses it; rewrite to 4-byte equivalent + nop (same footprint)
@@ -99,8 +105,8 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
 ```bash
 cargo check                          # Rust sanity (fast)
 wasm-pack build --target web         # rebuild pkg/stm32_bluepill_wasm_bg* (Rust → wasm)
-node tests/test_all.mjs              # 158 unit tests
-node tests/canary.mjs                # regression canary: 37/37 firmware checks, ~25s
+node tests/test_all.mjs              # 189 unit tests
+node tests/canary.mjs                # regression canary: 39/39 firmware checks, ~25s
 node tests/bench.mjs                 # benchmarks
 node pkg/cli.mjs tests/arduino_periph_test/build/arduino_periph_test.ino.elf   # run firmware
 echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml --max=200000000
@@ -120,7 +126,7 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 ## Next Phase — What's Left
 
 ### Immediate (ALL PASS as of this sprint; re-check after any change)
-1. **Verify nothing regressed** — rerun `tests/test_all.mjs` (158) + canary (`node tests/canary.mjs`, 37/37) after any edit to `src/` or `pkg/cli.mjs`
+1. **Verify nothing regressed** — rerun `tests/test_all.mjs` (189) + canary (`node tests/canary.mjs`, 39/39) after any edit to `src/` or `pkg/cli.mjs`
 
 ### Known issue (monitor only)
 - WASM abort (`Fatal: undefined Stack: undefined`) at ~35M+ instructions — seen once, **not reproducible** across ~2.5B stress instructions (7 runs). Re-investigate if it re-occurs
@@ -134,8 +140,11 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 ## Files Most Relevant
 - `src/peripherals/i2c.rs` — I2C state machine
 - `src/lib.rs` — WASM API; new exports
-- `pkg/cli.mjs` — DR Mode patch, workarounds, loop
+- `pkg/cli.mjs` — DR Mode patch, workarounds, loop, SVC hook, fault gate
 - `src/peripherals/usart.rs` — TXE byte-time pacing, `rx_pending()`
 - `src/ext_devices/spi_flash.rs`, `src/peripherals/spi.rs`, `src/ext_devices/touchscreen.rs` — touchscreen SPI reads (deferred_reply)
-- `src/peripherals/gpio.rs` — `read_pin_effective()`
-- `tests/arduino_periph_test/` — the 21-test firmware + config
+- `src/peripherals/gpio.rs` — electrical model (`pin_level()`), slew (`pending_transitions`), `read_pin_effective()`
+- `src/peripherals/scb.rs` — deep sleep, SHPR routing, `raise_fault()`
+- `src/peripherals/fsmc.rs`, `src/ext_devices/fsmc_nor.rs` — FSMC banks + backing
+- `src/peripherals/adc.rs` — real conversion state machine
+- `tests/arduino_periph_test/` — the 24-peripheral firmware (39 checks incl. SVC/PendSV) + config

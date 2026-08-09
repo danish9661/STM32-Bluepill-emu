@@ -4,7 +4,7 @@ Everything below is emulated at **register level** — the firmware talks to the
 memory-mapped registers of an STM32F103C8 and the emulator behaves like the hardware,
 including interrupt generation, status flags, and timing. Support levels:
 
-- **Full** — register-accurate, with interrupts and timing, exercised by the 37-check
+- **Full** — register-accurate, with interrupts and timing, exercised by the 39-check
   firmware test (`tests/arduino_periph_test`) and/or unit tests.
 - **Partial** — some sub-features implemented; see notes.
 - **Stub** — registers exist / reads return 0; listed for completeness.
@@ -28,13 +28,13 @@ including interrupt generation, status flags, and timing. Support levels:
 | IWDG | Full | Independent watchdog: down-counter, refresh, **triggers an emulator stop** on expiry (JS checks `is_watchdog_reset_requested()`). |
 | WWDG | Full | Window watchdog, same reset semantics. |
 | FLASH | Full | Flash interface: unlock/lock, program (byte/halfword/word), erase, option bytes, status flags. |
-| FSMC | Partial | Register file registered (addresses decode); no actual external-memory backing. |
+| FSMC | Full | All 7 external-memory banks (NE1–4 @ 0x6000/0x6400/0x6800/0x6C00, NAND2 @ 0x7000, NAND3 @ 0x8000, PC-Card @ 0x9000) with BCR/BTR/BWTR/PCR/PMEM/PATT registers, MBKEN/WREN gating, byte/16/32-bit accesses. Backed by a JS `Uint8Array` image per bank (`add_fsmc_bank('FSMC.BANK1', data)`). |
 
 ## GPIO & system interconnect
 
 | Unit | Level | Notes |
 |---|---|---|
-| GPIO A–D | Full | CRL/CRH/IDR/ODR/BSRR/BRR/LCKR, pull-ups, open-drain, alternate function, `read_pin_effective()` (input callback else driven output) for CS/touch lines. Readbacks (`gpio_read_output`, `gpio_read_input`) are exposed to JS. |
+| GPIO A–D | Full | CRL/CRH/IDR/ODR/BSRR/BRR/LCKR, pull-ups, open-drain, alternate function, `read_pin_effective()` (input callback else driven output) for CS/touch lines. **Electrical model**: IDR readback honors input pull-up/down (ODR bit selects direction), push-pull output readback, open-drain released level (external pull or 0), external drivers win over driven state, and output **slew** (IDR shows the old level until the transition settles, `gpio_set_slew(n)` instructions). Readbacks (`gpio_read_output`, `gpio_read_input`) are exposed to JS. |
 | AFIO | Full | Remap registers, EXTI line selectors. |
 | EXTI | Full | 20 lines, rising/falling/level triggers, software-triggered (SWIER), per-line IRQ mapping to NVIC (including the enable side — IMR writes enable the mapped IRQ). |
 | DMA1 | Full | 7 channels: peripheral→memory, memory→peripheral, memory→memory; CNDTR counts down across batches; transfer-complete IRQs; JS-side batched transfer (`dma_get_all_pending`/`dma_set_completed_many`). |
@@ -61,7 +61,7 @@ including interrupt generation, status flags, and timing. Support levels:
 
 | Unit | Level | Notes |
 |---|---|---|
-| ADC1–2 | Partial | Full register file (CR1/CR2/SR/SQR/SMPR), conversion is **simulated**: firmware reads come from `adc_set_sim_value()` — no real analog model. |
+| ADC1–2 | Full | Real conversion state machine: per-sequence channels (SQR/JSQR), sample-time timing (`Tconv = SMP + 12.5` ADC cycles, 1 instr = 1 cycle), EOC/STRT/JEOC/JSTRT flags, EOCS, AWD with HTR/LTR, CONT auto-restart, ADC1→DMA1 ch1 / ADC2→DMA1 ch2 requests. The sampled value still comes from `adc_set_sim_value()` — there is no analog input model. |
 | CRC | Full | CRC32 computation over written bytes, DR readback. |
 
 ## External devices (emulated bus devices)
@@ -80,19 +80,28 @@ These are *extra* peripherals the STM32 talks to over SPI/I2C — the "rest of t
 ## What is NOT emulated
 
 - **USB** (stub).
-- **Real ADC conversion** (values are injected), real analog comparators.
-- **CPU exceptions other than IRQs**: hard faults are tolerated (unmapped access →
-  instruction skipped), but there is no fault handler execution model.
-- **Multiple cores / sleep state timing** — firmware runs at a flat instruction rate;
-  `delay()`/`millis()` are correct, but power-down modes don't slow the wall clock.
-- Real GPIO/electrical behaviour (glitches, rise times, external pull strength).
+- **Real analog input model** — ADC converts with real timing/flags but samples
+  the injected `adc_set_sim_value()`; no capacitor/discharge model, comparators.
+- **Cortex-M fault-preemption details** — faults are raised with CFSR/HFSR/BFAR
+  bookkeeping and run through the same handler dispatch as IRQs (with SHCSR
+  escalation to HardFault), but precise stack/return-address semantics of a
+  real core are approximated.
+- **Power consumption / wall-clock slowdown** — STOP/STANDBY freezes all
+  peripherals except RTC + IWDG (SysTick included), but the emulated wall clock
+  doesn't slow down and wake is immediate on the next IRQ.
+- Slew rise/fall shaping (transitions are 2-state), glitches, and external pull
+  *strength* (drivers are digital).
 
 ## Verification coverage
 
-- **158 unit tests** (`node tests/test_all.mjs`) — GPIO, USART, ADC, RCC, SysTick, TIM,
-  IWDG, NVIC, CRC, SPI, I2C, RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6,
-  RTC Alarm, UART RX.
-- **37-check firmware test** (`node tests/canary.mjs`, 37/37): runs a real Arduino sketch
+- **189 unit tests** (`node tests/test_all.mjs`) — GPIO (incl. electrical model: pull-ups,
+  open-drain, external-driver precedence, slew readback), USART, ADC (real conversion
+  timing), RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C, RTC, PWR, FLASH, CAN, DMA, AFIO,
+  EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX, FSMC (MBKEN/WREN gating, byte/word access),
+  deep-sleep gating (TIM frozen, RTC alive, resume without catch-up), fault escalation
+  (CFSR/HFSR/BFAR, BusFault vs HardFault, IBUSERR, SHPR routing).
+- **39-check firmware test** (`node tests/canary.mjs`, 39/39): runs a real Arduino sketch
   compiled with STM32duino against sync + async scenarios (DMA TX/RX, UART RX, TIM2
-  overflow IRQ, EXTI0/1/13, CAN RX injection, SysTick, TIM3 PWM, TIM4 CNT, RTC alarm IRQ).
+  overflow IRQ, EXTI0/1/13, CAN RX injection, SysTick, TIM3 PWM, TIM4 CNT, RTC alarm IRQ,
+  **SVC + PendSV**).
 - CI (`.github/workflows/test.yml`) rebuilds the WASM and runs both suites on every push.

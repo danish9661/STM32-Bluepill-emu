@@ -95,7 +95,7 @@ select:focus { outline: none; border-color: #7dd3fc; }
                 <select id="presetSelect">
                     <option value="blink">Blink Demo (Arduino)</option>
                     <option value="comprehensive">Comprehensive Test (21 peripherals)</option>
-                    <option value="periph37">Peripheral Test (37 checks, auto)</option>
+                    <option value="periph37">Peripheral Test (39 checks, auto)</option>
                     <option value="echo">UART Echo (type in terminal)</option>
                     <option value="fade">TIM2 PWM Fade (PA0 glow)</option>
                 </select>
@@ -467,7 +467,7 @@ $('loadPresetBtn').addEventListener('click', async () => {
                 fetch('arduino_spi_flash.bin').then(r => r.arrayBuffer()),
                 fetch('arduino_spi_flash2.bin').then(r => r.arrayBuffer()),
             ]);
-            await initEmulator(new Uint8Array(fw), 'arduino_periph_test.elf (37 checks)', {
+            await initEmulator(new Uint8Array(fw), 'arduino_periph_test.elf (39 checks)', {
                 i2c_eeprom: [
                     { peripheral: 'I2C1', address: 0x50, data: new Uint8Array(e1) },
                     { peripheral: 'I2C2', address: 0x51, data: new Uint8Array(e2) },

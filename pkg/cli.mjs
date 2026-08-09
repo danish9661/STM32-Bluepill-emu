@@ -6,7 +6,7 @@ import { parseIntelHex, parseSymbolMap, parseElf } from './emulator.js';
 import * as periph from './stm32_bluepill_wasm.js';
 const { periph_read, periph_write, tick, step, step_batch, get_next_pending_interrupt, dma_get_all_pending, 
 dma_set_completed_many, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen,
-add_lcd, add_i2c_oled, can_inject_message,
+add_lcd, add_i2c_oled, can_inject_message, raise_fault,
 init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
 set_intr_masks, clear_current_interrupt, nvic_systick_take } = periph;
 
@@ -351,6 +351,9 @@ async function main() {
     process.stdin.resume();
     if (process.stdin.isTTY) process.on('SIGINT', () => { process.stdin.setRawMode(false); process.exit(0); });
 
+    // SVC frames live here while their handler runs. The frame is also written
+    // to the real stack so handler code can inspect it (Cortex-M ABI).
+    const svcStack = [];
     const intrHook = (handle, intno, user_data) => {
         if (intno === 8) {
             const sp = uc.reg_read_i32(Module.ARM_REG_SP);
@@ -364,6 +367,38 @@ async function main() {
             uc.reg_write_i32(Module.ARM_REG_LR, sv.getUint32(8, true));
             uc.reg_write_i32(Module.ARM_REG_PC, sv.getUint32(4, true) | 1);
             uc.reg_write_i32(Module.ARM_REG_SP, sp + 32);
+        } else if (intno === 2 && svcStack.length < 8) {
+            // SVC: stack the interrupted context, enter handler mode (LR = EXC_RETURN),
+            // jump to the SVCall vector. Return happens when the handler executes
+            // `bx lr` (Unicorn faults fetching 0xFFFFFFFx, caught in the main loop).
+            const sp = uc.reg_read_i32(Module.ARM_REG_SP);
+            const saved = {
+                sp,
+                r0: uc.reg_read_i32(Module.ARM_REG_R0),
+                r1: uc.reg_read_i32(Module.ARM_REG_R1),
+                r2: uc.reg_read_i32(Module.ARM_REG_R2),
+                r3: uc.reg_read_i32(Module.ARM_REG_R3),
+                r12: uc.reg_read_i32(Module.ARM_REG_R12),
+                lr: uc.reg_read_i32(Module.ARM_REG_LR),
+                pc: uc.reg_read_i32(Module.ARM_REG_PC),
+                xpsr: uc.reg_read_i32(Module.ARM_REG_XPSR),
+            };
+            svcStack.push(saved);
+            const frame = new Uint8Array(32);
+            const sv = new DataView(frame.buffer);
+            sv.setUint32(0, saved.xpsr, true);
+            sv.setUint32(4, saved.pc, true); // return PC = instruction after svc
+            sv.setUint32(8, saved.lr, true);
+            sv.setUint32(12, saved.r12, true);
+            sv.setUint32(16, saved.r3, true);
+            sv.setUint32(20, saved.r2, true);
+            sv.setUint32(24, saved.r1, true);
+            sv.setUint32(28, saved.r0, true);
+            uc.mem_write(BigInt(sp - 32), frame);
+            uc.reg_write_i32(Module.ARM_REG_SP, sp - 32);
+            const control = uc.reg_read_i32(Module.ARM_REG_CONTROL);
+            uc.reg_write_i32(Module.ARM_REG_LR, control & 1 ? 0xFFFFFFFD : 0xFFFFFFF9);
+            uc.reg_write_i32(Module.ARM_REG_PC, read32(vector_table + 4 * 11));
         }
     };
     uc.hook_add(Module.HOOK_INTR, intrHook, null);
@@ -466,9 +501,37 @@ async function main() {
             uc.emu_start(BigInt(curPc | 1), 0n, 0n, maxBatch);
         } catch (e) {
             const msg = String(e);
-            if (msg.includes('UC_ERR_READ_UNMAPPED') || msg.includes('UC_ERR_FETCH_UNMAPPED') || msg.includes('UC_ERR_WRITE_UNMAPPED')) {
-                const pc2 = uc.reg_read_i32(Module.ARM_REG_PC);
-                uc.reg_write_i32(Module.ARM_REG_PC, (pc2 + 2) | 1);
+            const pc2 = uc.reg_read_i32(Module.ARM_REG_PC);
+            if (msg.includes('UC_ERR_FETCH_UNMAPPED') && ((pc2 & ~1) >>> 0) >= 0xFFFFFFF0 && svcStack.length > 0) {
+                // SVC handler returned via `bx lr` (EXC_RETURN): restore the pre-SVC context
+                const st = svcStack.pop();
+                uc.reg_write_i32(Module.ARM_REG_R0, st.r0);
+                uc.reg_write_i32(Module.ARM_REG_R1, st.r1);
+                uc.reg_write_i32(Module.ARM_REG_R2, st.r2);
+                uc.reg_write_i32(Module.ARM_REG_R3, st.r3);
+                uc.reg_write_i32(Module.ARM_REG_R12, st.r12);
+                uc.reg_write_i32(Module.ARM_REG_LR, st.lr);
+                uc.reg_write_i32(Module.ARM_REG_PC, st.pc | 1);
+                uc.reg_write_i32(Module.ARM_REG_SP, st.sp);
+            } else if (msg.includes('UC_ERR_READ_UNMAPPED') || msg.includes('UC_ERR_FETCH_UNMAPPED') || msg.includes('UC_ERR_WRITE_UNMAPPED')) {
+                const r0 = uc.reg_read_i32(Module.ARM_REG_R0);
+                const r1 = uc.reg_read_i32(Module.ARM_REG_R1);
+                const lr = uc.reg_read_i32(Module.ARM_REG_LR);
+                const sym = traceResolve ? (traceResolve(pc2) || pc2.toString(16)) : null;
+                console.log(`FAULT @${sym} lr=${traceResolve ? (traceResolve(lr) || lr.toString(16)) : lr.toString(16)} r0=0x${r0.toString(16)} r1=0x${r1.toString(16)} [${msg}]`);
+                if (traceResolve && sym && sym.includes('HAL_NVIC_EnableIRQ')) {
+                    // Known Unicorn `bl` decode artifact at HAL_NVIC_EnableIRQ+0xf:
+                    // not a real fault, skip the faulting instruction like before.
+                    uc.reg_write_i32(Module.ARM_REG_PC, (pc2 + 2) | 1);
+                } else if (traceResolve) {
+                    // Real fault: raise it. The fault handler runs via
+                    // processInterrupts below and CFSR/HFSR/BFAR are populated.
+                    const kind = msg.includes('FETCH_UNMAPPED') ? 0 : (msg.includes('WRITE_UNMAPPED') ? 2 : 1);
+                    raise_fault(kind, 0);
+                } else {
+                    // No symbol table: keep the legacy tolerant skip.
+                    uc.reg_write_i32(Module.ARM_REG_PC, (pc2 + 2) | 1);
+                }
             } else {
                 console.error('Emulation error:', e.message || e);
                 break;

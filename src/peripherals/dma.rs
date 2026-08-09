@@ -56,6 +56,15 @@ impl Channel {
 }
 
 impl Peripheral for Dma {
+    /// Peripheral request (ADC end-of-conversion etc.): if the channel is enabled
+    /// and configured, move one transfer (real HW: the request line pulses).
+    fn dma_request(&mut self, sys: &System, channel: u32) {
+        let ch = channel as usize;
+        if ch < 7 && self.channels[ch].cr & 1 != 0 {
+            self.channels[ch].do_xfer(&self.name, sys, ch);
+        }
+    }
+
     fn tick(&mut self, sys: &System) {
         let bits = sys.dma_take_completions();
         if bits != 0 {

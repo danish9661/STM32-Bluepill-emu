@@ -56,9 +56,11 @@ The original design counted instructions with a per-instruction JS `codeHook`
 `uc.emu_start(pc, 0, 0, maxBatch)`, Unicorn stops *exactly* at `maxBatch` instructions, so:
 
 - a **normal batch** executed exactly `maxBatch` instructions → credit `maxBatch`;
-- a **faulted batch** (unmapped read/write/fetch, measured at 1 in 9988 batches) has the
-  faulting instruction skipped (`PC+2`, a firmware-bug tolerance) and is **credited in
-  full** anyway — overcounting < 1 batch, invisible;
+- a **faulted batch** (unmapped read/write/fetch, measured at 1 in 9988 batches) is
+  handled by the fault path (see Exceptions): the known Unicorn `bl` artifact at
+  `HAL_NVIC_EnableIRQ` is skipped (`PC+2`), any other unmapped fault is raised into the
+  firmware as a real fault, and the batch is credited in full — overcounting < 1 batch,
+  invisible;
 - **interrupt handler runs** (inside `processInterrupts`) are not counted — peripheral
   timers are instruction-delta based and self-correct.
 
@@ -91,6 +93,29 @@ Peripheral time is derived from **instruction counts**, not wall-clock:
 - Interrupt latency is bounded by the batch size: **20K instructions ≈ 1.1 ms** at real
   speed (was 5.4 ms at 100K).
 
+## Exceptions (SVC, PendSV, faults)
+
+Beyond IRQs the emulator models the system exceptions that real firmware exercises:
+
+- **SVC**: Unicorn's `HOOK_INTR` fires with `intno 2` on `svc`. The JS bridge stacks the
+  interrupted context (R0–R3, R12, LR, PC, xPSR — written to the real stack so handlers
+  can inspect it, with a JS mirror for restoration), sets `LR` to the EXC_RETURN value
+  (0xFFFFFFF9, or 0xFFFFFFFD when `CONTROL.SPSEL` is set), and jumps to the SVCall vector
+  (exception 11). Unicorn cannot execute `bx lr` with an EXC_RETURN value (fetch fault at
+  0xFFFFFFFx), which the main-loop fault handler recognizes and pops the mirror stack.
+  Nested SVCs are bounded (depth 8).
+- **PendSV**: pended normally via `ICSR.PENDSVSET` (SCB register write → NVIC pending),
+  dispatched by the same `processInterrupts` path as IRQs.
+- **Faults**: a real unmapped access (anything other than the known Unicorn `bl` artifact
+  at `HAL_NVIC_EnableIRQ`, which is skipped) calls `raise_fault(kind, addr)` in Rust:
+  CFSR (IBUSERR/PRECISERR/UNDEFINSTR), BFAR + BFARVALID, and HFSR FORCED are recorded,
+  and the fault exception is pended — BusFault (or UsageFault for undefined instructions)
+  if the corresponding SHCSR enable bit is set, otherwise **escalated to HardFault**.
+  Priority of the system handlers is programmable via SCB SHPR1–3, which the SCB
+  peripheral routes into the NVIC's `sys_handler_priority` table.
+- Fault handlers run through `processInterrupts` and re-execution of the faulting
+  instruction is left to the handler (as on real hardware).
+
 ## DMA
 
 DMA transfers cross the WASM boundary in batches:
@@ -101,6 +126,25 @@ DMA transfers cross the WASM boundary in batches:
 4. JS calls `dma_set_completed_many(bits)`; the next `step_batch` finishes the channel
    (CNDTR counts down, transfer-complete IRQ fires).
 
+## Sleep modes (STOP/STANDBY)
+
+`SCR.SLEEPDEEP` (SCB register write) puts the CPU in a deep-sleep mode. `system.tick()`
+then calls `tick_frozen()` on every peripheral except the LSI/LSE-clocked **RTC** and
+**IWDG**, which keep running, and stops SysTick accrual. Instruction-delta peripherals
+(e.g. timers) override `tick_frozen()` to advance their delta base *without* processing
+state, so they don't catch up when the CPU wakes. Wake-up is immediate on the next
+interrupt (e.g. UART RX), which pends from JS at the next batch boundary.
+
+## GPIO electrical model
+
+IDR readback is a per-pin **wire-level** model: input pull-up/down (CNF=01, ODR bit
+selects direction), floating input (external driver or 0), push-pull output readback,
+open-drain (low driven, high released → external pull or 0), and external drivers
+(JS-registered read callbacks) win over driven state. Output transitions can be slowed
+with `gpio_set_slew(n)`: IDR shows the previous level until the transition settles.
+ODR/BSRR/BRR write the full register (input pins use ODR for pull selection), while
+output-state side effects (device callbacks, EXTI) only fire for pins in output mode.
+
 ## External devices (I2C/SPI bus devices)
 
 Devices such as SPI NOR flash, I2C EEPROMs, OLED panels, an LCD, and a resistive
@@ -108,7 +152,10 @@ touchscreen live in `src/ext_devices/` as Rust structs that plug into the SPI/I2
 peripheral state machines. They can be file-backed (a `Buffer.alloc` in JS, e.g. a
 64K EEPROM image) so state survives across runs. GPIO pin state is consulted for
 chip-select and touch-detect lines (`read_pin_effective()`: read callback first,
-else driven output value).
+else driven output value). **FSMC external memory** is a memory-mapped ext device:
+each enabled bank (`BCR.MBKEN`, writes also need `BCR.WREN`) reads/writes a JS-backed
+byte image (`add_fsmc_bank('FSMC.BANK1', data)`) at its 0x6000_0000+ window, with
+byte/16/32-bit accesses. NAND/PC-Card banks are always enabled.
 
 ## Known workarounds (temporary, in the JS layer)
 
@@ -128,8 +175,8 @@ else driven output value).
 
 | Metric | Value |
 |---|---|
-| Throughput (periph37 firmware) | **~22M instructions/sec** (200M in ~9.1s) |
-| Browser demo (periph37 full run) | ~0.5 s wall |
+| Throughput (periph39 firmware) | **~22M instructions/sec** (200M in ~9.0s) |
+| Browser demo (periph39 full run) | ~0.5 s wall |
 | Batch size | 20K instructions (≈1.1 ms IRQ latency) |
 | Memory | stable ~150 MB RSS, no growth with instruction count |
 | Per-instruction JS cost | only the mem hooks (~0.1% of instructions) |
