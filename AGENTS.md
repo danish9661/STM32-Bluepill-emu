@@ -9,13 +9,14 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 ```
 ┌─────────────────────────── JS (pkg/cli.mjs) ─────────────────────────┐
 │                                                                      │
-│  codeHook (per-instruction) → counts instructions (no WASM calls)   │
+│  HOOKLESS instruction counting — emu_start(begin,0,0,maxBatch)      │
+│  stops exactly at maxBatch (faults: ~0.01% of batches, skip+credit) │
 │  memReadHook / memWriteHook → periph_read / periph_write  [JIT]     │
 │                                                                      │
 │  Loop (each iteration = 1 batch):                                    │
 │    1. pump stdin → uart_rx_byte()                                    │
 │    2. processDma()            ← move queued DMA data via Unicorn    │
-│    3. uc.emu_start(pc|1, 0, 0, maxBatch=100K)                       │
+│    3. uc.emu_start(pc|1, 0, 0, maxBatch=20K)                        │
 │    4. step_batch(batchInstCount)   ← Rust ticks peripherals         │
 │       - status==1 → watchdog reset requested → stop                 │
 │    5. processDma()                                                  │
@@ -34,7 +35,8 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 - Peripheral access hooks are NOT a bottleneck anymore: measured 0.001 accesses/instruction (~27K per 50M instr) for the periph37 firmware
 - `step_batch()` gave 3.15× speedup over per-instruction `step()`
 - `has_tick` flag: 69% tick speedup; `tick_indices` Vec + `AtomicU32` DMA bitmask: minor gains
-- **instCount as plain number, not BigInt** (cli.mjs + pkg/emulator.js codeHook): ~19% faster full run (48.3s → 39.1s); BigInt ops per instruction were measurable at 5M instr/sec. `maxInst` compare + `step_batch` arg are now numbers too. Same change in emulator.js lifted the browser demo from 3.8M → 5.0M Avg IPS (~30%)
+- **instCount as plain number, not BigInt** (cli.mjs + pkg/emulator.js): ~19% faster full run (48.3s → 39.1s); BigInt ops per instruction were measurable at 5M instr/sec. `maxInst` compare + `step_batch` arg are now numbers too. Same change in emulator.js lifted the browser demo from 3.8M → 5.0M Avg IPS (~30%)
+- **Hookless instruction counting** (cli.mjs + pkg/emulator.js): the per-instruction JS codeHook (2 increments) cost ~20% of runtime — measured by running 200M with the hook removed (10.86s → 8.7–9.1s; ~18.5 → ~22M IPS). Since `emu_start(begin,0,0,maxBatch)` stops exactly at maxBatch, each batch is credited in full: exact for normal batches; a faulted batch (unmapped access, ~0.01% of batches — 1 in 9988 measured) is skipped (PC+2) and credited full anyway, overcounting <1 batch — invisible. Handler runs inside `processInterrupts` are not credited (instruction-delta peripherals self-correct; canary stays 37/37). This also settles the "single WASM module / C-level codeHook" idea: the JS boundary was the whole cost, and it's now gone without any rebuild
 - **Batch size 20K** (cli.mjs, pkg/emulator.js DEFAULT_MAX_BATCH, site/index.html runLoop): was 100K (legacy from the slow-tick era). Per-batch tick is now cheap, so 5× smaller batches cut IRQ/interrupt delivery latency (~5.4ms → ~1.1ms) at zero measurable cost — 200M run 10.86s vs 10.8s baseline; canary still 37/37. More batch crossings = better UART RX/TIM/EXTI response in the browser demo (live per-frame UART render)
 - **Site runLoop**: batch ~4× `step(20000)` per rAF frame (80ms budget), one UI pass per frame; Speed stat divides real frame instructions, not a fixed 500K
 - **Regression canary**: `node tests/canary.mjs` (or `node tests/canary.mjs <maxInstr>` default 100M) — runs firmware, asserts exit 0, no FAIL lines, SUMMARY pass=37 fail=0, ~6s. Faster than the full 200M run.
@@ -77,7 +79,7 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
 ### New firmware tests + cli CAN RX injection (this sprint)
 - `tests/arduino_periph_test/arduino_periph_test.ino`: added `testI2C2()` (register-level I2C2 master on 0x40005800 → EEPROM 0x51 round-trip via repeated START), `testSPI2()` (register-level SPI2 master 0x40003800, JEDEC `EF 40 17` + PP/readback on PB12), `testUSART2()` (HDSEL loopback), plus async TIM3 PWM (CC1IF via OC1M=PWM1), TIM4 CNT, RTC alarm IRQ (custom `extern "C" RTC_IRQHandler`, IRQ3), EXTI1 (PB1) + EXTI13 (PB13) via SWIER, and CAN RX (firmware sets `canRxArmed` RAM flag → cli injects once → firmware reads RFIFO0)
 ### cli.mjs perf (`pkg/cli.mjs`)
-- **instCount/batchInstCount as plain numbers** (was BigInt): ~19% faster full run (48.3s → 39.1s at 200M); codeHook increments are the hottest JS path
+- **instCount/batchInstCount as plain numbers** (was BigInt): ~19% faster full run (48.3s → 39.1s at 200M); per-instruction hook increments were the hottest JS path — **replaced by hookless batch crediting** (see Performance section)
 - CAN RX injection: `can_inject_message` import; main loop polls the ELF symbol `canRxArmed` via `uc.mem_read` and injects a single CAN frame `(ID=0, DLC=2, data=0xDEAD)` — 37/37 firmware checks PASS
 - Regression canary: `tests/canary.mjs` (spawns cli with `--max=100000000`, asserts `SUMMARY pass=37 fail=0`, prints `CANARY PASS`) — ~25s, replaces slower full-run checks
 ### WASM abort investigation (this sprint)

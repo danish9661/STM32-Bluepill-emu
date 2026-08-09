@@ -3,7 +3,7 @@ const PERIPH_RANGES = [
     [0xE0000000, 0xE1000000],
 ];
 
-const DEFAULT_MAX_BATCH = 100000;
+const DEFAULT_MAX_BATCH = 20000;
 
 /**
  * Load the Rust peripheral WASM module.
@@ -391,8 +391,12 @@ export async function createEmulator(opts = {}) {
     let instCount = 0;
     let batchInstCount = 0;
 
-    const codeHook = () => { instCount++; batchInstCount++; };
-    uc.hook_add(Module.HOOK_CODE, codeHook, null);
+    // Hookless instruction counting: emu_start(begin, 0, 0, maxBatch) stops exactly at
+    // maxBatch instructions except on a fault (unmapped access, ~0.01% of batches),
+    // where the faulting instruction is skipped and the batch credited in full.
+    // Counting in JS per instruction cost ~20% of runtime; a full-batch credit is exact
+    // for normal batches and off by <1 batch on rare faults. Handler runs (inside
+    // processInterrupts) are not credited — instruction-delta peripherals self-correct.
 
     const intrHook = (handle, intno, user_data) => {
         if (intno === 8) {
@@ -534,6 +538,8 @@ export async function createEmulator(opts = {}) {
                         throw e;
                     }
                 }
+                instCount += DEFAULT_MAX_BATCH;
+                batchInstCount += DEFAULT_MAX_BATCH;
                 if (batchInstCount > 0) {
                     const status = step_batch(batchInstCount);
                     batchInstCount = 0;
@@ -567,6 +573,8 @@ export async function createEmulator(opts = {}) {
                     throw e;
                 }
             }
+            instCount += maxBatch;
+            batchInstCount += maxBatch;
             if (batchInstCount > 0) {
                 const status = step_batch(batchInstCount);
                 batchInstCount = 0;

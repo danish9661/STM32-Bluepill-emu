@@ -336,14 +336,14 @@ async function main() {
     let batchInstCount = 0;
     let stopRequested = false;
 
-    // Per-instruction hook: just count instructions, no WASM calls, no BigInt
-    // (number increments are ~3x faster than BigInt at 5M instr/sec).
-    // Actual tick/interrupt processing happens in step_batch() after each Unicorn batch.
-    const codeHook = (handle, address, size, user_data) => {
-        instCount++;
-        batchInstCount++;
-    };
-    uc.hook_add(Module.HOOK_CODE, codeHook, null);
+    // Hookless instruction counting: emu_start(begin, 0, 0, maxBatch) stops exactly at
+    // maxBatch instructions except on a fault (unmapped access, ~0.01% of batches),
+    // where the faulting instruction is skipped and the batch credited in full.
+    // A JS codeHook per instruction cost ~20% of runtime (10.9s -> 8.7s at 200M);
+    // a full-batch credit is exact for normal batches and off by <1 batch on rare
+    // faults. Handler runs (inside processInterrupts) are not credited — the
+    // instruction-delta peripherals self-correct. Actual tick/interrupt processing
+    // still happens in step_batch() after each Unicorn batch.
 
     const stdinQueue = [];
     if (process.stdin.isTTY) process.stdin.setRawMode(true);
@@ -430,7 +430,7 @@ async function main() {
             uc.reg_write_i32(Module.ARM_REG_LR, 0xFFFFFFF9);
             uc.reg_write_i32(Module.ARM_REG_PC, handler_pc);
             try {
-                uc.emu_start(BigInt(handler_pc), 0n, 0n, 100000);
+                uc.emu_start(BigInt(handler_pc), 0n, 0n, 20000);
             } catch (e) {
                 // Handler crashed on BX LR (EXC_RETURN not supported)
             }
@@ -448,7 +448,7 @@ async function main() {
         }
     };
 
-    const maxBatch = 100000;
+    const maxBatch = 20000;
     let totalSteps = 0;
     const startTime = Date.now();
     const traceResolve = makeResolver(fwSymbols);
@@ -474,6 +474,8 @@ async function main() {
                 break;
             }
         }
+        instCount += maxBatch;
+        batchInstCount += maxBatch;
         if (batchInstCount > 0) {
             const status = step_batch(batchInstCount);
             batchInstCount = 0;
