@@ -47,7 +47,7 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 
 ## Current Status (uncommitted WIP — see "What We Did — Current Sprint" below)
 ### Test suite: `node tests/test_all.mjs`
-**189/189 unit tests PASS** (GPIO incl. electrical model, USART, ADC, RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C, RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX, FSMC, deep-sleep gating, fault escalation).
+**203/203 unit tests PASS** (GPIO incl. electrical model, USART, ADC incl. RC sample-and-hold / DAC loopback / external triggers / AWD IRQ, RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C, RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX, FSMC, deep-sleep gating, fault escalation).
 
 ### Firmware test — `tests/arduino_periph_test/` (24-peripheral Arduino sketch, 39 checks)
 ```
@@ -81,12 +81,17 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
 ### 4. Real ADC conversion (`src/peripherals/adc.rs`)
 - Full rewrite: conversion state machine with real timing (`Tconv = SMP + 12.5` cycles, 1 instr = 1 ADC cycle; SMP codes 0-7 → 14/20/26/41/54/68/84/252), per-sequence channels (SQ1-16 from SQR3/2/1, JSQ1-4), `end_at`-based completion in `tick()`, EOC per conversion unless EOCS (CR2 bit 10), STRT at sequence start, AWD vs HTR/LTR, CONT (bit 16) auto-restart, SWSTART (bit 22)/JSWSTART (bit 21), CAL/RSTCAL self-clear, ADC1→DMA1 ch1 / ADC2→DMA1 ch2 requests via the new `dma_request()` trait method.
 - ADC unit test now waits `step_batch(14)` after SWSTART (was: instant EOC).
-### 5. Full FSMC (`src/peripherals/fsmc.rs`, `src/ext_devices/fsmc_nor.rs`)
+### 5. DAC→ADC loopback + ADC external triggers (`src/peripherals/dac.rs`, `src/peripherals/adc.rs`, `src/peripherals/tim.rs`, `src/peripherals/exti.rs`)
+- **DAC wires its pins**: enabled DAC channels drive a 12-bit analog wire (DAC1→PA4/ch4, DAC2→PA5/ch5); `Peripherals::dac_output()` (trait method `dac_output`, default None) consulted by `Adc::channel_voltage()` with the source resolver: wired GPIO (manual) > DAC output > nominal internal > sim value.
+- **External trigger machinery**: `adc_timer_trigger(sys, tim_base, ch)` (ch 4 = TRGO) + `adc_exti_trigger(sys, line)` trait methods, fanned out from `Peripherals` to every ADC (0x40012400/0x40012800). TIM emits TRGO on update when MMS=010 and CC triggers on compare matches; EXTI emits on lines 11/15 rising edges. ADC gates on EXTTRIG (CR2 bit 20) / JEXTTRIG (bit 15) and EXTSEL (bits 17-19) / JEXTSEL (bits 12-14) tables (TIM1_CC1..TIM1_TRGO, TIM2_CC2, TIM3_TRGO, TIM4_CC4; injected TIM1_CC4/TIM2_TRGO/TIM2_CC2/TIM3_CC4/TIM4_TRGO, EXTI15). New conversion only when idle.
+- Timer: `base` address field added (from name, `timer_base()`); triggers fire inside `advance()`/`generate_update()` mid-batch — conversion `end_at` completes at the NEXT step_batch (conversion runs with the batch-boundary ticker: same semantics as SWSTART).
+- **Fixes**: double-RefCell panic (GPIO write → EXTI → `channel_voltage` while `gpio.borrow_mut()` held) avoided by `gpio.try_borrow()` in `channel_voltage` (source is re-read at sample completion anyway); test bug (`EXTSEL=7 TIM1_TRGO` needs TIM1 CR2 MMS=010 → value 0x20 not 0x10).
+### 6. Full FSMC (`src/peripherals/fsmc.rs`, `src/ext_devices/fsmc_nor.rs`)
 - All 7 external-memory banks: NE1-4 @ 0x6000_0000/0x6400_0000/0x6800_0000/0x6C00_0000 (NOR), NAND2/3 @ 0x7000_0000/0x8000_0000, PC-Card @ 0x9000_0000. BCR1-4 @ 0xA000_0000.. (BTR/BWTR at +8/+10/+18), PCR/PMEM/PATT 2-4 at +0x60/+0x80/+0xA0 (+8 stride).
 - NOR banks gate on BCR MBKEN (bit 0); NOR writes also need WREN (bit 1). NAND/PC always enabled. `read_sized`/`write_sized` assemble bytes per access width.
 - Backing: `FsmcNor` ext device with a JS `Uint8Array` image; `add_fsmc_bank('FSMC.BANK1', data)` (must precede init()); ext_devices lookup in `find_mem_device` matches `fsmc_nors` by name (`FSMC.BANK1..7`).
 ### Unit tests / firmware / misc
-- `tests/test_all.mjs`: 160 → **189 pass** (ADC timing + GPIO electrical + FSMC + sleep + faults; FSMC byte-write constant is `0x4433AB11` — 0xAB lands at offset 1, little-endian).
+- `tests/test_all.mjs`: 189 → **203 PASS** (DAC→ADC loopback via DOR1/2, TIM1 TRGO/CC1 + EXTI11 external triggers, EXTI 11 → ADC without SWSTART; AWD IRQ needs ISER enable: `can_fire` requires the IRQ enabled in the NVIC, real hardware semantics — pending without enable stays pending).
 - Firmware: +SVC (synchronous, `svc #2` in setup()) +PendSV (ICSR-pended, fires next batch) → **39/39**; canary asserts 39.
 - cli.mjs/emulator.js: SVC hook, EXC_RETURN pop, symbol-gated fault raise; emulator.js `faultSym` merged into the existing `resolveSymbol` path (`resolveSym` shared helper, `setSymbols` resets it).
 - site/: synced (emulator.js + wasm + unicorn_arm.js), refreshed `arduino_periph_test.elf` (39 checks) + eeprom2/spi_flash2 images.
@@ -105,7 +110,7 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
 ```bash
 cargo check                          # Rust sanity (fast)
 wasm-pack build --target web         # rebuild pkg/stm32_bluepill_wasm_bg* (Rust → wasm)
-node tests/test_all.mjs              # 189 unit tests
+node tests/test_all.mjs              # 203 unit tests
 node tests/canary.mjs                # regression canary: 39/39 firmware checks, ~25s
 node tests/bench.mjs                 # benchmarks
 node pkg/cli.mjs tests/arduino_periph_test/build/arduino_periph_test.ino.elf   # run firmware

@@ -12,6 +12,17 @@ fn tim_irq(name: &str) -> Option<i32> {
     }
 }
 
+fn timer_base(name: &str) -> u32 {
+    match name {
+        "TIM1" => 0x4001_2C00, "TIM8" => 0x4001_3400,
+        "TIM9" => 0x4001_4C00, "TIM10" => 0x4001_5000, "TIM11" => 0x4001_5400,
+        "TIM2" => 0x4000_0000, "TIM3" => 0x4000_0400, "TIM4" => 0x4000_0800,
+        "TIM5" => 0x4000_0C00, "TIM6" => 0x4000_1000, "TIM7" => 0x4000_1400,
+        "TIM12" => 0x4000_1800, "TIM13" => 0x4000_1C00, "TIM14" => 0x4000_2000,
+        _ => 0,
+    }
+}
+
 pub struct Timer {
     cr1: u32,
     cr2: u32,
@@ -37,6 +48,7 @@ pub struct Timer {
     pwm_duty: [u32; 4],
     last_tick: u64,
     irq_num: i32,
+    base: u32,
     #[allow(dead_code)]
     name: String,
     #[allow(dead_code)]
@@ -54,6 +66,7 @@ impl Timer {
                 ccmr3: 0, ccr5: 0, ccr6: 0, pwm_duty: [0; 4],
                 last_tick: instruction_count(),
                 irq_num: irq,
+                base: timer_base(name),
                 name: name.to_string(),
                 one_pulse_active: false,
             }) as Box<dyn Peripheral>
@@ -92,6 +105,7 @@ impl Timer {
                     else {
                         self.cnt = 0;
                         self.sr |= 1; // UIF
+                        self.update_event_trigger(sys);
                         if self.dier & 1 != 0 { // UIE
                             sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
                         }
@@ -105,6 +119,7 @@ impl Timer {
                     else {
                         self.cnt = self.arr;
                         self.sr |= 1; // UIF
+                        self.update_event_trigger(sys);
                         if self.dier & 1 != 0 {
                             sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
                         }
@@ -115,6 +130,7 @@ impl Timer {
                     else {
                         self.cnt = 0;
                         self.sr |= 1;
+                        self.update_event_trigger(sys);
                         if self.dier & 1 != 0 {
                             sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
                         }
@@ -131,6 +147,8 @@ impl Timer {
                     let match_overflow = (old_cnt > self.cnt) && (old_cnt <= ccr_val || self.cnt >= ccr_val);
                     if match_up || match_down || match_overflow {
                         self.sr |= 1 << (1 + ch); // CC1IF-CC4IF
+                        // ADC external trigger on channel compare events
+                        sys.p.adc_timer_trigger(sys, self.base, ch as u8);
                         let cc_irq_enable = (self.dier >> (1 + ch)) & 1;
                         if cc_irq_enable != 0 {
                             sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
@@ -150,6 +168,13 @@ impl Timer {
         self.update_interrupt(sys);
     }
 
+    fn update_event_trigger(&mut self, sys: &System) {
+        // TRGO fires on update when MMS = 010 (update)
+        if (self.cr2 >> 4) & 7 == 2 {
+            sys.p.adc_timer_trigger(sys, self.base, 4);
+        }
+    }
+
     fn update_interrupt(&self, _sys: &System) {
         // UIF, CCxIF, TIF, etc. already trigger during advance
     }
@@ -157,6 +182,7 @@ impl Timer {
     fn generate_update(&mut self, sys: &System) {
         self.cnt = 0;
         self.sr |= 1; // UIF
+        self.update_event_trigger(sys);
         if self.dier & 1 != 0 {
             sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
         }

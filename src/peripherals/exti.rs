@@ -67,6 +67,10 @@ impl Peripheral for Exti {
         }
         self.pr |= mask;
         sys.p.nvic.borrow_mut().set_intr_pending(exti_irq(line));
+        // Lines 11/15 are the ADC external trigger inputs (regular/injected)
+        if rising {
+            sys.p.adc_exti_trigger(sys, line);
+        }
         true
     }
 
