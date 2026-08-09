@@ -61,6 +61,13 @@ pub trait Peripheral {
     /// Peripheral DMA request (e.g. ADC end-of-conversion): triggers a configured
     /// DMA channel transfer if it is enabled.
     fn dma_request(&mut self, _sys: &System, _channel: u32) {}
+    /// ADC external trigger from a timer source: (timer base, channel index,
+    /// 4 = TRGO update). ADC checks its own EXTSEL configuration.
+    fn adc_timer_trigger(&mut self, _sys: &System, _tim_base: u32, _ch: u8) {}
+    /// ADC external trigger from an EXTI line (regular: 11, injected: 15).
+    fn adc_exti_trigger(&mut self, _sys: &System, _line: u32) {}
+    /// 12-bit voltage a peripheral drives on a GPIO pin (DAC output), if any.
+    fn dac_output(&self, _port: u8, _pin: u8) -> Option<u32> { None }
     /// True when the CPU is in a deep-sleep mode (STOP/STANDBY), gating peripheral ticks.
     fn in_deep_sleep(&self) -> bool { false }
     /// Called instead of tick() while the peripheral is frozen in STOP/STANDBY.
@@ -533,6 +540,35 @@ impl Peripherals {
         if let Some(p) = Self::get_peripheral(&self.peripherals, 0x4000_6000) {
             p.peripheral.borrow_mut().dma_request(sys, channel);
         }
+    }
+
+    /// Timer-originated ADC external trigger: fanned out to every ADC, which
+    /// gates on its own EXTSEL/JEXTSEL configuration.
+    pub fn adc_timer_trigger(&self, sys: &System, tim_base: u32, ch: u8) {
+        for slot in &self.peripherals {
+            if slot.start == 0x4001_2400 || slot.start == 0x4001_2800 {
+                slot.peripheral.borrow_mut().adc_timer_trigger(sys, tim_base, ch);
+            }
+        }
+    }
+
+    /// EXTI-originated ADC trigger (line 11 = regular, 15 = injected).
+    pub fn adc_exti_trigger(&self, sys: &System, line: u32) {
+        for slot in &self.peripherals {
+            if slot.start == 0x4001_2400 || slot.start == 0x4001_2800 {
+                slot.peripheral.borrow_mut().adc_exti_trigger(sys, line);
+            }
+        }
+    }
+
+    /// Analog voltage driven on a pin by a peripheral (DAC output), if any.
+    pub fn dac_output(&self, port: u8, pin: u8) -> Option<u32> {
+        if let Some(p) = Self::get_peripheral(&self.peripherals, 0x4000_7400) {
+            if let Ok(dac) = p.peripheral.try_borrow() {
+                return dac.dac_output(port, pin);
+            }
+        }
+        None
     }
 
     /// STOP/STANDBY detection: SCB SCR SLEEPDEEP (bit 2). In deep sleep the core is

@@ -32,9 +32,25 @@ impl Dac {
             None
         }
     }
+
+    /// 12-bit voltage the DAC drives on the pin, if the channel is enabled.
+    /// F103: DAC1 -> PA4, DAC2 -> PA5 (no remap options on this part).
+    pub fn output_voltage(&self, port: u8, pin: u8) -> Option<u32> {
+        if port == 0 && pin == 4 && self.cr & 1 != 0 {
+            Some(self.dor1 & 0xFFF)
+        } else if port == 0 && pin == 5 && self.cr & (1 << 4) != 0 {
+            Some(self.dor2 & 0xFFF)
+        } else {
+            None
+        }
+    }
 }
 
 impl Peripheral for Dac {
+    fn dac_output(&self, port: u8, pin: u8) -> Option<u32> {
+        self.output_voltage(port, pin)
+    }
+
     fn read(&mut self, _sys: &System, offset: u32) -> u32 {
         match offset {
             0x00 => self.cr,

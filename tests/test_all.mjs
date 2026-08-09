@@ -224,6 +224,98 @@ step_batch(14);
 const rc_sim = periph_read(ADC1 + 0x4C, 4) & 0xFFF;
 assert_eq(rc_sim, 0x000, 'ADC without wired pin returns exact sim value');
 
+// DAC -> ADC analog loopback: DAC1 drives PA4 (channel 4) with a 12-bit
+// voltage; the ADC samples it through the RC cap (tau 100 left by the RC
+// group above: first sample lands well below the target and charges up).
+reset();
+periph_write(0x4002101C, 4, 1 << 29);  // APB1ENR: DAC1EN
+periph_write(0x40021018, 4, 1 << 9);   // APB2ENR: ADC1EN
+periph_write(0x40007400, 4, 0x1);      // DAC CR: EN1
+periph_write(0x40007408, 4, 0x800);    // DHR12R1 = 2048 (half scale)
+adc_set_rc_tau(100);                   // slow cap: first sample undershoots
+periph_write(ADC1 + 0x34, 4, 4);       // SQ1 = ch4 (PA4 = DAC1_OUT)
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 22)); // ADON + SWSTART
+step_batch(14);
+const dac_full = periph_read(ADC1 + 0x4C, 4) & 0xFFF;
+// cap from 0 to 0x800 over 14 cycles, tau 100: 2048 * (1 - e^-0.14) = 267
+assert(dac_full > 0x80 && dac_full < 0x600, `DAC1->ADC ch4 sampled the RC'd wire (${dac_full})`);
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 22));
+step_batch(14);
+const dac_second = periph_read(ADC1 + 0x4C, 4) & 0xFFF;
+assert(dac_second > dac_full, `DAC loopback cap continues charging (${dac_full} -> ${dac_second})`);
+// DAC2 on PA5 (channel 5)
+periph_write(ADC1 + 0x34, 4, 5);        // SQ1 = ch5
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 22));   // DAC2 still disabled: sim (0x000) source
+step_batch(14);
+periph_write(0x40007414, 4, 0x300);     // DHR12R2 = 768
+periph_write(0x40007400, 4, 0x11);      // EN1 + EN2
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 22));
+step_batch(14);
+const dac2_val = periph_read(ADC1 + 0x4C, 4) & 0xFFF;
+assert(dac2_val > 0x10 && dac2_val < 0x300, `DAC2->ADC ch5 charges toward 0x300 (${dac2_val})`);
+
+// AWD interrupt: HTR/LTR straddle the result -> AWD flag and IRQ 18 pending
+reset();
+periph_write(0x40021018, 4, 1 << 9);   // ADC1EN
+periph_write(ADC1 + 0x08, 4, 1);       // ADON
+adc_set_sim_value(0x3FF);
+periph_write(ADC1 + 0x04, 4, 0x41);    // CR1: AWDEN(0) + AWDIE(6)
+periph_write(0xE000E100, 4, 1 << 18);  // NVIC ISER: enable ADC IRQ 18
+periph_write(ADC1 + 0x24, 4, 0x200);   // HTR = 512
+periph_write(ADC1 + 0x28, 4, 0x100);   // LTR = 256
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 22));
+step_batch(14);
+assert_eq(periph_read(ADC1 + 0x00, 4) & 1, 1, 'ADC AWD flag set for out-of-range result');
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 18,
+  'ADC AWD interrupt pending (IRQ 18)');
+clear_current_interrupt();
+
+// External trigger: TIM1 update -> TRGO -> ADC (EXTTRIG + EXTSEL=TIM1_TRGO)
+reset();
+periph_write(0x40021018, 4, (1 << 9) | (1 << 11)); // ADC1EN + TIM1EN
+adc_set_sim_value(0x155);
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 20) | (7 << 17)); // ADON|EXTTRIG|EXTSEL=7
+periph_write(0x40012C00 + 0x00, 4, 1);              // TIM1 CR1: CEN
+periph_write(0x40012C00 + 0x04, 4, 0x20);           // TIM1 CR2: MMS=010 (update->TRGO)
+periph_write(0x40012C00 + 0x2C, 4, 0x100);          // TIM1 ARR
+let trig_eoc = false;
+for (let i = 0; i < 6 && !trig_eoc; i++) {
+  step_batch(1000);
+  trig_eoc = (periph_read(ADC1 + 0x00, 4) & 2) !== 0;
+}
+assert(trig_eoc, 'ADC starts from TIM1 TRGO without SWSTART');
+assert_eq(periph_read(ADC1 + 0x4C, 4) & 0xFFF, 0x155, 'ADC DR correct after TIM1 TRGO trigger');
+
+// External trigger: TIM1_CC1 compare event (EXTSEL=0)
+reset();
+periph_write(0x40021018, 4, (1 << 9) | (1 << 11));
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 20)); // EXTSEL defaults to TIM1_CC1
+periph_write(0x40012C00 + 0x00, 4, 0x1);            // CEN
+periph_write(0x40012C00 + 0x20, 4, 0x1);            // CCER: CC1E
+periph_write(0x40012C00 + 0x34, 4, 0x40);           // CCR1 = 64
+periph_write(0x40012C00 + 0x2C, 4, 0x100);          // ARR
+trig_eoc = false;
+for (let i = 0; i < 6 && !trig_eoc; i++) {
+  step_batch(1000);
+  trig_eoc = (periph_read(ADC1 + 0x00, 4) & 2) !== 0;
+}
+assert(trig_eoc, 'ADC starts from TIM1_CC1 compare event');
+
+// External trigger: EXTI line 11 rising edge (EXTSEL=6)
+reset();
+periph_write(0x40021018, 4, (1 << 9) | (1 << 0));   // ADC1EN + AFIOEN
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 20) | (6 << 17)); // EXTI11
+periph_write(0x40010400 + 0x00, 4, 1 << 11);        // EXTI IMR bit11
+periph_write(0x40010400 + 0x08, 4, 1 << 11);        // EXTI RTSR bit11
+periph_write(0x40010804, 4, 0x3 << 12);             // PA11 output push-pull
+periph_write(0x40010810, 4, 1 << 11);               // BSRR: PA11 high (rising edge)
+trig_eoc = false;
+for (let i = 0; i < 6 && !trig_eoc; i++) {
+  step_batch(200);
+  trig_eoc = (periph_read(ADC1 + 0x00, 4) & 2) !== 0;
+}
+assert(trig_eoc, 'ADC starts from EXTI11 rising edge');
+
 // ============================================================
 // RCC
 // ============================================================

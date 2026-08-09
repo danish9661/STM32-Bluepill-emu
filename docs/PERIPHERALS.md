@@ -61,7 +61,8 @@ including interrupt generation, status flags, and timing. Support levels:
 
 | Unit | Level | Notes |
 |---|---|---|
-| ADC1–2 | Full | Real conversion state machine: per-sequence channels (SQR/JSQR), sample-time timing (`Tconv = SMP + 12.5` cycles, 1 instr = 1 cycle), EOC/STRT/JEOC/JSTRT flags, EOCS, AWD with HTR/LTR, CONT auto-restart, ADC1→DMA1 ch1 / ADC2→DMA1 ch2 requests. Sources: `adc_set_sim_value()` serves exact readings (legacy), or `gpioSetAnalog()` wires a 12-bit pin voltage sampled through an RC sample-and-hold (`adcSetRcTau`). |
+| ADC1–2 | Full | Real conversion state machine: per-sequence channels (SQR/JSQR), sample-time timing (`Tconv = SMP + 12.5` cycles, 1 instr = 1 cycle), EOC/STRT/JEOC/JSTRT flags, EOCS, AWD with HTR/LTR + AWDIE, CONT auto-restart, ADC1→DMA1 ch1 / ADC2→DMA1 ch2 requests. **Sources**: `adc_set_sim_value()` serves exact readings (legacy), `gpioSetAnalog()` wires a 12-bit pin voltage, and enabled DAC channels drive their output pins (DAC1→PA4/ch4, DAC2→PA5/ch5) — real sources sample through an RC sample-and-hold (`adcSetRcTau`). **External triggers**: EXTTRIG/JEXTTRIG with EXTSEL/JEXTSEL sources TIM1_CC1/2/3, TIM1_TRGO, TIM2_CC2, TIM3_TRGO, TIM4_CC4 (+ injected TIM1_CC4/TIM2_TRGO/TIM2_CC2/TIM3_CC4/TIM4_TRGO) emitted from timer update (MMS=update) and compare events, and EXTI lines 11 (regular) / 15 (injected); a new conversion starts when a trigger arrives (ignored while busy). |
+| DAC | Full | DHR12/8 (L/R/D) registers, dual channels, output registers DOR1/2 driven on writes. Enabled channels drive a 12-bit analog wire on their pins (F103: DAC1→PA4, DAC2→PA5) that ADC channels mapped to those pins sample via the RC path. |
 | CRC | Full | CRC32 computation over written bytes, DR readback. |
 
 ## External devices (emulated bus devices)
@@ -98,12 +99,14 @@ These are *extra* peripherals the STM32 talks to over SPI/I2C — the "rest of t
 
 ## Verification coverage
 
-- **189 unit tests** (`node tests/test_all.mjs`) — GPIO (incl. electrical model: pull-ups,
+- **203 unit tests** (`node tests/test_all.mjs`) — GPIO (incl. electrical model: pull-ups,
   open-drain, external-driver precedence, slew readback), USART, ADC (real conversion
-  timing), RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C, RTC, PWR, FLASH, CAN, DMA, AFIO,
-  EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX, FSMC (MBKEN/WREN gating, byte/word access),
-  deep-sleep gating (TIM frozen, RTC alive, resume without catch-up), fault escalation
-  (CFSR/HFSR/BFAR, BusFault vs HardFault, IBUSERR, SHPR routing).
+  timing, RC sample-and-hold via gpioSetAnalog, DAC→ADC loopback, AWD IRQ, TIM1 TRGO /
+  TIM1_CC1 / EXTI 11 external triggers), RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C,
+  RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX, FSMC
+  (MBKEN/WREN gating, byte/word access), deep-sleep gating (TIM frozen, RTC alive, resume
+  without catch-up), fault escalation (CFSR/HFSR/BFAR, BusFault vs HardFault, IBUSERR,
+  SHPR routing).
 - **39-check firmware test** (`node tests/canary.mjs`, 39/39): runs a real Arduino sketch
   compiled with STM32duino against sync + async scenarios (DMA TX/RX, UART RX, TIM2
   overflow IRQ, EXTI0/1/13, CAN RX injection, SysTick, TIM3 PWM, TIM4 CNT, RTC alarm IRQ,

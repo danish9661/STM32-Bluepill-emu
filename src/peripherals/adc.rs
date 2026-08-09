@@ -175,14 +175,21 @@ impl Adc {
     }
 
     /// Target voltage (0..4095) for a channel at sample time.
-    /// If an analog voltage is configured on the mapped pin (or the channel
-    /// is internal 16/17/18), the RC sample-and-hold path engages; otherwise
-    /// the injected simulation value is sampled directly (legacy behavior).
+    /// Sources, in precedence order: manually wired pin (gpioSetAnalog),
+    /// DAC output on the mapped pin, injected simulation value; internal
+    /// channels 16/17/18 use nominal values. Any real source engages the RC
+    /// sample-and-hold path.
     fn channel_voltage(&self, sys: &System, ch: u8) -> (u32, bool) {
         if let Some((port, pin)) = channel_pin(ch) {
-            let gpio = sys.p.gpio.borrow();
-            if let Some(v) = gpio.analog_pin_value(port, pin) {
-                return (v as u32 & 0xFFF, true);
+            if let Some(v) = sys.p.dac_output(port, pin) {
+                return (v, true);
+            }
+            // The GPIO port may be mid-write (EXTI trigger inside a BSRR/ODR
+            // write); the source is re-read at sample completion anyway.
+            if let Ok(gpio) = sys.p.gpio.try_borrow() {
+                if let Some(v) = gpio.analog_pin_value(port, pin) {
+                    return (v as u32 & 0xFFF, true);
+                }
             }
         }
         if let Some(v) = nominal_channel(ch) {
@@ -190,6 +197,30 @@ impl Adc {
         }
         (ADC_SIM_VALUE.load(Ordering::Relaxed) as u32 & 0xFFF, false)
     }
+
+    /// External trigger sources (F103, RM0008). ch 4 = TRGO (update event).
+    /// Regular EXTSEL (CR2 bits 17-19):
+    const REG_SOURCES: [(u32, u8); 8] = [
+        (0x4001_2C00, 0), // 0: TIM1_CC1
+        (0x4001_2C00, 1), // 1: TIM1_CC2
+        (0x4001_2C00, 2), // 2: TIM1_CC3
+        (0x4000_0000, 1), // 3: TIM2_CC2
+        (0x4000_0400, 4), // 4: TIM3_TRGO
+        (0x4000_0800, 3), // 5: TIM4_CC4
+        (0, 0),           // 6: EXTI11 (handled via adc_exti_trigger)
+        (0x4001_2C00, 4), // 7: TIM1_TRGO
+    ];
+    /// Injected JEXTSEL (CR2 bits 12:14):
+    const INJECTED_SOURCES: [(u32, u8); 8] = [
+        (0x4001_2C00, 4), // 0: TIM1_TRGO
+        (0x4001_2C00, 3), // 1: TIM1_CC4
+        (0x4000_0000, 4), // 2: TIM2_TRGO
+        (0x4000_0000, 1), // 3: TIM2_CC2
+        (0x4000_0400, 3), // 4: TIM3_CC4
+        (0x4000_0800, 4), // 5: TIM4_TRGO
+        (0, 0),           // 6: EXTI15 (handled via adc_exti_trigger)
+        (0x4001_2C00, 4), // 7: TIM1_TRGO
+    ];
 
     /// RC sample-and-hold settle: the cap charges from its held voltage toward
     /// the source over `cycles` (1 instr = 1 cycle). Returns the 12-bit
@@ -325,6 +356,32 @@ impl Adc {
 }
 
 impl Peripheral for Adc {
+    fn adc_timer_trigger(&mut self, sys: &System, tim_base: u32, ch: u8) {
+        if self.cr2 & (1 << 20) != 0 { // EXTTRIG
+            let sel = (self.cr2 >> 17) & 7;
+            if sel != 6 && Adc::REG_SOURCES[sel as usize] == (tim_base, ch) && self.conv.is_none() {
+                self.start_regular(sys);
+            }
+        }
+        if self.cr2 & (1 << 15) != 0 { // JEXTTRIG
+            let jsel = (self.cr2 >> 12) & 7;
+            if jsel != 6 && Adc::INJECTED_SOURCES[jsel as usize] == (tim_base, ch) && self.jconv.is_none() {
+                self.start_injected(sys);
+            }
+        }
+    }
+
+    fn adc_exti_trigger(&mut self, sys: &System, line: u32) {
+        if line == 11 && self.cr2 & (1 << 20) != 0 && (self.cr2 >> 17) & 7 == 6
+            && self.conv.is_none() {
+            self.start_regular(sys);
+        }
+        if line == 15 && self.cr2 & (1 << 15) != 0 && (self.cr2 >> 12) & 7 == 6
+            && self.jconv.is_none() {
+            self.start_injected(sys);
+        }
+    }
+
     fn tick(&mut self, sys: &System) {
         let now = instruction_count();
         loop {
