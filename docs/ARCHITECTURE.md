@@ -82,14 +82,20 @@ Peripheral time is derived from **instruction counts**, not wall-clock:
 
 - Rust implements the **NVIC** (priority dispatch, pending/active sets, PRIMASK/BASEPRI
   gating) and **SysTick** with a 1 ms "debt" system: a batch can accrue several 1 ms
-  IRQs, and `nvic_systick_take()` drains them one per handler run.
+  IRQs, and `nvic_systick_take()` drains them one per handler run (wired to `irq === -1`
+  — SysTick is delivered as offset `-1` into `vector_table + 4*(16+irq)`; the accounting
+  subtracts the first tick, which the pending IRQ itself delivers, so steady state is
+  exactly one SysTick per period).
 - After each batch, JS calls `has_pending_interrupt()` /
   `get_next_pending_interrupt()` and runs the handler via
   `uc.emu_start(handler_pc, ...)`, saving/restoring the interrupted context in JS
-  variables (see workarounds). cli.mjs processes up to **64 IRQs per batch** (the
-  browser version drains all pending); the NVIC's `last_popped` fairness makes a hot
-  self-re-pending IRQ (e.g. USART TXE while draining a ring buffer) alternate with other
-  pending IRQs instead of starving them.
+  variables (see workarounds) — including **xPSR**: the handler's emu_start clobbers
+  APSR, so failing to restore xPSR makes any `cmp`/branch pair straddling a batch
+  boundary evaluate with the *handler's* flags (a TIM2 ISR landing between a guard's
+  `cmp` and `beq` duplicated a demo's print line every second). cli.mjs processes up to
+  **64 IRQs per batch** (the browser version drains all pending); the NVIC's
+  `last_popped` fairness makes a hot self-re-pending IRQ (e.g. USART TXE while draining
+  a ring buffer) alternate with other pending IRQs instead of starving them.
 - Interrupt latency is bounded by the batch size: **20K instructions ≈ 1.1 ms** at real
   speed (was 5.4 ms at 100K).
 
