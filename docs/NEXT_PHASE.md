@@ -17,7 +17,7 @@ peripherals linked together, shared linear memory) that would eliminate the JS b
 - The "single WASM module" idea was therefore evaluated as **not worth the rebuild** —
   the JS boundary was the whole cost, and it is already gone without any rebuild.
 
-Current status: **189/189 unit tests**, **39/39 firmware checks**, canary ~25s at 100M.
+Current status: **203/203 unit tests**, **39/39 firmware checks**, canary ~25s at 100M.
 
 ## Retired (moot — do not redo)
 
@@ -63,7 +63,7 @@ cli.mjs / emulator.js loop (each iteration = 1 batch of 20K instructions):
   3. uc.emu_start(pc|1, 0, 0, 20000)           ← hookless counting
   4. step_batch(20000)                         ← Rust ticks (once per batch)
   5. processDma()
-  6. processInterrupts()                       ← up to 16 IRQs per batch
+  6. processInterrupts()                       ← up to 64 IRQs per batch
   7. watchdog reset check
 ```
 
@@ -75,4 +75,4 @@ Key measured facts that keep this loop cheap:
 | Hooks per instruction | 0.001 (peripheral access — not a bottleneck) |
 | Batch size | 20K (5× lower IRQ latency vs 100K, zero speed cost) |
 | Canary | 39/39 firmware checks, ~25s at 100M |
-| Unit tests | 189/189 |
+| Unit tests | 203/203 |
