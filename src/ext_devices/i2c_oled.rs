@@ -19,6 +19,8 @@ pub struct I2cOled {
     pages: u16,
     display_on: bool,
     inverted: bool,
+    pub write_count: u64,
+    transaction_first: bool,
 }
 
 impl I2cOled {
@@ -34,11 +36,17 @@ impl I2cOled {
             display_on: true,
             inverted: false,
             config,
+            write_count: 0,
+            transaction_first: true,
         }
     }
 
     fn cmd_set_page(&mut self, v: u8) {
         self.page = (v & 0x07) as u16;
+    }
+
+    pub fn framebuffer(&self) -> &[u8] {
+        &self.fb
     }
 
     fn cmd_set_col_low(&mut self, v: u8) {
@@ -74,11 +82,21 @@ impl ExtDevice<(), u8> for I2cOled {
     fn read(&mut self, _sys: &System, _addr: ()) -> u8 { 0 }
 
     fn write(&mut self, _sys: &System, _addr: (), v: u8) {
-        if v == 0x00 {
-            self.cmd_mode = true;
-        } else if v == 0x40 {
-            self.cmd_mode = false;
-        } else if self.cmd_mode {
+        self.write_count += 1;
+        // First byte of a transaction is the control byte: 0x00 = commands
+        // follow, 0x40 = display data follows. Later bytes in data mode are
+        // pixels; a 0x00 pixel must NOT reselect command mode (real SSD1306
+        // has separate D/C# pin / control byte only at transaction start).
+        if self.transaction_first {
+            self.transaction_first = false;
+            if v == 0x00 {
+                self.cmd_mode = true;
+            } else if v == 0x40 {
+                self.cmd_mode = false;
+            }
+            return;
+        }
+        if self.cmd_mode {
             match v {
                 0xAE => self.display_on = false,
                 0xAF => self.display_on = true,
@@ -98,12 +116,10 @@ impl ExtDevice<(), u8> for I2cOled {
         }
     }
 
+    // Called at the start of every I2C transaction (address match). This is
+    // the SSD1306 control-byte slot, NOT a chip reset: keep the framebuffer
+    // and mode across transactions (only the first byte's 0x00/0x40 decides).
     fn reset(&mut self) {
-        self.cmd_mode = true;
-        self.col = 0;
-        self.page = 0;
-        self.display_on = true;
-        self.inverted = false;
-        self.fb.fill(0);
+        self.transaction_first = true;
     }
 }

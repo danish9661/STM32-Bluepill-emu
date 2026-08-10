@@ -195,7 +195,8 @@ pub fn gpio_set_slew(inst: u32) {
 
 #[wasm_bindgen]
 pub fn gpio_set_input(port: u32, pin: u32, value: bool) {
-    sys().p.gpio.borrow_mut().set_input_pin(port as u8, pin as u8, value);
+    let sys = sys();
+    sys.p.gpio.borrow_mut().set_input_pin(&sys, port as u8, pin as u8, value);
 }
 
 #[wasm_bindgen]
@@ -373,4 +374,40 @@ pub fn touchscreen_set_touch(peripheral: &str, x: u16, y: u16, pressure: u16) {
             break;
         }
     }
+}
+
+/// Read back an SPI LCD display's framebuffer (128x64, 1 byte per pixel).
+#[wasm_bindgen]
+pub fn lcd_fb(peripheral: &str) -> Vec<u8> {
+    let et = system::get_ext_devices().lock().unwrap();
+    for d in &et.lcds {
+        if d.borrow().config.peripheral == peripheral {
+            return d.borrow().fb.clone();
+        }
+    }
+    Vec::new()
+}
+
+/// Read back an I2C OLED display's framebuffer (page-major, 1 byte per column).
+#[wasm_bindgen]
+pub fn i2c_oled_fb(peripheral: &str, address: u32) -> Vec<u8> {
+    let et = system::get_ext_devices().lock().unwrap();
+    for d in &et.i2c_oleds {
+        if d.borrow().config.peripheral == peripheral && d.borrow().config.address as u32 == address {
+            return d.borrow().framebuffer().to_vec();
+        }
+    }
+    Vec::new()
+}
+
+/// Debug: bytes the I2C OLED device received (should be ~1K+ for a full frame).
+#[wasm_bindgen]
+pub fn i2c_oled_writes(peripheral: &str, address: u32) -> u64 {
+    let et = system::get_ext_devices().lock().unwrap();
+    for d in &et.i2c_oleds {
+        if d.borrow().config.peripheral == peripheral && d.borrow().config.address as u32 == address {
+            return d.borrow().write_count;
+        }
+    }
+    0
 }

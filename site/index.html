@@ -84,6 +84,20 @@ select:focus { outline: none; border-color: #7dd3fc; }
 .legend span { display: inline-flex; align-items: center; gap: 5px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .dot.hi { background: #4ade80; } .dot.lo { background: #64748b; } .dot.in { background: #fbbf24; }
+/* Showcase peripherals */
+.periph-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.periph-dev { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 8px; }
+.periph-dev h4 { font-size: 10px; color: #7dd3fc; letter-spacing: 1px; margin-bottom: 6px; text-transform: uppercase; }
+.periph-dev canvas { display: block; background: #000; image-rendering: pixelated; width: 100%; border-radius: 4px; }
+.displays { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+#seg-svg { width: 100%; }
+#seg-svg .seg { fill: #1e293b; stroke: #334155; stroke-width: 1.5; }
+#seg-svg .seg.on { fill: #ef4444; stroke: #dc2626; }
+#rgb-bar { height: 14px; border-radius: 4px; border: 1px solid #334155; transition: background 150ms; }
+#buzz-ind { display: inline-block; width: 34px; height: 34px; border-radius: 50%; border: 2px solid #334155; color: #94a3b8; text-align: center; line-height: 32px; font-size: 16px; transition: all 120ms; }
+#buzz-ind.on { border-color: #f59e0b; color: #f59e0b; box-shadow: 0 0 14px rgba(245,158,11,0.7); }
+#btn-widget { width: 100%; padding: 9px; font-size: 13px; }
+#btn-widget:active { background: #d97706; }
 </style>
 </head>
 <body>
@@ -111,6 +125,19 @@ select:focus { outline: none; border-color: #7dd3fc; }
             <h2>GPIO State</h2>
             <div class="gpio-grid" id="gpioGrid"></div>
         </div>
+        <div class="card" style="margin-top:16px" id="showcaseCard" hidden>
+            <h2>Showcase Peripherals</h2>
+            <div class="periph-grid">
+                <div class="displays">
+                    <div class="periph-dev"><h4>I2C OLED · 0x3C</h4><canvas id="oledCanvas" width="128" height="64"></canvas></div>
+                    <div class="periph-dev"><h4>SPI LCD · 128x64</h4><canvas id="lcdCanvas" width="128" height="64"></canvas></div>
+                </div>
+                <div class="periph-dev"><h4>7-Segment · 74HC595 (SPI1·PA4)</h4><div id="segHost"></div></div>
+                <div class="periph-dev"><h4>RGB LED · TIM2 CH1-3 (PA0-2)</h4><div id="rgb-bar"></div></div>
+                <div class="periph-dev"><h4>Buzzer · PB14</h4><span id="buzz-ind">♪</span></div>
+                <div class="periph-dev"><h4>Button · PB13 EXTI13</h4><button id="btn-widget">Press PB13</button></div>
+            </div>
+        </div>
     </div>
 
     <div>
@@ -126,6 +153,7 @@ select:focus { outline: none; border-color: #7dd3fc; }
                     <option value="timer_uart">TIM2 timer on UART (t=1s.. cnt=..)</option>
                     <option value="adc_uart">ADC on UART (adc=1023 each second)</option>
                     <option value="flash_demo">SPI flash + I2C (JEDEC/EEPROM/OLED)</option>
+                    <option value="showcase">Peripheral Showcase (OLED·LCD·7-seg·RGB·buzzer·button)</option>
                 </select>
                 <button id="loadPresetBtn" class="primary">Load Preset</button>
                 <label class="file-btn">Load .bin / .hex <input type="file" id="binInput" accept=".bin,.hex"></label>
@@ -311,6 +339,84 @@ function renderGpio() {
     gpioGrid.innerHTML = html;
 }
 
+function renderShowcase() {
+    if (!emu || $('showcaseCard').hidden) return;
+    try {
+        const oledFb = emu.i2cOledFb('I2C1', 0x3C);
+        const oledCv = $('oledCanvas'), oledCtx = oledCv.getContext('2d');
+        oledCtx.clearRect(0, 0, 128, 64);
+        if (oledFb) {
+            const img = oledCtx.createImageData(128, 64);
+            for (let x = 0; x < 128; x++) {
+                for (let page = 0; page < 8; page++) {
+                    const b = oledFb[page * 128 + x] || 0;
+                    for (let bit = 0; bit < 8; bit++) {
+                        if (b & (1 << bit)) {
+                            const i = ((page * 8 + bit) * 128 + x) * 4;
+                            img.data[i] = 240; img.data[i + 1] = 240; img.data[i + 2] = 240; img.data[i + 3] = 255;
+                        }
+                    }
+                }
+            }
+            oledCtx.putImageData(img, 0, 0);
+        }
+        const lcdFb = emu.lcdFb('SPI1');
+        const lcdCv = $('lcdCanvas'), lcdCtx = lcdCv.getContext('2d');
+        lcdCtx.clearRect(0, 0, 128, 64);
+        if (lcdFb) {
+            const img = lcdCtx.createImageData(128, 64);
+            for (let i = 0; i < 8192 && i < lcdFb.length; i++) {
+                const v = lcdFb[i] ? 240 : 24;
+                img.data[i * 4] = v; img.data[i * 4 + 1] = v; img.data[i * 4 + 2] = v; img.data[i * 4 + 3] = 255;
+            }
+            lcdCtx.putImageData(img, 0, 0);
+        }
+        $('segHost').innerHTML = segSvg();
+        const duty = [emu.pwmDuty(0x40000000, 0), emu.pwmDuty(0x40000000, 1), emu.pwmDuty(0x40000000, 2)];
+        $('rgb-bar').style.background = `rgb(${Math.round(duty[0] * 2.55)},${Math.round(duty[1] * 2.55)},${Math.round(duty[2] * 2.55)})`;
+        $('buzz-ind').classList.toggle('on', !!emu.gpioReadOutput(1, 14));
+    } catch (e) {}
+}
+
+const SEG_CS = 'PA4', SEG_CS_BIT = 4, SEG_SPI_DR = 0x4001300C;
+const SEG_GPIOA_ODR = 0x4001080C, SEG_GPIOA_BSRR = 0x40010810, SEG_GPIOA_BRR = 0x40010814;
+let segBuf = [], segDigits = [0x3F, 0x3F, 0x3F, 0x3F], segCsLow = false;
+const SEG_PAT = [0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F, 0x77, 0x7C, 0x39, 0x5E, 0x79, 0x71];
+const segWatch = (addr, width, value) => {
+    if (addr === SEG_GPIOA_ODR) segCsLow = ((value >>> SEG_CS_BIT) & 1) === 0;
+    else if (addr === SEG_GPIOA_BSRR) {
+        if ((value >>> SEG_CS_BIT) & 1) segCsLow = false;
+        if ((value >>> (SEG_CS_BIT + 16)) & 1) segCsLow = true;
+    } else if (addr === SEG_GPIOA_BRR) {
+        if ((value >>> SEG_CS_BIT) & 1) segCsLow = true;
+    } else if (addr === SEG_SPI_DR && segCsLow) {
+        segBuf.push(value & 0xFF);
+        if (segBuf.length >= 4) { segDigits = segBuf.slice(0, 4); segBuf = []; }
+    }
+};
+const segSvg = () => {
+    const pts = {
+        a: 'M3,3 h30 v4 h-30 z', b: 'M35,4 v14', c: 'M35,24 v14', d: 'M33,38 h-30 v-4 h30 z',
+        e: 'M3,24 v14', f: 'M3,4 v14', g: 'M3,21 h30 v4 h-30 z',
+    };
+    const segOrder = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+    const segOn = pat => [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40].map((m, i) => (pat & m) !== 0);
+    let html = '<svg id="seg-svg" viewBox="0 0 172 42" xmlns="http://www.w3.org/2000/svg">';
+    segDigits.forEach((pat, d) => {
+        const on = segOn(pat);
+        html += `<g transform="translate(${d * 40},0)">`;
+        html += `<rect x="0" y="0" width="32" height="42" rx="3" fill="#0f172a" stroke="#334155"/>`;
+        for (const k of segOrder) {
+            const i = segOrder.indexOf(k);
+            html += `<path class="seg${on[i] ? ' on' : ''}" d="${pts[k]}" />`;
+        }
+        html += `<circle cx="34" cy="36" r="3" class="seg${(pat & 0x80) ? ' on' : ''}" />`;
+        html += '</g>';
+    });
+    html += '</svg>';
+    return html;
+};
+
 function updateRegs() {
     if (!emu) return;
     try {
@@ -327,6 +433,7 @@ function updateVisuals() {
         const ledOn = !!emu.gpioReadOutput(2, 13);
         renderBoard(ledOn);
         renderGpio();
+        renderShowcase();
     } catch (e) {}
 }
 
@@ -367,6 +474,7 @@ async function initEmulator(data, name, extDevices = {}) {
     $('stepCount').textContent = '0';
     $('speed').textContent = '—';
     $('avgMips').textContent = '—';
+    $('showcaseCard').hidden = true;
     runStartTs = 0;
     runStartInst = 0;
     totalInst = 0;
@@ -539,12 +647,28 @@ $('loadPresetBtn').addEventListener('click', async () => {
                 spi_flash: [{ peripheral: 'SPI1', jedec_id: 0xEF4016, data: new Uint8Array(spiflash), cs: 'PA4' }],
             });
             log('Press Run — JEDEC flash ID, I2C EEPROM write/readback and OLED presence print once.', 't-in');
+        } else if (preset === 'showcase') {
+            const fw = await fetch('arduino_hw_showcase.elf').then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(fw), 'arduino_hw_showcase.elf (7 peripherals live)', {
+                i2c_oled: [{ peripheral: 'I2C1', address: 0x3C, width: 128, height: 64 }],
+                lcd: [{ peripheral: 'SPI1', cs: 'PA8' }],
+            });
+            segBuf = []; segDigits = [0x3F, 0x3F, 0x3F, 0x3F]; segCsLow = false;
+            emu.onPeriphWrite(segWatch);
+            $('showcaseCard').hidden = false;
+            log('Press Run — OLED + LCD framebuffers, 7-seg, RGB PWM, buzzer at PB14 and the PB13 button widget go live.', 't-in');
         }
     } catch (e) {
         log(`Failed to load preset: ${e.message || e}`, 't-err');
         setState('Error');
     }
 });
+
+const btnWidget = $('btn-widget');
+btnWidget.addEventListener('mousedown', () => { if (emu) emu.gpioSetInput(1, 13, true); });
+const btnUp = () => { if (emu) emu.gpioSetInput(1, 13, false); };
+btnWidget.addEventListener('mouseup', btnUp);
+btnWidget.addEventListener('mouseleave', btnUp);
 
 $('binInput').addEventListener('change', async (e) => {
     const file = e.target.files[0];

@@ -189,6 +189,11 @@ export function parseElf(buffer) {
  *     touchscreen:[{peripheral, touch_detected_pin, cs}],
  *     software_spi:[{name, cs, clk, miso, mosi}] }
  *
+ * Page-side peripheral drivers (7-seg, buzzer, ...) are pure JS: subscribe with
+ * emu.onPeriphWrite(...) to tap the peripheral bus like real hardware, and poll
+ * gpioReadOutput/pwmDuty per frame. The WASM stays a faithful STM32 core plus
+ * chip models that must respond on the bus (eeprom/flash/oled/lcd/touchscreen).
+ *
  * @returns {Promise<BluepillEmulator>}
  */
 export async function createEmulator(opts = {}) {
@@ -213,7 +218,8 @@ export async function createEmulator(opts = {}) {
     init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
     gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt, nvic_systick_take,
     can_inject_message, adc_set_sim_value, gpio_set_analog, adc_set_rc_tau,
-    touchscreen_set_touch, pwm_duty, raise_fault } = periph;
+    touchscreen_set_touch, pwm_duty, raise_fault,
+    i2c_oled_fb, lcd_fb } = periph;
 
     // Register external devices BEFORE init()
     for (const d of ext_devices.spi_flash || []) {
@@ -380,6 +386,13 @@ export async function createEmulator(opts = {}) {
                 }
             } catch (_) {}
         }
+        // External bus observers: page-side peripheral drivers (7-seg, buzzer, ...) tap
+        // the peripheral bus exactly like real hardware taps the pins.
+        if (writeWatchers.length) {
+            for (let wi = 0; wi < writeWatchers.length; wi++) {
+                try { writeWatchers[wi](addr32, size, valueNum); } catch (e) {}
+            }
+        }
     };
 
     for (const [start, end] of PERIPH_RANGES) {
@@ -390,6 +403,7 @@ export async function createEmulator(opts = {}) {
     let stopRequested = false;
     let instCount = 0;
     let batchInstCount = 0;
+    const writeWatchers = [];
 
     // Hookless instruction counting: emu_start(begin, 0, 0, maxBatch) stops exactly at
     // maxBatch instructions except on a fault (unmapped access, ~0.01% of batches),
@@ -721,6 +735,27 @@ export async function createEmulator(opts = {}) {
         gpioSetAnalog(port, pin, level) { gpio_set_analog(port, pin, level); },
         adcSetRcTau(cycles) { adc_set_rc_tau(cycles); },
         setTouch(peripheral, x, y, pressure) { touchscreen_set_touch(peripheral, x, y, pressure); },
+
+        /** Watch every peripheral register write: fn(addr, width, value). Returns unsubscribe. */
+        onPeriphWrite(fn) {
+            writeWatchers.push(fn);
+            return () => {
+                const i = writeWatchers.indexOf(fn);
+                if (i >= 0) writeWatchers.splice(i, 1);
+            };
+        },
+
+        /** Current I2C OLED framebuffer, page-major (page*width + col), 1 byte per column. */
+        i2cOledFb(peripheral, address = 0x3C) {
+            const arr = i2c_oled_fb(peripheral, address);
+            return arr && arr.length ? new Uint8Array(arr) : null;
+        },
+
+        /** Current SPI LCD framebuffer, 128x64 (y*128 + x), 1 byte per pixel. */
+        lcdFb(peripheral) {
+            const arr = lcd_fb(peripheral);
+            return arr && arr.length ? new Uint8Array(arr) : null;
+        },
 
         /** Low-level register access (width: 1, 2, or 4). */
         periphRead(addr, width = 4) { return periph_read(addr, width) >>> 0; },
