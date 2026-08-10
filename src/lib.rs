@@ -44,6 +44,41 @@ pub fn periph_write(addr: u32, width: u32, value: u32) {
     sys().p.write(&*sys(), addr, width as u8, value);
 }
 
+/// DMA periph->mem pump: pop `size` bytes from the peripheral at `addr` via
+/// the normal periph_read path (chunks <= 4, little-endian packed), so JS only
+/// writes the result to RAM once per transfer instead of one crossing per chunk.
+#[wasm_bindgen]
+pub fn dma_absorb_periph(addr: u32, size: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(size as usize);
+    let mut j = 0u32;
+    while j < size {
+        let chunk = std::cmp::min(4, size - j);
+        let val = sys().p.read(&*sys(), addr, chunk as u8);
+        for k in 0..chunk {
+            out.push(((val >> (k * 8)) & 0xFF) as u8);
+        }
+        j += chunk;
+    }
+    out
+}
+
+/// DMA mem->periph pump: push `data` bytes into the peripheral at `addr` via
+/// the normal periph_write path (chunks <= 4, little-endian unpacked), so JS
+/// only reads RAM once per transfer instead of one crossing per chunk.
+#[wasm_bindgen]
+pub fn dma_push_periph(addr: u32, data: &[u8]) {
+    let mut j = 0usize;
+    while j < data.len() {
+        let chunk = std::cmp::min(4, data.len() - j);
+        let mut val = 0u32;
+        for k in 0..chunk {
+            val |= (data[j + k] as u32) << (k * 8);
+        }
+        sys().p.write(&*sys(), addr, chunk as u8, val);
+        j += chunk;
+    }
+}
+
 #[wasm_bindgen]
 pub fn tick() {
     use std::sync::atomic::Ordering;
