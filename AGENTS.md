@@ -153,8 +153,10 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - `pkg/cli.mjs` — DR Mode patch, workarounds, loop, SVC hook, fault gate
 - `src/peripherals/usart.rs` — TXE byte-time pacing, `rx_pending()`
 - `src/ext_devices/spi_flash.rs`, `src/peripherals/spi.rs`, `src/ext_devices/touchscreen.rs` — touchscreen SPI reads (deferred_reply)
-- `src/peripherals/gpio.rs` — electrical model (`pin_level()`), slew (`pending_transitions`), `read_pin_effective()`
+- `src/peripherals/gpio.rs` — electrical model (`pin_level()`), slew (`pending_transitions`), `read_pin_effective()`; `set_input_pin()` fires EXTI edges (page-driven button widgets → attachInterrupt works)
 - `src/peripherals/scb.rs` — deep sleep, SHPR routing, `raise_fault()`
 - `src/peripherals/fsmc.rs`, `src/ext_devices/fsmc_nor.rs` — FSMC banks + backing
 - `src/peripherals/adc.rs` — real conversion state machine
 - `tests/arduino_periph_test/` — the 24-peripheral firmware (39 checks incl. SVC/PendSV) + config
+- `tests/arduino_hw_showcase/` — 7-device live demo firmware (OLED 0x3C, SPI LCD CS PA8, 7-seg 74HC595 via SPI1+PA4, RGB TIM2 PWM PA0-2, buzzer PB14, button PB13 EXTI13) — build `tests/arduino_hw_showcase/build/arduino_hw_showcase.ino.elf`; ship `site/arduino_hw_showcase.elf` (force-add)
+- `site/index.html` — `showcase` preset (`newString`/`oldString`); 7-seg is a JS-side shift-register decode: `onPeriphWrite` watches SPI1 DR (0x4001300C) while PA4 CS is low (GPIOA ODR/BSRR/BRR tracking), latch 4 bytes → `segDigits`; OLED/LCD render from `emu.i2cOledFb('I2C1',0x3C)` / `emu.lcdFb('SPI1')`; button widget calls `emu.gpioSetInput(1,13,true/false)`

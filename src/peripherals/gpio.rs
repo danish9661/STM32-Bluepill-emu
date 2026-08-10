@@ -171,7 +171,19 @@ impl GpioPorts {
         v
     }
 
-    pub fn set_input_pin(&mut self, port: u8, pin: u8, value: bool) {
+    pub fn set_input_pin(&mut self, sys: &System, port: u8, pin: u8, value: bool) {
+        let prev = (self.input_states[port as usize] >> pin) & 1 != 0;
+        self.set_input_pin_raw(port, pin, value);
+        // A real push-button wired to an input pin produces EXTI edges. Fire
+        // the same edge detection as GPIO output writes so attachInterrupt()
+        // works for page-driven input pins (button widgets).
+        if prev != value {
+            let rising = value && !prev;
+            sys.p.gpio_exti_trigger(sys, port, pin, rising);
+        }
+    }
+
+    fn set_input_pin_raw(&mut self, port: u8, pin: u8, value: bool) {
         let mut found = false;
         for (p, ref mut cb) in &mut self.read_callbacks[port as usize] {
             if *p == pin {

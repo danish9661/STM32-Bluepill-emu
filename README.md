@@ -10,12 +10,12 @@ HAL programs — in **Node.js or the browser**. Powered by the **Unicorn ARM Cor
 emulator compiled to WebAssembly (WASM)** + a **Rust peripheral emulator** implementing
 the chip's registers with realistic timing, interrupts, and electrical behavior.
 
-- **Try it live**: [danish9661.github.io/STM32-Bluepill-emu](https://danish9661.github.io/STM32-Bluepill-emu/) — 8 demo presets with a board + LED visualization and a UART terminal, or upload your own `.bin`/`.hex`/`.elf`
+- **Try it live**: [danish9661.github.io/STM32-Bluepill-emu](https://danish9661.github.io/STM32-Bluepill-emu/) — 9 demo presets with a board + LED visualization and a UART terminal, or upload your own `.bin`/`.hex`/`.elf`
 - **~5.1M instructions/sec** in the browser, **~22M instructions/sec** headless (200M instructions in ~9 s)
 - Runs firmware compiled for the real chip: Arduino core (STM32duino), libopencm3, STM32Cube HAL
 - Verified: `Serial.println()`, `digitalWrite()`, `millis()`, SPI, I2C, CAN, DMA, ADC, timers and interrupts all work
 - **Cycle-accurate timing**: 1 instruction = 1 CPU cycle on a 72 MHz-equivalent time base (SysTick/timer/UART timing matches real silicon); wall speed scales with host throughput, so a "1 s" timer demo runs slower than one line per wall second (~0.2 s of chip time per second of wall time headless)
-- **Demo presets**: blink, comprehensive test (21 peripherals), peripheral test (39 automated checks), UART echo, TIM2 PWM fade, TIM2-on-UART, ADC-on-UART, SPI flash + I2C EEPROM/OLED (JEDEC ID, EEPROM write/readback, device scan)
+- **Demo presets**: blink, comprehensive test (21 peripherals), peripheral test (39 automated checks), UART echo, TIM2 PWM fade, TIM2-on-UART, ADC-on-UART, SPI flash + I2C EEPROM/OLED (JEDEC ID, EEPROM write/readback, device scan), **peripheral showcase** (I2C OLED + SPI LCD framebuffers, 74HC595 7-seg, RGB PWM, buzzer, EXTI13 button — all as JS-side drivers watching the buses)
 
 ## Features
 

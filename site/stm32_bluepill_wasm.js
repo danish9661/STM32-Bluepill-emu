@@ -304,6 +304,34 @@ export function has_pending_interrupt() {
 }
 
 /**
+ * Read back an I2C OLED display's framebuffer (page-major, 1 byte per column).
+ * @param {string} peripheral
+ * @param {number} address
+ * @returns {Uint8Array}
+ */
+export function i2c_oled_fb(peripheral, address) {
+    const ptr0 = passStringToWasm0(peripheral, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.i2c_oled_fb(ptr0, len0, address);
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
+ * Debug: bytes the I2C OLED device received (should be ~1K+ for a full frame).
+ * @param {string} peripheral
+ * @param {number} address
+ * @returns {bigint}
+ */
+export function i2c_oled_writes(peripheral, address) {
+    const ptr0 = passStringToWasm0(peripheral, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.i2c_oled_writes(ptr0, len0, address);
+    return BigInt.asUintN(64, ret);
+}
+
+/**
  * Initialize the emulator with hardcoded peripheral map.
  * Must be called after adding all ext devices (add_spi_flash, add_i2c_eeprom).
  * Can be called multiple times to reset emulator state.
@@ -329,6 +357,20 @@ export function init_svd(svd_xml) {
 export function is_watchdog_reset_requested() {
     const ret = wasm.is_watchdog_reset_requested();
     return ret !== 0;
+}
+
+/**
+ * Read back an SPI LCD display's framebuffer (128x64, 1 byte per pixel).
+ * @param {string} peripheral
+ * @returns {Uint8Array}
+ */
+export function lcd_fb(peripheral) {
+    const ptr0 = passStringToWasm0(peripheral, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.lcd_fb(ptr0, len0);
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
 }
 
 /**
