@@ -208,7 +208,7 @@ export async function createEmulator(opts = {}) {
     const periph = await getPeriph();
 
     const { periph_read, periph_write, tick, step_batch, get_next_pending_interrupt,
-    dma_get_all_pending, dma_set_completed_many, is_watchdog_reset_requested,
+    dma_get_all_pending, dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested,
     add_spi_flash, add_i2c_eeprom, add_touchscreen, add_lcd, add_i2c_oled, add_software_spi,
     init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
     gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt, nvic_systick_take,
@@ -465,36 +465,15 @@ export async function createEmulator(opts = {}) {
             const peripheral = pending[6] || 0;
             doneBits |= 1 << stream;
             try {
-                if (dir === 2) {
+                if (dir === 2 || !peripheral) {
                     const data = uc.mem_read(BigInt(src), size);
                     uc.mem_write(BigInt(dst), data);
                 } else if (dir === 0) {
-                    // periph -> mem: pop bytes from the peripheral, store in RAM
-                    if (peripheral) {
-                        for (let j = 0; j < size; j += 4) {
-                            const chunk = Math.min(4, size - j);
-                            const val = periph_read(peri_addr, chunk);
-                            const bytes = new Uint8Array(chunk);
-                            for (let k = 0; k < chunk; k++) bytes[k] = (val >> (k * 8)) & 0xFF;
-                            uc.mem_write(BigInt(dst + j), bytes);
-                        }
-                    } else {
-                        const data = uc.mem_read(BigInt(src), size);
-                        uc.mem_write(BigInt(dst), data);
-                    }
-                } else if (dir === 1) {
-                    // mem -> periph: read RAM, push into the peripheral
-                    const data = uc.mem_read(BigInt(src), size);
-                    if (peripheral) {
-                        for (let j = 0; j < size; j += 4) {
-                            const chunk = Math.min(4, size - j);
-                            let val = 0;
-                            for (let k = 0; k < chunk; k++) val |= data[j + k] << (k * 8);
-                            periph_write(peri_addr, chunk, val);
-                        }
-                    } else {
-                        uc.mem_write(BigInt(dst), data);
-                    }
+                    // periph -> mem (DmaDir::Read): Rust absorbs bytes, JS stores in RAM
+                    uc.mem_write(BigInt(dst), dma_absorb_periph(peri_addr, size));
+                } else {
+                    // mem -> periph (DmaDir::Write): JS reads RAM, Rust pushes bytes
+                    dma_push_periph(peri_addr, uc.mem_read(BigInt(src), size));
                 }
             } catch (e) {
                 // ignore per-transfer errors

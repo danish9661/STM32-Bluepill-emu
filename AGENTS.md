@@ -29,7 +29,8 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 │                                                                      │
 │  DMA crosses the WASM boundary:                                      │
 │    Rust queues DmaTransfer → JS dma_get_all_pending() →              │
-│    uc.mem_read/mem_write to move data → dma_set_completed_many()    │
+│    periph bytes pumped in Rust (dma_absorb_periph / dma_push_periph),│
+│    RAM moves via uc.mem_read/mem_write → dma_set_completed_many()    │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -47,7 +48,7 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 
 ## Current Status (uncommitted WIP — see "What We Did — Current Sprint" below)
 ### Test suite: `node tests/test_all.mjs`
-**203/203 unit tests PASS** (GPIO incl. electrical model, USART, ADC incl. RC sample-and-hold / DAC loopback / external triggers / AWD IRQ, RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C, RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX, FSMC, deep-sleep gating, fault escalation).
+**210/210 unit tests PASS** (GPIO incl. electrical model, USART, ADC incl. RC sample-and-hold / DAC loopback / external triggers / AWD IRQ, RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C, RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX, FSMC, deep-sleep gating, fault escalation).
 
 ### Firmware test — `tests/arduino_periph_test/` (24-peripheral Arduino sketch, 39 checks)
 ```
@@ -95,7 +96,7 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
 - **SysTick debt drain**: SysTick is delivered as `irq=-1` (const `SYSTICK: i32 = -1` in nvic.rs — exception #15 via `vector_table + 4*(16+irq)`), but both JS paths drained the re-pend debt with a dead `if (irq === 15)` check — `nvic_systick_take()` never ran, so a multi-period elapsed (large SysTick debt) delivered only ONE of the owed ticks.
 - **Debt accounting**: wiring the drain to `irq === -1` alone double-delivered: `maybe_set_systick_intr_pending` sets the pending bit AND adds `ticks` to debt, then `systick_take()` re-pends the same tick again (~150 deliveries/6M vs 75 = 2× fast millis). Fixed in nvic.rs: the pending IRQ covers the FIRST tick, debt holds only the remainder (`ticks.saturating_sub(1)`, or full `ticks` when a SysTick was already pending); steady state = 1 delivery per period (75/6M ≈ 83 expected at 72000-instr 1ms).
 ### Unit tests / firmware / misc
-- `tests/test_all.mjs`: 189 → **203 PASS** (DAC→ADC loopback via DOR1/2, TIM1 TRGO/CC1 + EXTI11 external triggers, EXTI 11 → ADC without SWSTART; AWD IRQ needs ISER enable: `can_fire` requires the IRQ enabled in the NVIC, real hardware semantics — pending without enable stays pending).
+- `tests/test_all.mjs`: 189 → **210 PASS** (DAC→ADC loopback via DOR1/2, TIM1 TRGO/CC1 + EXTI11 external triggers, EXTI 11 → ADC without SWSTART, DMA pump exports `dma_absorb_periph`/`dma_push_periph`; AWD IRQ needs ISER enable: `can_fire` requires the IRQ enabled in the NVIC, real hardware semantics — pending without enable stays pending).
 - Firmware: +SVC (synchronous, `svc #2` in setup()) +PendSV (ICSR-pended, fires next batch) → **39/39**; canary asserts 39.
 - cli.mjs/emulator.js: SVC hook, EXC_RETURN pop, symbol-gated fault raise; emulator.js `faultSym` merged into the existing `resolveSymbol` path (`resolveSym` shared helper, `setSymbols` resets it).
 - site/: synced (emulator.js + wasm + unicorn_arm.js), refreshed `arduino_periph_test.elf` (39 checks) + eeprom2/spi_flash2 images.
@@ -108,13 +109,13 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
 3. **hi2c->Mode patch** (cli.mjs `memWriteHook`): when `0x40005410` (I2C1 DR) is written with the R-bit set, patch RAM `*(0x200002d8)+0x3D` to 0x22 — HAL I2C1 ISR requires `hi2c->Mode == 0x22` (MASTER_RX) before reading DR
 4. **Interrupt frame saved in JS closure variables** (not memory): stack frames get clobbered by handler PUSH; save R0-R3,R12,LR,PC,xPSR in JS locals, restore after handler — restoring xPSR is REQUIRED (see §7: the handler's emu_start clobbers APSR; dropping it mis-evaluates any cmp/beq that straddles the batch boundary)
 5. **64-IRQ loop in `processInterrupts()`** (cli.mjs; emulator.js drains all pending): prevents starvation when high-priority IRQ re-pends itself — paired with the NVIC `last_popped` fairness, a hot IRQ (TXE) alternates with other pendings instead of consuming every slot (e.g. CAN TX IRQ37 prio16 vs I2C EV IRQ31 prio32)
-6. **DMA**: batched `dma_get_all_pending()` / `dma_set_completed_many()` — one WASM call instead of 7; JS-side `[DMAP]` direction decode: 0=periph→mem (periph_read), 1=mem→periph (periph_write), 2=mem→mem
+6. **DMA**: batched `dma_get_all_pending()` / `dma_set_completed_many()` — one WASM call instead of 7; the **periph byte pump now lives in Rust** (`dma_absorb_periph(addr,size)` / `dma_push_periph(addr,bytes)`, keeping the exact per-chunk periph_read/periph_write call pattern) so JS only touches RAM: periph→mem = `uc.mem_write(dst, absorb(peri_addr,size))`, mem→periph = `push(peri_addr, uc.mem_read(src,size))`, dir 2 / non-peripheral = raw memcpy. Note: Vec<u8> returns arrive in JS as a plain number array, not Uint8Array (test_all joins bytes with String.fromCharCode)
 
 ## To Run / Rebuild
 ```bash
 cargo check                          # Rust sanity (fast)
 wasm-pack build --target web         # rebuild pkg/stm32_bluepill_wasm_bg* (Rust → wasm)
-node tests/test_all.mjs              # 203 unit tests
+node tests/test_all.mjs              # 210 unit tests
 node tests/canary.mjs                # regression canary: 39/39 firmware checks, ~25s
 node tests/bench.mjs                 # benchmarks
 node pkg/cli.mjs tests/arduino_periph_test/build/arduino_periph_test.ino.elf   # run firmware
@@ -135,7 +136,7 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 ## Next Phase — What's Left
 
 ### Immediate (ALL PASS as of this sprint; re-check after any change)
-1. **Verify nothing regressed** — rerun `tests/test_all.mjs` (203) + canary (`node tests/canary.mjs`, 39/39) after any edit to `src/` or `pkg/cli.mjs`
+1. **Verify nothing regressed** — rerun `tests/test_all.mjs` (210) + canary (`node tests/canary.mjs`, 39/39) after any edit to `src/` or `pkg/cli.mjs`
 
 ### Known issue (monitor only)
 - WASM abort (`Fatal: undefined Stack: undefined`) at ~35M+ instructions — seen once, **not reproducible** across ~2.5B stress instructions (7 runs). Re-investigate if it re-occurs

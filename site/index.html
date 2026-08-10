@@ -125,6 +125,7 @@ select:focus { outline: none; border-color: #7dd3fc; }
                     <option value="fade">TIM2 PWM Fade (PA0 glow)</option>
                     <option value="timer_uart">TIM2 timer on UART (t=1s.. cnt=..)</option>
                     <option value="adc_uart">ADC on UART (adc=1023 each second)</option>
+                    <option value="flash_demo">SPI flash + I2C (JEDEC/EEPROM/OLED)</option>
                 </select>
                 <button id="loadPresetBtn" class="primary">Load Preset</button>
                 <label class="file-btn">Load .bin / .hex <input type="file" id="binInput" accept=".bin,.hex"></label>
@@ -526,6 +527,18 @@ $('loadPresetBtn').addEventListener('click', async () => {
             const buf = await fetch('arduino_adc_uart.elf').then(r => r.arrayBuffer());
             await initEmulator(new Uint8Array(buf), 'arduino_adc_uart.elf (ADC on UART)');
             log('Press Run — adc=<0..4095> prints each simulated second.', 't-in');
+        } else if (preset === 'flash_demo') {
+            const [fw, eeprom, spiflash] = await Promise.all([
+                fetch('arduino_flash_demo.elf').then(r => r.arrayBuffer()),
+                fetch('eeprom.bin').then(r => r.arrayBuffer()),
+                fetch('spi_flash.bin').then(r => r.arrayBuffer()),
+            ]);
+            await initEmulator(new Uint8Array(fw), 'arduino_flash_demo.elf (SPI/I2C devices)', {
+                i2c_eeprom: [{ peripheral: 'I2C1', address: 0x50, data: new Uint8Array(eeprom) }],
+                i2c_oled: [{ peripheral: 'I2C1', address: 0x3C, width: 128, height: 64 }],
+                spi_flash: [{ peripheral: 'SPI1', jedec_id: 0xEF4016, data: new Uint8Array(spiflash), cs: 'PA4' }],
+            });
+            log('Press Run — JEDEC flash ID, I2C EEPROM write/readback and OLED presence print once.', 't-in');
         }
     } catch (e) {
         log(`Failed to load preset: ${e.message || e}`, 't-err');

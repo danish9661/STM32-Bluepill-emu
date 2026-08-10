@@ -711,9 +711,45 @@ let dma_en = periph_read(DMA1 + 0x08 + 0*0x14, 4) & 1;
 assert_eq(dma_en, 0, 'DMA1 EN cleared after transfer completes');
 
 // ============================================================
-// SCB
+// DMA pump exports (Rust-side periph byte movement, replaces
+// the JS per-chunk periph_read/periph_write loops in processDma)
 // ============================================================
-group('SCB');
+group('DMA pump exports');
+
+reset();
+const USART1_PUMP = 0x40013800;
+periph_write(0x40021014, 4, 1 << 14); // USART1EN on APB2
+periph_write(0x4002101C, 4, 1 << 0);  // DMA1EN on APB1
+// USART1 TX on PA9, RX on PA10
+periph_write(0x40010804, 4, (0x4 << 14) | 0x4); // CRH PA9-10 AF push-pull (10MHz)
+periph_write(0x4001380C, 4, 0x200C);            // CR1 UE|TE|RE
+// absorb: pops RX FIFO bytes in order via the periph_read path
+periph.uart_rx_byte(USART1_PUMP, 0x41); // 'A'
+periph.uart_rx_byte(USART1_PUMP, 0x42); // 'B'
+periph.uart_rx_byte(USART1_PUMP, 0x43); // 'C'
+// NOTE: wasm-bindgen returns Vec<u8> as a plain JS number array; Uint8Array
+// wrap keeps join() from stringifying element 65 as "65"
+let popped = Array.from(new Uint8Array(periph.dma_absorb_periph(USART1_PUMP + 0x04, 3)), b => String.fromCharCode(b)).join('');
+assert_eq(popped, 'A\x00\x00', 'dma_absorb_periph pops RX FIFO byte first, pads chunk tail');
+assert_eq(periph.uart_rx_pending(USART1_PUMP), 2, 'dma_absorb_periph pops ONE FIFO byte per read');
+// absorb with odd size: chunk=4 read returns the FIFO byte + zero pad (JS loop semantics)
+periph.uart_rx_byte(USART1_PUMP, 0x51); // 'Q'
+popped = Array.from(new Uint8Array(periph.dma_absorb_periph(USART1_PUMP + 0x04, 5)), b => String.fromCharCode(b)).join('');
+assert_eq(popped, 'B\x00\x00\x00C', 'absorb 5-byte read pops a FIFO byte per chunk, zero pads');
+assert_eq(periph.uart_rx_pending(USART1_PUMP), 1, 'absorb consumed 2 of 3 queued bytes');
+// push: USART DR consumes ONE byte per write (FIFO), so a 3-byte buffer lands byte 0
+periph.dma_push_periph(USART1_PUMP + 0x04, new Uint8Array([0x41, 0x42, 0x43]));
+let out = get_uart_output();
+assert_eq(out, 'A', 'dma_push_periph feeds the chunk-leading byte to the TX FIFO');
+// uneven chunk (4+3): leading bytes of each chunk are consumed, rest return to FIFO
+periph.dma_push_periph(USART1_PUMP + 0x04, new Uint8Array([1, 2, 3, 4, 5, 6, 7]));
+out = get_uart_output();
+assert_eq(out, '\x01\x05', 'dma_push_periph handles uneven chunks (per-chunk lead byte)');
+// per-byte pushes (real DMA TX pattern: size 1 per transfer) land every byte
+periph.dma_push_periph(USART1_PUMP + 0x04, new Uint8Array([0x50]));
+periph.dma_push_periph(USART1_PUMP + 0x04, new Uint8Array([0x51]));
+out = get_uart_output();
+assert_eq(out, 'PQ', 'dma_push_periph per-byte pushes land in order');
 
 reset();
 const SCB = 0xE000ED00;

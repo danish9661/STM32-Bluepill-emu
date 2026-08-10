@@ -17,7 +17,7 @@ peripherals linked together, shared linear memory) that would eliminate the JS b
 - The "single WASM module" idea was therefore evaluated as **not worth the rebuild** —
   the JS boundary was the whole cost, and it is already gone without any rebuild.
 
-Current status: **203/203 unit tests**, **39/39 firmware checks**, canary ~25s at 100M.
+Current status: **210/210 unit tests**, **39/39 firmware checks**, canary ~25s at 100M.
 
 ## Retired (moot — do not redo)
 
@@ -37,11 +37,19 @@ interrupt dispatch) is where scheduling flexibility lives (canary depends on its
 semantics). Any new peripheral feature is cheaper here than in a merged build.
 
 ### 2. Move DMA + interrupt delivery into Rust (single-domain, moderate win)
-- DMA: replace the JS `dma_get_all_pending()`/`uc.mem_read|mem_write`/`dma_set_completed`
-  round trip with a Rust-side `memcpy` across flat memory (drops 1 WASM crossing per
-  batch; DMA count is tiny but removes a whole class of JS state).
-- Interrupts: run IRQ handling inside Rust (`uc_intr`-style injection or stop+re-exec),
-  instead of the JS stack-frame push/pop.
+- **PARTIALLY LANDED** (2026-08-10): the periph byte pump moved into Rust — JS now only
+  touches RAM (`dma_absorb_periph` / `dma_push_periph` replace the per-chunk
+  periph_read/periph_write JS loops; cli.mjs + emulator.js processDma are down to 3
+  branches and 1 WASM crossing per transfer).
+- What remains: RAM→RAM moves still need Unicorn (`uc.mem_read`/`mem_write` — Rust has
+  no CPU memory visibility without a shared-linear-memory map, which was retired as
+  moot; DMA RAM traffic is per-transfer, not per-instruction).
+- **Interrupt delivery stays in JS** — bounded by the architecture: Unicorn owns the
+  CPU state (SP/registers/vector fetch), so framing R0-R3/R12/LR/PC/xPSR and the
+  handler `emu_start` cannot move into Rust without a `uc_intr`-style injection API
+  (not exposed by this Unicorn build) or stop+re-exec (which is what emulator.js
+  already does, one `emu_start` per IRQ). The Rust side already owns all the policy:
+  pending/active sets, priority dispatch, SysTick debt accounting.
 
 ### 3. Evaluate a pure-Rust Cortex-M3 emulator (`cargo-cortex-m` / `mdl`)
 Replace Unicorn entirely: no C build, no `unicorn_arm` binary addon, coherent memory
@@ -75,4 +83,4 @@ Key measured facts that keep this loop cheap:
 | Hooks per instruction | 0.001 (peripheral access — not a bottleneck) |
 | Batch size | 20K (5× lower IRQ latency vs 100K, zero speed cost) |
 | Canary | 39/39 firmware checks, ~25s at 100M |
-| Unit tests | 203/203 |
+| Unit tests | 210/210 |

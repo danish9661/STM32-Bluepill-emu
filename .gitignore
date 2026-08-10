@@ -33,3 +33,10 @@ tests/arduino_adc_uart/build/*.cache
 tests/arduino_adc_uart/build/*.log
 tests/arduino_adc_uart/build/compile_commands.json
 tests/arduino_adc_uart/build/build.options.json
+tests/arduino_flash_demo/build/core/
+tests/arduino_flash_demo/build/libraries/
+tests/arduino_flash_demo/build/sketch/
+tests/arduino_flash_demo/build/*.cache
+tests/arduino_flash_demo/build/*.log
+tests/arduino_flash_demo/build/compile_commands.json
+tests/arduino_flash_demo/build/build.options.json

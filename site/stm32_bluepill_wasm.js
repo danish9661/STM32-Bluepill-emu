@@ -148,6 +148,21 @@ export function clear_current_interrupt() {
 }
 
 /**
+ * DMA periph->mem pump: pop `size` bytes from the peripheral at `addr` via
+ * the normal periph_read path (chunks <= 4, little-endian packed), so JS only
+ * writes the result to RAM once per transfer instead of one crossing per chunk.
+ * @param {number} addr
+ * @param {number} size
+ * @returns {Uint8Array}
+ */
+export function dma_absorb_periph(addr, size) {
+    const ret = wasm.dma_absorb_periph(addr, size);
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
+}
+
+/**
  * @returns {Uint32Array}
  */
 export function dma_get_all_pending() {
@@ -174,6 +189,19 @@ export function dma_get_pending(index) {
 export function dma_get_pending_count() {
     const ret = wasm.dma_get_pending_count();
     return ret >>> 0;
+}
+
+/**
+ * DMA mem->periph pump: push `data` bytes into the peripheral at `addr` via
+ * the normal periph_write path (chunks <= 4, little-endian unpacked), so JS
+ * only reads RAM once per transfer instead of one crossing per chunk.
+ * @param {number} addr
+ * @param {Uint8Array} data
+ */
+export function dma_push_periph(addr, data) {
+    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    wasm.dma_push_periph(addr, ptr0, len0);
 }
 
 /**
@@ -471,6 +499,11 @@ function __wbg_get_imports() {
 function getArrayU32FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
+}
+
+function getArrayU8FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
 }
 
 let cachedDataViewMemory0 = null;
