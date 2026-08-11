@@ -36,7 +36,13 @@ jobs:
           cp site/arduino_spi_flash2.bin tests/arduino_periph_test/build/spi_flash2.bin
       - name: Unit tests
         run: node tests/test_all.mjs
+      - name: Firmware format + ESM smoke tests
+        run: |
+          node tests/test_firmware_formats.mjs
+          node tests/test_esm.mjs
       - name: Regression canary (39/39 firmware checks)
         run: node tests/canary.mjs
       - name: Full firmware run (200M instructions, UART RX + config)
         run: echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml --max=200000000
+      - name: Emulator.js path (browser run loop) 200M firmware run
+        run: node tests/test_emulator_js.mjs
