@@ -6,7 +6,7 @@ import { parseIntelHex, parseSymbolMap, parseElf } from './emulator.js';
 import * as periph from './stm32_bluepill_wasm.js';
 const { periph_read, periph_write, tick, step, step_batch, get_next_pending_interrupt, dma_pump_all, dma_take_absorbed, dma_get_pending_count,
 dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen,
-add_lcd, add_i2c_oled, reset_ext_devices, can_inject_message, raise_fault,
+add_lcd, add_i2c_oled, reset_ext_devices, register_js_peripheral, can_inject_message, raise_fault,
 init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
 set_intr_masks, clear_current_interrupt, finish_interrupt } = periph;
 
@@ -86,6 +86,7 @@ async function main() {
         || process.env.MAX_INST || '1000000', 10);
     const showRegs = args.includes('--regs') || process.env.SHOW_REGS === '1';
     const mapPath = args.find(a => a.startsWith('--map='))?.split('=')[1];
+    const periphPlugin = args.find(a => a.startsWith('--periph-plugin='))?.split('=')[1];
     let uartAddr = parseInt(args.find(a => a.startsWith('--uart='))?.split('=')[1] || process.env.UART_ADDR || '0x40013800', 16);
 
     let config = {};
@@ -148,12 +149,25 @@ async function main() {
             }
         }
 
-        if (config.cpu?.use_hardcoded) {
+        // Board selection (rp2040js-style): 'stm32f103c8' = builtin hardcoded map;
+        // cpu.svd (or cpu.chip = { svd: ... }) = any F1-family chip built from SVD.
+        const chipSvd = typeof config.cpu?.chip === 'string' ? null : config.cpu?.chip?.svd;
+        if (config.cpu?.use_hardcoded || (!config.cpu?.svd && !chipSvd)) {
             init();
         } else {
-            const svdPath = path.resolve(config._devices_dir, config.cpu?.svd || 'stm32f103c8.svd');
-            const svdXml = readFileSync(svdPath, 'utf8');
+            const svdXml = chipSvd ?? readFileSync(path.resolve(config._devices_dir, config.cpu.svd), 'utf8');
             init_svd(svdXml);
+        }
+
+        // rp2040js-style custom peripherals from a JS plugin module:
+        //   --periph-plugin=./my_periph.mjs   (default export: array of {base, size, read, write})
+        if (periphPlugin) {
+            const mod = await import(path.resolve(process.cwd(), periphPlugin));
+            const list = mod.default ?? [];
+            for (const jp of list) {
+                register_js_peripheral(jp.base, jp.size, jp.read, jp.write);
+                console.log(`Registered JS peripheral at 0x${jp.base.toString(16)} (${jp.size} bytes)`);
+            }
         }
 
         if (config.patches) {

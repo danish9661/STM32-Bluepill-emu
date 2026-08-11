@@ -2,11 +2,11 @@ import { readFileSync } from 'fs';
 import * as periph from '../pkg/stm32_bluepill_wasm.js';
 periph.initSync({ module: readFileSync(new URL('../pkg/stm32_bluepill_wasm_bg.wasm', import.meta.url)) });
 
-const { init, periph_read, periph_write, tick, step_batch, has_pending_interrupt,
+const { init, init_svd, periph_read, periph_write, tick, step_batch, has_pending_interrupt,
         get_next_pending_interrupt, clear_current_interrupt, gpio_read_output, gpio_set_input,
         gpio_read_input, get_uart_output, uart_rx_byte, adc_set_sim_value,
         is_watchdog_reset_requested, can_inject_message, gpio_set_slew, raise_fault,
-        add_fsmc_bank, gpio_set_analog, adc_set_rc_tau } = periph;
+        add_fsmc_bank, gpio_set_analog, adc_set_rc_tau, register_js_peripheral } = periph;
 
 let passed = 0, failed = 0;
 
@@ -671,10 +671,10 @@ assert_eq(periph_read(CAN1 + 0x1C, 4), 0x001C0033, 'CAN1 BTR');
 group('DMA');
 
 reset();
-const DMA1 = 0x40006000;
+const DMA1 = 0x40020000;
 
 // Enable DMA1 clock
-periph_write(0x4002101C, 4, 1 << 0); // DMA1EN on APB1
+periph_write(0x40021014, 4, 1 << 0); // DMA1EN on APB1
 
 // Configure channel 1: CCR
 // M2M=1, PL=11 (very high), MSIZE=01 (16-bit), PSIZE=01, MINC=1, PINC=0, CIRC=0, DIR=1 (read from mem), EN=0 first
@@ -695,7 +695,7 @@ group('DMA Transfer');
 
 reset();
 // Set up DMA channel 1
-periph_write(0x4002101C, 4, 1 << 0);
+periph_write(0x40021014, 4, 1 << 0);
 periph_write(DMA1 + 0x08 + 0*0x14, 4, 0); // disable first
 periph_write(DMA1 + 0x08 + 2*4, 4, 0x20000000); // CPAR
 periph_write(DMA1 + 0x08 + 3*4, 4, 0x20001000); // CMAR
@@ -719,7 +719,7 @@ group('DMA pump exports');
 reset();
 const USART1_PUMP = 0x40013800;
 periph_write(0x40021014, 4, 1 << 14); // USART1EN on APB2
-periph_write(0x4002101C, 4, 1 << 0);  // DMA1EN on APB1
+periph_write(0x40021014, 4, 1 << 0);  // DMA1EN on APB1
 // USART1 TX on PA9, RX on PA10
 periph_write(0x40010804, 4, (0x4 << 14) | 0x4); // CRH PA9-10 AF push-pull (10MHz)
 periph_write(0x4001380C, 4, 0x200C);            // CR1 UE|TE|RE
@@ -776,7 +776,7 @@ reset();
 const T2 = 0x40000000;
 
 // Enable TIM2 clock
-periph_write(0x4002101C, 4, 1 << 0);
+periph_write(0x40021014, 4, 1 << 0);
 
 // Set PSC=0 (no prescaler), ARR=999 → counts 0..999 then wraps
 periph_write(T2 + 0x28, 4, 0);    // PSC = 0
@@ -811,7 +811,7 @@ group('TIM Interrupt');
 
 reset();
 
-periph_write(0x4002101C, 4, 1 << 0);
+periph_write(0x40021014, 4, 1 << 0);
 periph_write(T2 + 0x28, 4, 0);    // PSC = 0
 periph_write(T2 + 0x2C, 4, 99);   // ARR = 99 (wrap every 100 ticks)
 periph_write(T2 + 0x0C, 4, 1);   // DIER.UIE = 1 (enable update interrupt)
@@ -839,7 +839,7 @@ group('TIM Prescaler');
 
 reset();
 
-periph_write(0x4002101C, 4, 1 << 0);
+periph_write(0x40021014, 4, 1 << 0);
 periph_write(T2 + 0x28, 4, 9);    // PSC = 9 (tick every 10 instructions)
 periph_write(T2 + 0x2C, 4, 99);   // ARR = 99
 periph_write(T2 + 0x00, 4, 1);    // CEN = 1
@@ -1364,6 +1364,67 @@ assert_eq(periph_read(SCB_CFSR, 4) & (1 << 8), 1 << 8, 'CFSR IBUSERR set');
 // SysTick priority is programmable via SCB SHPR
 periph_write(0xE000ED20, 4, 0xFF00FF00);        // SHPR3: SysTick=0, PendSV=0xFF, SVCall=0
 assert_eq(periph_read(0xE000ED20, 4) & 0xFF, 0, 'SHPR3 SVCall prio routed through SCB');
+
+// ============================================================
+// JS-registered peripheral (rp2040js-style custom chip)
+// ============================================================
+group('JS Peripheral');
+
+reset();
+const JS_BASE = 0x40006800; // gap between CAN1 and BKP on F103 — 4-aligned
+let jsWrites = [];
+let jsReads = 0;
+const regOk = register_js_peripheral(JS_BASE, 0x400,
+  (addr, size) => { jsReads++; return addr === JS_BASE ? 0x42 : 0; },
+  (addr, value, size) => { jsWrites.push([addr, value, size]); });
+assert_eq(regOk, true, 'register_js_peripheral after init returns true');
+
+// read callback fires with the absolute address + size
+assert_eq(periph_read(JS_BASE, 4), 0x42, 'JS peripheral read callback value');
+assert_eq(jsReads, 1, 'JS peripheral read callback fired');
+
+// write callback fires with (addr, value, size)
+periph_write(JS_BASE + 4, 4, 0xDEADBEEF);
+assert_eq(jsWrites.length, 1, 'JS peripheral write callback fired');
+assert_eq(jsWrites[0][0], JS_BASE + 4, 'JS peripheral write addr absolute');
+assert_eq(jsWrites[0][1], 0xDEADBEEF, 'JS peripheral write value');
+assert_eq(jsWrites[0][2], 4, 'JS peripheral write size');
+
+// shadow a built-in: register over USART1 and confirm last-wins
+register_js_peripheral(0x40013800, 0x400, () => 0x77, () => {});
+assert_eq(periph_read(0x40013800, 4), 0x77, 'JS peripheral shadows built-in USART1');
+
+// re-init drops JS peripherals (fresh bus per init)
+reset();
+assert_eq(periph_read(JS_BASE, 4), 0, 'JS peripheral gone after re-init');
+
+// ============================================================
+// Second chip: STM32F105 (connectivity line) from SVD
+// ============================================================
+group('Chip: STM32F105 (SVD)');
+
+{
+  const { readFileSync } = await import('fs');
+  const svd = readFileSync(new URL('../svd/STM32F105xx.svd', import.meta.url), 'utf8');
+  init_svd(svd);
+
+  // CAN2 (0x40006800) is F105-only — SVD path registers it
+  periph_write(0x40006800, 4, 0x00000041); // INRQ + ABOM(6) + TTCM(7)? ABOM is bit 6 on F1 bxCAN
+  const can2mcr = periph_read(0x40006800, 4);
+  assert_eq(can2mcr & 1, 1, 'F105 CAN2 MCR INRQ bit set');
+  assert_eq(can2mcr & (1 << 6), 1 << 6, 'F105 CAN2 MCR ABOM bit set');
+
+  // DMA1 at the real 0x40020000 (SVD map)
+  periph_write(0x4002000C, 4, 42);
+  assert_eq(periph_read(0x4002000C, 4), 42, 'F105 DMA1 CNDTR at 0x40020000');
+
+  // CAN1 still at its F1 address
+  periph_write(0x4000641C, 4, 0x001C0033);
+  assert_eq(periph_read(0x4000641C, 4), 0x001C0033, 'F105 CAN1 BTR');
+
+  // Unsupported peripherals in the SVD (ETH) are skipped, not fatal
+  assert_eq(periph_read(0x40028000, 4), 0, 'F105 ETH (0x40028000) not mapped (skipped)');
+}
 
 // ============================================================
 // Summary

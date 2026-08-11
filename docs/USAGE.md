@@ -20,7 +20,11 @@ const emu = await createEmulator({
   flash_size: 0x10000, // Flash region size (64KB default)
   ram_size: 0x5000,    // SRAM size (20KB default)
   vector_table: 0x08000000, // Vector table base
-  svd: null,           // SVD XML string (optional; defaults to hardcoded register map)
+  chip: 'stm32f103c8', // 'stm32f103c8' = builtin hardcoded map (default),
+                       // or { name, svd } for any F1-family chip from an SVD
+                       // (e.g. { name:'STM32F105', svd: svdXml } adds CAN2)
+  svd: null,           // SVD XML string (optional; overrides the builtin map)
+  js_peripherals: [],  // rp2040js-style custom peripherals, see below
   uart_addr: 0x40013800,    // USART used by uartRx()
   verbose: false,
   ext_devices: {},     // see below
@@ -41,12 +45,41 @@ emu.setSimAdc(value);      // ADC conversion result firmware will read (conversi
 emu.gpioSetAnalog(port, pin, level); // wire a 12-bit analog voltage onto a GPIO pin: ADC channels mapped to that pin sample it via an RC sample-and-hold instead of the sim value; level 0xFFFF disconnects
 emu.adcSetRcTau(cycles);   // RC sample-and-hold time constant in ADC cycles (1 instr = 1 cycle), default 12
 emu.setTouch(periphAddr, x, y, pressure);  // ADS7846 touch injection
+emu.addJsPeripheral(base, size, read, write); // rp2040js-style custom peripheral on the bus
 emu.periphRead(addr, width); emu.periphWrite(addr, width, value); // raw register access
 emu.memRead32(addr);       // read emulated RAM/Flash word (e.g. firmware flags)
 emu.onPeriphWrite(fn);     // tap every peripheral write: fn(addr, width, value) — page-side drivers (7-seg shift registers, CS tracking) watch buses like real hardware
 emu.i2cOledFb('I2C1', 0x3C); // 128×64 monochrome framebuffer readback from an i2c_oled device (byte = 8 vertical pixels)
 emu.lcdFb('SPI1');         // 128×64 byte-per-pixel framebuffer readback from an lcd device
 ```
+
+### Custom JS peripherals (rp2040js-style)
+
+The peripheral bus is a runtime registry (`src/bus.rs`, like rp2040js's `bus.ts`).
+Peripherals can be added without touching Rust — a JS object with read/write
+callbacks, called with the **absolute address** and access width:
+
+```js
+emu.addJsPeripheral(0x40007C00, 0x100,   // base, size
+  (addr, size) => addr === 0x40007C00 ? 0xC0FFEE : 0,  // read(addr, size) -> number
+  (addr, value, size) => { /* write(addr, value, size) */ });
+```
+
+Last registration wins on overlap, so a JS peripheral can shadow a built-in.
+Registered peripherals live on the bus and are dropped by the next `createEmulator()`
+(or `init()`/`init_svd()`). The CLI equivalent is a plugin module:
+
+```bash
+node pkg/cli.mjs firmware.elf --periph-plugin=./my_periph.mjs
+# my_periph.mjs: export default [{ base, size, read(addr,size), write(addr,value,size) }]
+```
+
+Multi-chip: `chip: 'stm32f103c8'` uses the builtin hardcoded map; any F1-family
+chip works from an SVD (`svd/STM32F105xx.svd` is shipped — adds CAN2@0x40006800).
+Unsupported SVD peripherals (e.g. F105's ETH) are skipped, and the ARM core
+peripherals (NVIC/SysTick/SCB) are auto-registered at their fixed addresses even
+when the SVD omits them. F4/G0-class chips (MODER-style GPIO, different RCC)
+need new peripheral modules — the bus/registry part is done.
 
 ### `ext_devices` — peripherals the STM32 talks to over SPI/I2C
 
@@ -94,6 +127,7 @@ Options:
 | `--regs[=<file>]` | Dump register state to stdout/file and exit |
 | `--uart=<file>` | Play a UART RX script file (bytes, fed via `uart_rx_byte`) |
 | `--map=<file>` | Extra `.map` file for symbols (in addition to ELF symbols) |
+| `--periph-plugin=<file.mjs>` | Register rp2040js-style JS peripherals: default export = `[{ base, size, read(addr,size), write(addr,value,size) }]` |
 | env `FIRMWARE`, `MAX_INST` | Same as the position arg / `--max` |
 
 The CLI prints machine-parseable lines: `[name] PASS/FAIL` per test check and a final
@@ -105,7 +139,9 @@ auto-loaded), **HEX**, or **raw BIN**.
 ```yaml
 cpu:
   vector_table: 0x08000000
-  svd: path/to/file.svd       # optional; default = hardcoded register map
+  svd: path/to/file.svd       # optional; any F1-family chip (e.g. svd/STM32F105xx.svd)
+                              # default (no svd) = builtin STM32F103C8 hardcoded map
+  chip: { svd: path }         # alternative to `svd` (rp2040js-style board object)
   use_hardcoded: true
 regions:
   - start: 0x08000000

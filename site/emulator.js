@@ -176,7 +176,12 @@ export function parseElf(buffer) {
  * @param {number}    [opts.flash_size=0x10000] Flash region size (64KB default)
  * @param {number}    [opts.ram_size=0x5000]    SRAM size (20KB default)
  * @param {number}    [opts.vector_table=0x08000000] Vector table base address
- * @param {string}    [opts.svd]                SVD XML string (optional; defaults to hardcoded map)
+ * @param {string}    [opts.svd]                SVD XML string (optional; defaults to hardcoded F103C8 map)
+ * @param {string|object} [opts.chip]           'stm32f103c8' (builtin hardcoded map, default) or
+ *                                              { name, svd } to build the peripheral map from an SVD
+ *                                              (any F1-family chip, e.g. STM32F105 with CAN2)
+ * @param {Array}     [opts.js_peripherals=[]]  rp2040js-style custom peripherals:
+ *                                              [{ base, size, read(addr,size), write(addr,value,size) }]
  * @param {number}    [opts.uart_addr=0x40013800] USART used for uartRx()
  * @param {object}    [opts.ext_devices={}]     External devices (see below)
  * @param {boolean}   [opts.verbose=false]      Print init info to console
@@ -203,6 +208,8 @@ export async function createEmulator(opts = {}) {
         ram_size = 0x5000,
         vector_table = 0x08000000,
         svd = null,
+        chip = 'stm32f103c8',
+        js_peripherals = [],
         uart_addr = 0x40013800,
         ext_devices = {},
         verbose = false,
@@ -215,6 +222,7 @@ export async function createEmulator(opts = {}) {
     const { periph_read, periph_write, tick, step_batch, get_next_pending_interrupt,
     dma_pump_all, dma_take_absorbed, dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested,
     add_spi_flash, add_i2c_eeprom, add_touchscreen, add_lcd, add_i2c_oled, add_software_spi, reset_ext_devices,
+    register_js_peripheral,
     init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
     gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt, finish_interrupt,
     can_inject_message, adc_set_sim_value, gpio_set_analog, adc_set_rc_tau,
@@ -242,10 +250,19 @@ export async function createEmulator(opts = {}) {
         add_software_spi(d.name, d.cs ?? null, d.clk, d.miso, d.mosi);
     }
 
-    if (svd) {
-        init_svd(svd);
+    const chipSvd = (typeof chip === 'string') ? (svd ?? null) : (chip.svd ?? null);
+    if (typeof chip === 'string' && chip !== 'stm32f103c8' && !chipSvd) {
+        console.warn(`createEmulator: unknown chip "${chip}" (no SVD provided), using builtin STM32F103C8 map`);
+    }
+    if (chipSvd) {
+        init_svd(chipSvd);
     } else {
         init();
+    }
+
+    // rp2040js-style custom peripherals: JS callbacks on the peripheral bus.
+    for (const jp of js_peripherals || []) {
+        register_js_peripheral(jp.base, jp.size, jp.read, jp.write);
     }
 
     const uc = new Module.Unicorn(
@@ -747,6 +764,15 @@ export async function createEmulator(opts = {}) {
         /** Low-level register access (width: 1, 2, or 4). */
         periphRead(addr, width = 4) { return periph_read(addr, width) >>> 0; },
         periphWrite(addr, width, value) { periph_write(addr, width, value); },
+
+        /**
+         * Register an rp2040js-style custom peripheral on the bus.
+         * read(addr, size) -> number; write(addr, value, size). Last registration
+         * wins on overlap, so JS can shadow built-in peripherals.
+         */
+        addJsPeripheral(base, size, read, write) {
+            return register_js_peripheral(base, size, read, write);
+        },
 
         tick() { tick(); },
         stepBatch(count) { return step_batch(count); },

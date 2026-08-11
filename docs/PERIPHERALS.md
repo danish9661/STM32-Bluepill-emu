@@ -37,7 +37,7 @@ including interrupt generation, status flags, and timing. Support levels:
 | GPIO A–D | Full | CRL/CRH/IDR/ODR/BSRR/BRR/LCKR, pull-ups, open-drain, alternate function, `read_pin_effective()` (input callback else driven output) for CS/touch lines. **Electrical model**: IDR readback honors input pull-up/down (ODR bit selects direction), push-pull output readback, open-drain released level (external pull or 0), external drivers win over driven state, and output **slew** (IDR shows the old level until the transition settles, `gpio_set_slew(n)` instructions). Readbacks (`gpio_read_output`, `gpio_read_input`) are exposed to JS. |
 | AFIO | Full | Remap registers, EXTI line selectors. |
 | EXTI | Full | 20 lines, rising/falling/level triggers, software-triggered (SWIER), per-line IRQ mapping to NVIC (including the enable side — IMR writes enable the mapped IRQ). **Input pins fire edges too**: `gpioSetInput()` level changes go through the same edge detection as GPIO output writes, so page-driven button widgets drive `attachInterrupt()`. |
-| DMA1 | Full | 7 channels: peripheral→memory, memory→peripheral, memory→memory; CNDTR counts down across batches; transfer-complete IRQs; **pump runs in Rust** (`dma_pump_all()` pops the queue, absorbs/pushes peripheral bytes internally, returns a flat op plan for JS: memcpy / store-absorbed / read-RAM-then-push / done-bits — JS only touches Unicorn RAM via `uc.mem_read`/`mem_write`; completion signaled last so TC IRQs fire after the data lands). **Address caveat**: the SVD map (`init_svd()`/`from_svd`, passed via the `svd` option) puts DMA1 at 0x40020000 (real HW); the fallback `init()` uses the hardcoded table in `src/peripherals/mod.rs` where DMA1 is **0x40006000** (the real CAN1 address) — real-address firmware silently loses DMA writes without `svd`. |
+| DMA1 | Full | 7 channels: peripheral→memory, memory→peripheral, memory→memory; CNDTR counts down across batches; transfer-complete IRQs; **pump runs in Rust** (`dma_pump_all()` pops the queue, absorbs/pushes peripheral bytes internally, returns a flat op plan for JS: memcpy / store-absorbed / read-RAM-then-push / done-bits — JS only touches Unicorn RAM via `uc.mem_read`/`mem_write`; completion signaled last so TC IRQs fire after the data lands). DMA1@0x40020000 / DMA2@0x40020400 on both the builtin map and SVD maps (dual-map bug class removed 2026-08-11). |
 
 ## Serial buses
 
@@ -99,7 +99,7 @@ These are *extra* peripherals the STM32 talks to over SPI/I2C — the "rest of t
 
 ## Verification coverage
 
-- **210 unit tests** (`node tests/test_all.mjs`) — GPIO (incl. electrical model: pull-ups,
+- **224 unit tests** (`node tests/test_all.mjs`) — GPIO (incl. electrical model: pull-ups,
   open-drain, external-driver precedence, slew readback), USART, ADC (real conversion
   timing, RC sample-and-hold via gpioSetAnalog, DAC→ADC loopback, AWD IRQ, TIM1 TRGO /
   TIM1_CC1 / EXTI 11 external triggers), RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C,

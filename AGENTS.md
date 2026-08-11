@@ -7,7 +7,7 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 
 > **Staging rule (CI incident 2026-08-09):** always `git add -A` or stage BOTH `pkg/` and `site/` together. Commit `7040bd0` staged only `site/` (fresh `pkg/emulator.js` stayed uncommitted at 100K batches) — CI's `cmp pkg/emulator.js site/emulator.js` guard failed on the next commit and caught it. Local working trees mask this; fresh checkouts don't.
 
-> **SVD vs hardcoded layout (verified 2026-08-09):** `Peripherals::from_svd()` (via `init_svd`, used by cli.mjs's config.yaml) registers REAL STM32F103 addresses (DMA1@0x40020000, CAN1@0x40006400). The fallback `Peripherals::new()` (via `init()`, used by emulator.js when no `svd` option is passed) uses the quirky hardcoded table in `src/peripherals/mod.rs` where **DMA1 = 0x40006000** (the real CAN1 address!) and CAN1 = 0x40006400. Real-address firmware (arduino_periph_test writes DMA1_B=0x40020000) FAILS its DMA tests under the no-SVD map — writes silently dropped. site/index.html fetches STM32F103.svd and passes it, so the browser demo is fine; any standalone `createEmulator()` smoke test must pass `svd` too.
+> **SVD vs hardcoded layout (FIXED 2026-08-11):** both maps now agree on real STM32F103 addresses (DMA1@0x40020000, DMA2@0x40020400, CAN1@0x40006400) — the hardcoded `init()` board no longer puts DMA1 at 0x40006000, so real-address firmware passes under EITHER path. `from_svd()` also auto-registers the ARM core peripherals (NVIC/SysTick/SCB at their fixed 0xE000Exxx addresses) when an SVD omits them (STM32F105xx.svd has no SCB/SysTick — without the fallback, millis()/SysTick and PendSV silently break).
 
 ## Architecture & Emulation Loop
 ```
@@ -51,7 +51,7 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 
 ## Current Status (uncommitted WIP — see "What We Did — Current Sprint" below)
 ### Test suite: `node tests/test_all.mjs`
-**210/210 unit tests PASS** (GPIO incl. electrical model, USART, ADC incl. RC sample-and-hold / DAC loopback / external triggers / AWD IRQ, RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C, RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX, FSMC, deep-sleep gating, fault escalation).
+**224/224 unit tests PASS** (GPIO incl. electrical model, USART, ADC incl. RC sample-and-hold / DAC loopback / external triggers / AWD IRQ, RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C, RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX, FSMC, deep-sleep gating, fault escalation).
 
 ### Firmware test — `tests/arduino_periph_test/` (24-peripheral Arduino sketch, 39 checks)
 ```
@@ -67,47 +67,54 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
   `node -e "const fs=require('fs'); const e2=Buffer.alloc(65536); e2[0]=0x42; e2[1]=0x24; fs.writeFileSync('tests/arduino_periph_test/build/eeprom2.bin', e2); fs.writeFileSync('tests/arduino_periph_test/build/spi_flash2.bin', Buffer.alloc(65536));"`
 
 ## What We Did — Current Sprint (uncommitted WIP)
-### 0. Stale ext-device fix — `reset_ext_devices()` (`src/lib.rs`, `pkg/cli.mjs`, `pkg/emulator.js`) [commit f05a44d]
+### 0. rp2040js-style peripheral bus + custom JS peripherals + multi-chip (`src/bus.rs`, `src/peripherals/mod.rs`, `pkg/cli.mjs`, `pkg/emulator.js`, site/index.html)
+- **Bus**: new `src/bus.rs` — runtime registry (rp2040js `bus.ts` equivalent): `Bus::register(start, end, tick, p)`, sorted slots + binary search (`get()`), tick bookkeeping rebuilt on every register. `Peripherals.peripherals`/`tick_indices` → `bus: RefCell<Bus>`; `PeripheralSlot` gained a `tick` flag. **Last registration wins on overlap** (custom peripherals can shadow built-ins).
+- **JS peripherals**: `JsPeripheral` (impl `Peripheral`, holds `js_sys::Function`s) + wasm export `register_js_peripheral(base, size, read, write) -> bool` — callbacks get `(addr, size)` / `(addr, value, size)` with the ABSOLUTE address; requires init first; cleared by the next init (fresh bus). emulator.js: `emu.addJsPeripheral(...)` + `opts.js_peripherals`; cli.mjs: `--periph-plugin=<file.mjs>` (default export array of {base,size,read,write}).
+- **Hardcoded table fixed to real F103 addresses**: DMA1 0x40006000 → **0x40020000**, +DMA2 0x40020400 (clock_enabled had the right gates already; `dma_request()` lookup updated) — the SVD-vs-hardcoded dual-map bug class is GONE; real-address firmware passes under either path. CAN MCR write mask corrected: 0x7F3F → 0x180FF (INRQ..TTCM 0-7, RESET 15, DBF 16 — ABOM bit 6 was silently dropped).
+- **Multi-chip**: `from_svd()` now auto-registers the ARM core peripherals (NVIC/SysTick/SCB at fixed 0xE000Exxx addresses) when the SVD omits them — **STM32F105xx.svd has no SCB/SysTick**, so millis()/PendSV silently broke until the fallback (verified: browser periph37 on F105 = 39/39, CAN2@0x40006800 live). Unsupported SVD peripherals (ETH) skipped by name. Ship `svd/STM32F105xx.svd` (connectivity line, CAN2) + page chip selector (`chipSelect`: F103C8 builtin | F105 SVD).
+- **Verified**: `tests/test_all.mjs` 224/224 (+9 JS-peripheral, +5 F105); canary 39/39; 200M 39/39 @ 9.67s; browser F103C8 39/39 + F105 39/39.
+- **Docs**: ARCHITECTURE.md "The peripheral bus" (layer table), USAGE.md (chip/js_peripherals/plugin), AGENTS.md SVD-note rewritten.
+### 1. Stale ext-device fix — `reset_ext_devices()` (`src/lib.rs`, `pkg/cli.mjs`, `pkg/emulator.js`) [commit f05a44d]
 - **Symptom**: running arduino_periph_test in the page AFTER the showcase preset → 38/39 (touchscreen FAIL). Root cause: `add_*` calls append to module-level static lists — a second `init()` keeps the showcase's devices. The stale showcase LCD (SPI1 cs **PA8**) sits BEFORE the new run's touchscreen (cs PA1) in SPI1's device list; the fresh GPIO leaves PA8 low → stale LCD selected during the touchscreen test → `read()`=0 → `[Touchscreen] FAIL`. Direct-API re-init passed because it re-added the SAME devices (fresh list order), masking the bug.
 - **Fix**: new `reset_ext_devices()` wasm export (clears spi_flashes, i2c_eeproms, usart_probes, lcds, touchscreens, displays, i2c_oleds, fsmc_nors + software SPI configs); called at the top of `createEmulator()` and both cli.mjs paths (before config/bare-firmware device registration, always before `init()`). Single-instance runs unaffected.
-- **Verified**: `node tests/test_all.mjs` 210/210; canary 39/39; `--max=200000000` 39/39 in 9.56s; browser periph37-after-showcase 39/39 badge Done; headless CDP button press → `t=8s btn=1` heartbeat (earlier misses were the test clicking at y=-89 — button scrolled above the viewport; `scrollIntoView` first).
-### 1. Real GPIO/electrical behaviour (`src/peripherals/gpio.rs`)
+- **Verified**: `node tests/test_all.mjs` 224/224; canary 39/39; `--max=200000000` 39/39 in 9.56s; browser periph37-after-showcase 39/39 badge Done; headless CDP button press → `t=8s btn=1` heartbeat (earlier misses were the test clicking at y=-89 — button scrolled above the viewport; `scrollIntoView` first).
+### 2. Real GPIO/electrical behaviour (`src/peripherals/gpio.rs`)
 - **Pin-level electrical model** for IDR readback: input pull-up/down (CNF=01, ODR bit selects direction), floating input (external driver or 0), push-pull output readback (slew-aware), open-drain (low driven; high released → external pull or 0), external drivers (JS read callbacks) win over driven state, analog → 0.
 - **Slew** (`GPIO_SLEW` + `gpio_set_slew(n)`): output transitions land in `pending_transitions` (pin, settle_at, old_level); IDR shows the old level until settle. Open-drain driven-low ignores external drivers (`driven_pin_level`).
 - **ODR/BSRR/BRR write the full register** (input pins use ODR for pull selection — the old `output_mask` filter silently broke INPUT_PULLUP); output-mode side effects (device callbacks, EXTI) still only fire for output pins.
-### 2. Sleep state timing (`src/system.rs`, `src/peripherals/scb.rs`, `src/peripherals/mod.rs`, `src/peripherals/tim.rs`)
+### 3. Sleep state timing (`src/system.rs`, `src/peripherals/scb.rs`, `src/peripherals/mod.rs`, `src/peripherals/tim.rs`)
 - `SCR.SLEEPDEEP` (SCB 0xE000ED10 bit 2) → deep sleep: `system.tick()` calls `tick_frozen()` on every peripheral except RTC (0x40002800) + IWDG (0x40003000), and skips SysTick accrual.
 - **New trait method `tick_frozen()`** (default no-op): instruction-delta peripherals advance their delta base WITHOUT processing state. TIM overrides it — without this, frozen timers CATCH UP on wake (a 200-tick sleep produced a +220 CNT jump).
 - Wake is immediate: UART RX pends from JS at the next batch boundary.
-### 3. Exceptions other than IRQs (SVC, PendSV, faults) (`src/peripherals/nvic.rs`, `src/peripherals/scb.rs`, `pkg/cli.mjs`, `pkg/emulator.js`)
+### 4. Exceptions other than IRQs (SVC, PendSV, faults) (`src/peripherals/nvic.rs`, `src/peripherals/scb.rs`, `pkg/cli.mjs`, `pkg/emulator.js`)
 - **Unicorn probe**: `svc` fires HOOK_INTR intno 2 (execution continues after svc if not redirected); `bx lr` to 0xFFFFFFF9 THROWS UC_ERR_FETCH_UNMAPPED (no hook); MODE_BIG → UC_ERR_ARCH (must use THUMB|LITTLE_ENDIAN). The old `intno === 8` INTR branch is dead code (kept intact).
 - **SVC**: JS stacks a 32-byte frame (xPSR, PC+2, LR, R12, R0-3) — written to the real stack AND mirrored in a JS `svcStack` — sets LR = EXC_RETURN (0xFFFFFFF9, or 0xFFFFFFFD when `CONTROL.SPSEL`), PC = SVCall vector (exception 11 → vector_table + 44). Return: the main-loop catch sees PC in 0xFFFFFFF0..0xFFFFFFFF with svcStack non-empty → pops the mirror. Depth capped at 8.
 - **PendSV**: `ICSR.PENDSVSET` (SCB write) → NVIC pending → dispatched by the normal `processInterrupts` path.
 - **Faults**: unmapped faults are now REAL except the known Unicorn `bl` artifact at `HAL_NVIC_EnableIRQ` (resolved via ELF symbols; skip PC+2). `raise_fault(kind, addr)` (Rust export) sets CFSR (IBUSERR/PRECISERR/UNDEFINSTR), BFAR+BFARVALID, HFSR FORCED, and pends BusFault (-11)/UsageFault (-10) if the SHCSR enable bit is set, else **escalates to HardFault (-13)**.
 - **System-handler priorities**: SCB SHPR1-3 writes route to the NVIC `sys_handler_priority[16]` (default 0x80; fixed: NMI 0, HardFault 0, MemManage 1, BusFault 2, UsageFault 3). SHCSR write mask fixed (`& 0xFFFF` dropped bit 18).
 - **Fault dispatch caveat**: STM32duino's default fault handler is `while(1)` — a genuinely faulting firmware hangs the run (realistic; the artifact skip + symbol gating keeps periph39 clean). No symbol table (hex-only browser firmware) → legacy tolerant skip.
-### 4. Real ADC conversion (`src/peripherals/adc.rs`)
+### 5. Real ADC conversion (`src/peripherals/adc.rs`)
 - Full rewrite: conversion state machine with real timing (`Tconv = SMP + 12.5` cycles, 1 instr = 1 ADC cycle; SMP codes 0-7 → 14/20/26/41/54/68/84/252), per-sequence channels (SQ1-16 from SQR3/2/1, JSQ1-4), `end_at`-based completion in `tick()`, EOC per conversion unless EOCS (CR2 bit 10), STRT at sequence start, AWD vs HTR/LTR, CONT (bit 16) auto-restart, SWSTART (bit 22)/JSWSTART (bit 21), CAL/RSTCAL self-clear, ADC1→DMA1 ch1 / ADC2→DMA1 ch2 requests via the new `dma_request()` trait method.
 - ADC unit test now waits `step_batch(14)` after SWSTART (was: instant EOC).
-### 5. DAC→ADC loopback + ADC external triggers (`src/peripherals/dac.rs`, `src/peripherals/adc.rs`, `src/peripherals/tim.rs`, `src/peripherals/exti.rs`)
+### 6. DAC→ADC loopback + ADC external triggers (`src/peripherals/dac.rs`, `src/peripherals/adc.rs`, `src/peripherals/tim.rs`, `src/peripherals/exti.rs`)
 - **DAC wires its pins**: enabled DAC channels drive a 12-bit analog wire (DAC1→PA4/ch4, DAC2→PA5/ch5); `Peripherals::dac_output()` (trait method `dac_output`, default None) consulted by `Adc::channel_voltage()` with the source resolver: wired GPIO (manual) > DAC output > nominal internal > sim value.
 - **External trigger machinery**: `adc_timer_trigger(sys, tim_base, ch)` (ch 4 = TRGO) + `adc_exti_trigger(sys, line)` trait methods, fanned out from `Peripherals` to every ADC (0x40012400/0x40012800). TIM emits TRGO on update when MMS=010 and CC triggers on compare matches; EXTI emits on lines 11/15 rising edges. ADC gates on EXTTRIG (CR2 bit 20) / JEXTTRIG (bit 15) and EXTSEL (bits 17-19) / JEXTSEL (bits 12-14) tables (TIM1_CC1..TIM1_TRGO, TIM2_CC2, TIM3_TRGO, TIM4_CC4; injected TIM1_CC4/TIM2_TRGO/TIM2_CC2/TIM3_CC4/TIM4_TRGO, EXTI15). New conversion only when idle.
 - Timer: `base` address field added (from name, `timer_base()`); triggers fire inside `advance()`/`generate_update()` mid-batch — conversion `end_at` completes at the NEXT step_batch (conversion runs with the batch-boundary ticker: same semantics as SWSTART).
 - **Fixes**: double-RefCell panic (GPIO write → EXTI → `channel_voltage` while `gpio.borrow_mut()` held) avoided by `gpio.try_borrow()` in `channel_voltage` (source is re-read at sample completion anyway); test bug (`EXTSEL=7 TIM1_TRGO` needs TIM1 CR2 MMS=010 → value 0x20 not 0x10).
-### 6. Full FSMC (`src/peripherals/fsmc.rs`, `src/ext_devices/fsmc_nor.rs`)
+### 7. Full FSMC (`src/peripherals/fsmc.rs`, `src/ext_devices/fsmc_nor.rs`)
 - All 7 external-memory banks: NE1-4 @ 0x6000_0000/0x6400_0000/0x6800_0000/0x6C00_0000 (NOR), NAND2/3 @ 0x7000_0000/0x8000_0000, PC-Card @ 0x9000_0000. BCR1-4 @ 0xA000_0000.. (BTR/BWTR at +8/+10/+18), PCR/PMEM/PATT 2-4 at +0x60/+0x80/+0xA0 (+8 stride).
 - NOR banks gate on BCR MBKEN (bit 0); NOR writes also need WREN (bit 1). NAND/PC always enabled. `read_sized`/`write_sized` assemble bytes per access width.
 - Backing: `FsmcNor` ext device with a JS `Uint8Array` image; `add_fsmc_bank('FSMC.BANK1', data)` (must precede init()); ext_devices lookup in `find_mem_device` matches `fsmc_nors` by name (`FSMC.BANK1..7`).
-### 7. IRQ delivery correctness (`pkg/cli.mjs`, `pkg/emulator.js`, `src/peripherals/nvic.rs`) [commits add9fe2, 9626233]
+### 8. IRQ delivery correctness (`pkg/cli.mjs`, `pkg/emulator.js`, `src/peripherals/nvic.rs`) [commits add9fe2, 9626233]
 - **xPSR restore**: `processInterrupts` saved R0-R3,R12,LR,PC,xPSR but cli.mjs never wrote xPSR back (emulator.js's frame read-back did). A handler's emu_start clobbers APSR, so a cmp/beq pair split across a batch boundary (e.g. timer demo guard `cmp` @0x8000222, `beq` @0x8000224) evaluated with the HANDLER's flags: TIM2's ISR landing exactly there fell through a guard that should have skipped → the print body ran twice per second with a stale `now` + fresh `CNT` → every `t=Ns cnt=N+1` line duplicated. Fix: `uc.reg_write_i32(ARM_REG_XPSR, savedXPSR)` before restoring PC. This was why cli runs were dirty while emulator.js probes stayed clean.
 - **SysTick debt drain**: SysTick is delivered as `irq=-1` (const `SYSTICK: i32 = -1` in nvic.rs — exception #15 via `vector_table + 4*(16+irq)`), but both JS paths drained the re-pend debt with a dead `if (irq === 15)` check — `nvic_systick_take()` never ran, so a multi-period elapsed (large SysTick debt) delivered only ONE of the owed ticks.
 - **Debt accounting**: wiring the drain to `irq === -1` alone double-delivered: `maybe_set_systick_intr_pending` sets the pending bit AND adds `ticks` to debt, then `systick_take()` re-pends the same tick again (~150 deliveries/6M vs 75 = 2× fast millis). Fixed in nvic.rs: the pending IRQ covers the FIRST tick, debt holds only the remainder (`ticks.saturating_sub(1)`, or full `ticks` when a SysTick was already pending); steady state = 1 delivery per period (75/6M ≈ 83 expected at 72000-instr 1ms).
 ### Unit tests / firmware / misc
-- `tests/test_all.mjs`: 189 → **210 PASS** (DAC→ADC loopback via DOR1/2, TIM1 TRGO/CC1 + EXTI11 external triggers, EXTI 11 → ADC without SWSTART, DMA pump exports `dma_absorb_periph`/`dma_push_periph`; AWD IRQ needs ISER enable: `can_fire` requires the IRQ enabled in the NVIC, real hardware semantics — pending without enable stays pending).
+- `tests/test_all.mjs`: 189 → **224 PASS** (DAC→ADC loopback via DOR1/2, TIM1 TRGO/CC1 + EXTI11 external triggers, EXTI 11 → ADC without SWSTART, DMA pump exports `dma_absorb_periph`/`dma_push_periph`; AWD IRQ needs ISER enable: `can_fire` requires the IRQ enabled in the NVIC, real hardware semantics — pending without enable stays pending).
 - Firmware: +SVC (synchronous, `svc #2` in setup()) +PendSV (ICSR-pended, fires next batch) → **39/39**; canary asserts 39.
 - cli.mjs/emulator.js: SVC hook, EXC_RETURN pop, symbol-gated fault raise; emulator.js `faultSym` merged into the existing `resolveSymbol` path (`resolveSym` shared helper, `setSymbols` resets it).
 - site/: synced (emulator.js + wasm + unicorn_arm.js), refreshed `arduino_periph_test.elf` (39 checks) + eeprom2/spi_flash2 images.
-- docs/: PERIPHERALS.md (FSMC/ADC Full, GPIO electrical, sleep, exceptions, 189 tests, 39 checks), ARCHITECTURE.md (Exceptions/Sleep/GPIO/FSMC sections), USAGE.md (gpioSetSlew + fsmc ext_devices + 39), README links.
+- docs/: PERIPHERALS.md (FSMC/ADC Full, GPIO electrical, sleep, exceptions, 224 tests, 39 checks), ARCHITECTURE.md (Exceptions/Sleep/GPIO/FSMC sections), USAGE.md (gpioSetSlew + fsmc ext_devices + 39), README links.
 - 200M full run: 39/39 in **9.00s** (~22M IPS).
 
 ## Active Workarounds (temporary, remove or upstream later)
@@ -122,7 +129,7 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
 ```bash
 cargo check                          # Rust sanity (fast)
 wasm-pack build --target web         # rebuild pkg/stm32_bluepill_wasm_bg* (Rust → wasm)
-node tests/test_all.mjs              # 210 unit tests
+node tests/test_all.mjs              # 224 unit tests
 node tests/canary.mjs                # regression canary: 39/39 firmware checks, ~25s
 node tests/bench.mjs                 # benchmarks
 node pkg/cli.mjs tests/arduino_periph_test/build/arduino_periph_test.ino.elf   # run firmware
@@ -143,7 +150,7 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 ## Next Phase — What's Left
 
 ### Immediate (ALL PASS as of this sprint; re-check after any change)
-1. **Verify nothing regressed** — rerun `tests/test_all.mjs` (210) + canary (`node tests/canary.mjs`, 39/39) after any edit to `src/` or `pkg/cli.mjs`
+1. **Verify nothing regressed** — rerun `tests/test_all.mjs` (224) + canary (`node tests/canary.mjs`, 39/39) after any edit to `src/` or `pkg/cli.mjs`
 
 ### Known issue (monitor only, mostly explained)
 - Historical `Fatal: undefined Stack: undefined` at ~35M+ instructions — **identified (2026-08-11)**: that text is cli.mjs's own catch handler format (`console.error('Fatal:', e.name, e.message)` + `'Stack:', ...`, present since the initial commit), not any wasm/glue string — no "Fatal:" exists in unicorn_arm.cjs/.js, stm32_bluepill_wasm.js or the .wasm. So the incident was a JS promise rejection with a nameless value (bare string/undefined; wasm-bindgen panics throw `new Error(msg)` with name+message, so a REAL Rust/wasm panic would have printed differently). Current handler is hardened (`e?.name || '(no name)'`, `Type:` dump) so a re-occurrence is now diagnosable. Not reproduced across ~2.5B stress instructions (7 runs); monitor only.

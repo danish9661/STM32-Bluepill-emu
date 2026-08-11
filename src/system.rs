@@ -222,18 +222,20 @@ impl WasmSystem {
     pub fn tick(&self) {
         let p = self.p.clone();
         let deep = p.in_deep_sleep();
-        for &idx in &p.tick_indices {
+        let bus = p.bus.borrow();
+        for &idx in bus.tick_indices() {
             if deep {
                 // STOP/STANDBY: only LSI/LSE-clocked peripherals keep running
                 // (IWDG @ 0x40003000, RTC @ 0x40002800); everything else freezes.
-                let base = p.peripherals[idx].start;
+                let base = bus.slot_at(idx).start;
                 if base != 0x4000_3000 && base != 0x4000_2800 {
-                    p.peripherals[idx].peripheral.borrow_mut().tick_frozen(self);
+                    bus.slot_at(idx).peripheral.borrow_mut().tick_frozen(self);
                     continue;
                 }
             }
-            p.peripherals[idx].peripheral.borrow_mut().tick(self);
+            bus.slot_at(idx).peripheral.borrow_mut().tick(self);
         }
+        drop(bus);
         // SysTick runs off HCLK: frozen in STOP/STANDBY.
         if !deep {
             p.nvic.borrow_mut().maybe_set_systick_intr_pending();

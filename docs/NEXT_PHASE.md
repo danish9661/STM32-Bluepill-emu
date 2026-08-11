@@ -17,7 +17,7 @@ peripherals linked together, shared linear memory) that would eliminate the JS b
 - The "single WASM module" idea was therefore evaluated as **not worth the rebuild** —
   the JS boundary was the whole cost, and it is already gone without any rebuild.
 
-Current status: **210/210 unit tests**, **39/39 firmware checks**, canary ~25s at 100M.
+Current status: **224/224 unit tests**, **39/39 firmware checks**, canary ~25s at 100M.
 
 ## Retired (moot — do not redo)
 
@@ -83,4 +83,4 @@ Key measured facts that keep this loop cheap:
 | Hooks per instruction | 0.001 (peripheral access — not a bottleneck) |
 | Batch size | 20K (5× lower IRQ latency vs 100K, zero speed cost) |
 | Canary | 39/39 firmware checks, ~25s at 100M |
-| Unit tests | 210/210 |
+| Unit tests | 224/224 |
