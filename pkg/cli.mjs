@@ -4,7 +4,7 @@ import path from 'path';
 import * as yaml from 'js-yaml';
 import { parseIntelHex, parseSymbolMap, parseElf } from './emulator.js';
 import * as periph from './stm32_bluepill_wasm.js';
-const { periph_read, periph_write, tick, step, step_batch, get_next_pending_interrupt, dma_pump_all, dma_take_absorbed, dma_get_pending_count,
+const { periph_read, periph_write, tick, step, step_batch, get_next_pending_interrupt, intr_next, intr_svc_enter, intr_svc_leave, intr_svc_depth, dma_pump_all, dma_take_absorbed, dma_get_pending_count,
 dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen,
 add_lcd, add_i2c_oled, reset_ext_devices, register_js_peripheral, can_inject_message, raise_fault,
 init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
@@ -367,9 +367,10 @@ async function main() {
     process.stdin.resume();
     if (process.stdin.isTTY) process.on('SIGINT', () => { process.stdin.setRawMode(false); process.exit(0); });
 
-    // SVC frames live here while their handler runs. The frame is also written
-    // to the real stack so handler code can inspect it (Cortex-M ABI).
-    const svcStack = [];
+    // SVC frames live in Rust (src/interrupts.rs, shared with emulator.js —
+    // the same mirror used to be duplicated here and in emulator.js and they
+    // kept drifting). The frame is also written to the real stack so handler
+    // code can inspect it (Cortex-M ABI).
     const intrHook = (handle, intno, user_data) => {
         if (intno === 8) {
             const sp = uc.reg_read_i32(Module.ARM_REG_SP);
@@ -383,38 +384,31 @@ async function main() {
             uc.reg_write_i32(Module.ARM_REG_LR, sv.getUint32(8, true));
             uc.reg_write_i32(Module.ARM_REG_PC, sv.getUint32(4, true) | 1);
             uc.reg_write_i32(Module.ARM_REG_SP, sp + 32);
-        } else if (intno === 2 && svcStack.length < 8) {
-            // SVC: stack the interrupted context, enter handler mode (LR = EXC_RETURN),
-            // jump to the SVCall vector. Return happens when the handler executes
-            // `bx lr` (Unicorn faults fetching 0xFFFFFFFx, caught in the main loop).
+        } else if (intno === 2) {
+            // SVC: stack the interrupted context (mirror + real stack frame,
+            // both built in Rust), enter handler mode (LR = EXC_RETURN), jump
+            // to the SVCall vector. Return happens when the handler executes
+            // `bx lr` (Unicorn faults fetching 0xFFFFFFFx, caught in the main
+            // loop, which pops the mirror via intr_svc_leave).
             const sp = uc.reg_read_i32(Module.ARM_REG_SP);
-            const saved = {
+            const frame = intr_svc_enter(
+                uc.reg_read_i32(Module.ARM_REG_R0),
+                uc.reg_read_i32(Module.ARM_REG_R1),
+                uc.reg_read_i32(Module.ARM_REG_R2),
+                uc.reg_read_i32(Module.ARM_REG_R3),
+                uc.reg_read_i32(Module.ARM_REG_R12),
+                uc.reg_read_i32(Module.ARM_REG_LR),
+                uc.reg_read_i32(Module.ARM_REG_PC),
+                uc.reg_read_i32(Module.ARM_REG_XPSR),
                 sp,
-                r0: uc.reg_read_i32(Module.ARM_REG_R0),
-                r1: uc.reg_read_i32(Module.ARM_REG_R1),
-                r2: uc.reg_read_i32(Module.ARM_REG_R2),
-                r3: uc.reg_read_i32(Module.ARM_REG_R3),
-                r12: uc.reg_read_i32(Module.ARM_REG_R12),
-                lr: uc.reg_read_i32(Module.ARM_REG_LR),
-                pc: uc.reg_read_i32(Module.ARM_REG_PC),
-                xpsr: uc.reg_read_i32(Module.ARM_REG_XPSR),
-            };
-            svcStack.push(saved);
-            const frame = new Uint8Array(32);
-            const sv = new DataView(frame.buffer);
-            sv.setUint32(0, saved.xpsr, true);
-            sv.setUint32(4, saved.pc, true); // return PC = instruction after svc
-            sv.setUint32(8, saved.lr, true);
-            sv.setUint32(12, saved.r12, true);
-            sv.setUint32(16, saved.r3, true);
-            sv.setUint32(20, saved.r2, true);
-            sv.setUint32(24, saved.r1, true);
-            sv.setUint32(28, saved.r0, true);
-            uc.mem_write(BigInt(sp - 32), frame);
-            uc.reg_write_i32(Module.ARM_REG_SP, sp - 32);
-            const control = uc.reg_read_i32(Module.ARM_REG_CONTROL);
-            uc.reg_write_i32(Module.ARM_REG_LR, control & 1 ? 0xFFFFFFFD : 0xFFFFFFF9);
-            uc.reg_write_i32(Module.ARM_REG_PC, read32(vector_table + 4 * 11));
+            );
+            if (frame.length) {
+                uc.mem_write(BigInt(sp - 32), frame);
+                uc.reg_write_i32(Module.ARM_REG_SP, sp - 32);
+                const control = uc.reg_read_i32(Module.ARM_REG_CONTROL);
+                uc.reg_write_i32(Module.ARM_REG_LR, control & 1 ? 0xFFFFFFFD : 0xFFFFFFF9);
+                uc.reg_write_i32(Module.ARM_REG_PC, read32(vector_table + 4 * 11));
+            }
         }
     };
     uc.hook_add(Module.HOOK_INTR, intrHook, null);
@@ -443,19 +437,30 @@ async function main() {
     };
 
     const processInterrupts = () => {
-        for (let i = 0; i < 64; i++) {
-            const irq = get_next_pending_interrupt();
+        while (true) {
+            const irq = intr_next();
             if (irq <= -100) return;
 
             const savedAt = uc.reg_read_i32(Module.ARM_REG_SP);
-            const savedR0 = uc.reg_read_i32(Module.ARM_REG_R0);
-            const savedR1 = uc.reg_read_i32(Module.ARM_REG_R1);
-            const savedR2 = uc.reg_read_i32(Module.ARM_REG_R2);
-            const savedR3 = uc.reg_read_i32(Module.ARM_REG_R3);
-            const savedR12 = uc.reg_read_i32(Module.ARM_REG_R12);
-            const savedLR = uc.reg_read_i32(Module.ARM_REG_LR);
-            const savedPC = uc.reg_read_i32(Module.ARM_REG_PC);
-            const savedXPSR = uc.reg_read_i32(Module.ARM_REG_XPSR);
+            const pc = uc.reg_read_i32(Module.ARM_REG_PC);
+            const lr = uc.reg_read_i32(Module.ARM_REG_LR);
+            const xpsr = uc.reg_read_i32(Module.ARM_REG_XPSR);
+            const r0 = uc.reg_read_i32(Module.ARM_REG_R0);
+            const r1 = uc.reg_read_i32(Module.ARM_REG_R1);
+            const r2 = uc.reg_read_i32(Module.ARM_REG_R2);
+            const r3 = uc.reg_read_i32(Module.ARM_REG_R3);
+            const r12 = uc.reg_read_i32(Module.ARM_REG_R12);
+            const frame = new Uint8Array(32);
+            const sv = new DataView(frame.buffer);
+            sv.setUint32(0, xpsr, true);
+            sv.setUint32(4, pc, true);
+            sv.setUint32(8, lr, true);
+            sv.setUint32(12, r12, true);
+            sv.setUint32(16, r3, true);
+            sv.setUint32(20, r2, true);
+            sv.setUint32(24, r1, true);
+            sv.setUint32(28, r0, true);
+            uc.mem_write(BigInt(savedAt - 32), frame);
             uc.reg_write_i32(Module.ARM_REG_SP, savedAt - 32);
             const handler_pc = read32(vector_table + 4 * (16 + irq));
             uc.reg_write_i32(Module.ARM_REG_LR, 0xFFFFFFF9);
@@ -463,17 +468,22 @@ async function main() {
             try {
                 uc.emu_start(BigInt(handler_pc), 0n, 0n, 20000);
             } catch (e) {
-                // Handler crashed on BX LR (EXC_RETURN not supported)
+                // BX LR with EXC_RETURN handled by intrHook
             }
             finish_interrupt(irq);
-            uc.reg_write_i32(Module.ARM_REG_R0, savedR0);
-            uc.reg_write_i32(Module.ARM_REG_R1, savedR1);
-            uc.reg_write_i32(Module.ARM_REG_R2, savedR2);
-            uc.reg_write_i32(Module.ARM_REG_R3, savedR3);
-            uc.reg_write_i32(Module.ARM_REG_R12, savedR12);
-            uc.reg_write_i32(Module.ARM_REG_LR, savedLR);
-            uc.reg_write_i32(Module.ARM_REG_XPSR, savedXPSR);
-            uc.reg_write_i32(Module.ARM_REG_PC, savedPC | 1);
+            // Restore from the stacked frame (not JS locals) so a handler that
+            // edits the saved context is honored; xPSR restore is REQUIRED —
+            // the handler's emu_start clobbers APSR, and a cmp/beq pair split
+            // across a batch boundary would evaluate with the handler's flags.
+            const savedFrame = uc.mem_read(BigInt(savedAt - 32), 32);
+            const savedSv = new DataView(savedFrame.buffer, savedFrame.byteOffset, savedFrame.byteLength);
+            uc.reg_write_i32(Module.ARM_REG_R0, savedSv.getUint32(28, true));
+            uc.reg_write_i32(Module.ARM_REG_R1, savedSv.getUint32(24, true));
+            uc.reg_write_i32(Module.ARM_REG_R2, savedSv.getUint32(20, true));
+            uc.reg_write_i32(Module.ARM_REG_R3, savedSv.getUint32(16, true));
+            uc.reg_write_i32(Module.ARM_REG_R12, savedSv.getUint32(12, true));
+            uc.reg_write_i32(Module.ARM_REG_LR, savedSv.getUint32(8, true));
+            uc.reg_write_i32(Module.ARM_REG_PC, savedSv.getUint32(4, true) | 1);
             uc.reg_write_i32(Module.ARM_REG_SP, savedAt);
             processDma();
         }
@@ -498,17 +508,20 @@ async function main() {
         } catch (e) {
             const msg = String(e);
             const pc2 = uc.reg_read_i32(Module.ARM_REG_PC);
-            if (msg.includes('UC_ERR_FETCH_UNMAPPED') && ((pc2 & ~1) >>> 0) >= 0xFFFFFFF0 && svcStack.length > 0) {
-                // SVC handler returned via `bx lr` (EXC_RETURN): restore the pre-SVC context
-                const st = svcStack.pop();
-                uc.reg_write_i32(Module.ARM_REG_R0, st.r0);
-                uc.reg_write_i32(Module.ARM_REG_R1, st.r1);
-                uc.reg_write_i32(Module.ARM_REG_R2, st.r2);
-                uc.reg_write_i32(Module.ARM_REG_R3, st.r3);
-                uc.reg_write_i32(Module.ARM_REG_R12, st.r12);
-                uc.reg_write_i32(Module.ARM_REG_LR, st.lr);
-                uc.reg_write_i32(Module.ARM_REG_PC, st.pc | 1);
-                uc.reg_write_i32(Module.ARM_REG_SP, st.sp);
+            if (msg.includes('UC_ERR_FETCH_UNMAPPED') && ((pc2 & ~1) >>> 0) >= 0xFFFFFFF0 && intr_svc_depth() > 0) {
+                // SVC handler returned via `bx lr` (EXC_RETURN): restore the
+                // pre-SVC context from the Rust mirror.
+                const st = intr_svc_leave();
+                if (st.length === 8) {
+                    uc.reg_write_i32(Module.ARM_REG_R0, st[0]);
+                    uc.reg_write_i32(Module.ARM_REG_R1, st[1]);
+                    uc.reg_write_i32(Module.ARM_REG_R2, st[2]);
+                    uc.reg_write_i32(Module.ARM_REG_R3, st[3]);
+                    uc.reg_write_i32(Module.ARM_REG_R12, st[4]);
+                    uc.reg_write_i32(Module.ARM_REG_LR, st[5]);
+                    uc.reg_write_i32(Module.ARM_REG_PC, st[6] | 1);
+                    uc.reg_write_i32(Module.ARM_REG_SP, st[7]);
+                }
             } else if (msg.includes('UC_ERR_READ_UNMAPPED') || msg.includes('UC_ERR_FETCH_UNMAPPED') || msg.includes('UC_ERR_WRITE_UNMAPPED')) {
                 const r0 = uc.reg_read_i32(Module.ARM_REG_R0);
                 const r1 = uc.reg_read_i32(Module.ARM_REG_R1);

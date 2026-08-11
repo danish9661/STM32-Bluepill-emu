@@ -22,8 +22,11 @@ jobs:
         run: cargo check
       - name: Build peripheral WASM
         run: wasm-pack build --target web
-      - name: site/ must mirror pkg/ (emulator.js)
-        run: cmp pkg/emulator.js site/emulator.js
+      - name: site/ must mirror pkg/ (emulator.js + wasm glue + wasm)
+        run: |
+          cmp pkg/emulator.js site/emulator.js
+          cmp pkg/stm32_bluepill_wasm.js site/stm32_bluepill_wasm.js
+          cmp pkg/stm32_bluepill_wasm_bg.wasm site/stm32_bluepill_wasm_bg.wasm
       - name: Prepare firmware ELF + device images (committed copies live in site/)
         run: |
           cp site/arduino_periph_test.elf tests/arduino_periph_test/build/arduino_periph_test.ino.elf
@@ -33,5 +36,7 @@ jobs:
           cp site/arduino_spi_flash2.bin tests/arduino_periph_test/build/spi_flash2.bin
       - name: Unit tests
         run: node tests/test_all.mjs
-      - name: Regression canary (37/37 firmware checks)
+      - name: Regression canary (39/39 firmware checks)
         run: node tests/canary.mjs
+      - name: Full firmware run (200M instructions, UART RX + config)
+        run: echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml --max=200000000

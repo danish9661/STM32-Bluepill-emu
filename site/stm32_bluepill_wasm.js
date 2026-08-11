@@ -397,6 +397,60 @@ export function init_svd(svd_xml) {
 }
 
 /**
+ * Next pending IRQ within the batch budget (like get_next_pending_interrupt,
+ * but capped at 64 per step/step_batch so one hot IRQ can't starve others).
+ * @returns {number}
+ */
+export function intr_next() {
+    const ret = wasm.intr_next();
+    return ret;
+}
+
+/**
+ * Number of SVC frames currently in flight (guard for the JS catch).
+ * @returns {number}
+ */
+export function intr_svc_depth() {
+    const ret = wasm.intr_svc_depth();
+    return ret >>> 0;
+}
+
+/**
+ * Enter an SVC: push a mirror of the interrupted context (depth-capped at 8)
+ * and return the 32-byte Cortex-M exception frame to write to the real stack.
+ * Empty vec when the cap is hit (SVC ignored, like the old JS guard).
+ * Frame layout: [xpsr, pc, lr, r12, r3, r2, r1, r0] little-endian.
+ * @param {number} r0
+ * @param {number} r1
+ * @param {number} r2
+ * @param {number} r3
+ * @param {number} r12
+ * @param {number} lr
+ * @param {number} pc
+ * @param {number} xpsr
+ * @param {number} sp
+ * @returns {Uint8Array}
+ */
+export function intr_svc_enter(r0, r1, r2, r3, r12, lr, pc, xpsr, sp) {
+    const ret = wasm.intr_svc_enter(r0, r1, r2, r3, r12, lr, pc, xpsr, sp);
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
+}
+
+/**
+ * Pop the top SVC mirror: [r0, r1, r2, r3, r12, lr, pc, sp]. Empty vec when
+ * the stack is empty (no SVC in flight).
+ * @returns {Uint32Array}
+ */
+export function intr_svc_leave() {
+    const ret = wasm.intr_svc_leave();
+    var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
+}
+
+/**
  * @returns {boolean}
  */
 export function is_watchdog_reset_requested() {

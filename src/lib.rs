@@ -3,6 +3,7 @@ use wasm_bindgen::prelude::*;
 
 mod system;
 pub mod bus;
+mod interrupts;
 pub mod peripherals;
 pub mod ext_devices;
 
@@ -128,6 +129,7 @@ pub fn step(primask: u32, basepri: u32) -> u32 {
     system::INTR_MASK_PRIMASK.store(primask, Ordering::Relaxed);
     system::INTR_MASK_BASEPRI.store(basepri, Ordering::Relaxed);
     system::INSTRUCTION_COUNT.fetch_add(1, Ordering::Relaxed);
+    sys().intr.borrow_mut().reset_budget();
     sys().tick();
     if is_watchdog_reset_requested() { return 1; }
     if sys().pending_dma_count() > 0 { return 2; }
@@ -145,6 +147,7 @@ pub fn step(primask: u32, basepri: u32) -> u32 {
 pub fn step_batch(count: u32) -> u32 {
     let sys = sys();
     system::INSTRUCTION_COUNT.fetch_add(count as u64, Ordering::Relaxed);
+    sys.intr.borrow_mut().reset_budget();
     sys.tick();
     if is_watchdog_reset_requested() { 1 } else { 0 }
 }
