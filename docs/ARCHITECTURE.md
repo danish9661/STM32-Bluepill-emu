@@ -30,10 +30,31 @@ layer bridges the two.
 | Module | What it is | Notes |
 |---|---|---|
 | `pkg/unicorn_arm.cjs` | ARM Cortex-M3 CPU (Unicorn engine) | Emscripten-compiled C; **self-contained** — the WASM binary is embedded (`binaryDecode`), no external files, works in Node and browser. Effectively unmodifiable (binary). |
-| `pkg/stm32_bluepill_wasm_bg.wasm` | All peripherals in Rust | wasm-bindgen exports; the JS glue is `pkg/stm32_bluepill_wasm.js`. Source lives in `src/` (`src/peripherals/*`, `src/ext_devices/*`). |
+| `pkg/stm32_bluepill_wasm_bg.wasm` | All peripherals in Rust | wasm-bindgen exports; the JS glue is `pkg/stm32_bluepill_wasm.js`. Source lives in `src/` (`src/bus.rs`, `src/peripherals/*`, `src/ext_devices/*`). |
 
 Both are instantiated once and communicate only through the JS bridge — Unicorn never
 calls into Rust directly and vice versa.
+
+## The peripheral bus (rp2040js-style)
+
+`src/bus.rs` is a runtime registry in the style of Wokwi's `rp2040js`/`avrjs`
+`bus.ts`: peripherals register an address range `[start, end)` and accesses are
+routed with a binary search. Board assembly picks the peripheral set:
+
+| Layer | rp2040js/avrjs equivalent | Ours |
+|---|---|---|
+| CPU core | `src/cpu/` (own ARM core) | Unicorn (separate, faster) |
+| Bus | `bus.ts` `addPeripheral(addr, peripheral)` | `src/bus.rs` `Bus::register(start, end, tick, p)` |
+| Peripheral impl | one class per file in `src/peripherals/` | one `impl Peripheral` per file in `src/peripherals/*.rs` |
+| Chip assembly | `rp2040.ts` / `mcu.ts` | `Peripherals::new_wasm()` (builtin STM32F103C8 table) / `from_svd()` (any F1-family SVD) |
+| Custom chips | TS classes on the bus | `register_js_peripheral(base, size, read, write)` — JS callbacks called with absolute address + width; last registration wins (can shadow built-ins) |
+
+Registration is live: a new peripheral (Rust or JS) can be added to a running
+emulator; `init()`/`init_svd()` rebuild the whole bus from scratch. SVDs that omit
+the ARM core peripherals (STM32F105xx has no SCB/SysTick) get them auto-registered
+at their fixed 0xE000Exxx addresses. F1-family SVDs work out of the box (F105 adds
+CAN2@0x40006800); F4/G0-class chips need new peripheral modules (MODER-style GPIO,
+different RCC layout) but the bus itself is chip-agnostic.
 
 ## Memory model
 

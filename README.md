@@ -21,7 +21,8 @@ the chip's registers with realistic timing, interrupts, and electrical behavior.
 
 - **Full peripheral set** — GPIO (A–D) with an electrical model (pull-ups, open-drain, output slew), USART1–3, SPI1–2, I2C1–2, TIM1–14 (PWM, input capture, external ADC triggers), ADC1–2 (real conversion timing + RC sample-and-hold, DAC→ADC loopback, external triggers), DAC1–2, DMA1 (7 channels), CAN1 (RX injection), RTC alarm, CRC, NVIC priority dispatch, SysTick, EXTI, AFIO, BKP, WWDG, IWDG, PWR, FLASH, FSMC (NOR/NAND/PC-Card)
 - **Realistic analog & interrupts** — SVC/PendSV/fault escalation, deep-sleep gating, timer-driven ADC triggers (TIM1–4 TRGO/CC events, EXTI 11/15)
-- **210/210 unit tests** and a **39/39 integration canary** running a real 24-peripheral Arduino sketch (~9 s)
+- **224/224 unit tests** and a **39/39 integration canary** running a real 24-peripheral Arduino sketch (~9 s)
+- **rp2040js-style bus** — peripherals register on a runtime bus (`src/bus.rs`); custom JS peripherals (`emu.addJsPeripheral`) and multi-chip support (STM32F103C8 builtin, any F1-family SVD like STM32F105 with CAN2)
 - **Library + CLI + browser demo** — embed it, script it, or demo it
 
 ## Install
@@ -121,7 +122,7 @@ MIT — see [LICENSE](LICENSE).
 
 ```bash
 wasm-pack build --target web --out-dir pkg   # rebuild Rust peripherals
-node tests/test_all.mjs                      # 210 unit tests
+node tests/test_all.mjs                      # 224 unit tests
 node tests/bench.mjs                         # benchmarks
 node pkg/cli.mjs firmware.bin                # run firmware
 ```

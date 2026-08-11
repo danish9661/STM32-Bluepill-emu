@@ -469,6 +469,22 @@ export function raise_fault(kind, addr) {
 }
 
 /**
+ * Register a peripheral implemented entirely in JS (rp2040js-style custom
+ * chip). Callbacks are invoked with `(addr, size)` / `(addr, value, size)`
+ * where addr is the ABSOLUTE access address. Requires init()/init_svd() first;
+ * last registration wins on overlap. Returns false if not initialized.
+ * @param {number} base
+ * @param {number} size
+ * @param {Function} read
+ * @param {Function} write
+ * @returns {boolean}
+ */
+export function register_js_peripheral(base, size, read, write) {
+    const ret = wasm.register_js_peripheral(base, size, read, write);
+    return ret !== 0;
+}
+
+/**
  * Clear all registered ext devices (spi flash, eeprom, oled, lcd, touchscreen,
  * fsmc, software spi). Call BEFORE adding devices for a new emulator instance —
  * otherwise devices from a previous init (stale CS pins reading low on the
@@ -555,6 +571,23 @@ export function uart_rx_pending(addr) {
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
+        __wbg___wbindgen_number_get_394265ed1e1b84ee: function(arg0, arg1) {
+            const obj = arg1;
+            const ret = typeof(obj) === 'number' ? obj : undefined;
+            getDataViewMemory0().setFloat64(arg0 + 8 * 1, isLikeNone(ret) ? 0 : ret, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, !isLikeNone(ret), true);
+        },
+        __wbg___wbindgen_throw_344f42d3211c4765: function(arg0, arg1) {
+            throw new Error(getStringFromWasm0(arg0, arg1));
+        },
+        __wbg_call_44b7209e1e252e6a: function() { return handleError(function (arg0, arg1, arg2, arg3, arg4) {
+            const ret = arg0.call(arg1, arg2, arg3, arg4);
+            return ret;
+        }, arguments); },
+        __wbg_call_e3b662382210db98: function() { return handleError(function (arg0, arg1, arg2, arg3) {
+            const ret = arg0.call(arg1, arg2, arg3);
+            return ret;
+        }, arguments); },
         __wbg_error_a6fa202b58aa1cd3: function(arg0, arg1) {
             let deferred0_0;
             let deferred0_1;
@@ -577,6 +610,11 @@ function __wbg_get_imports() {
             getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
             getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
         },
+        __wbindgen_cast_0000000000000001: function(arg0) {
+            // Cast intrinsic for `F64 -> Externref`.
+            const ret = arg0;
+            return ret;
+        },
         __wbindgen_init_externref_table: function() {
             const table = wasm.__wbindgen_externrefs;
             const offset = table.grow(4);
@@ -591,6 +629,12 @@ function __wbg_get_imports() {
         __proto__: null,
         "./stm32_bluepill_wasm_bg.js": import0,
     };
+}
+
+function addToExternrefTable0(obj) {
+    const idx = wasm.__externref_table_alloc();
+    wasm.__wbindgen_externrefs.set(idx, obj);
+    return idx;
 }
 
 function getArrayU32FromWasm0(ptr, len) {
@@ -629,6 +673,15 @@ function getUint8ArrayMemory0() {
         cachedUint8ArrayMemory0 = new Uint8Array(wasm.memory.buffer);
     }
     return cachedUint8ArrayMemory0;
+}
+
+function handleError(f, args) {
+    try {
+        return f.apply(this, args);
+    } catch (e) {
+        const idx = addToExternrefTable0(e);
+        wasm.__wbindgen_exn_store(idx);
+    }
 }
 
 function isLikeNone(x) {

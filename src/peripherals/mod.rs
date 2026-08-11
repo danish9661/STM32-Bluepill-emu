@@ -28,6 +28,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use crate::system::System;
 use crate::ext_devices::ExtDevices;
+use crate::bus::{Bus, JsPeripheral};
 use fsmc::Fsmc;
 use gpio::GpioPorts;
 use svd_parser::svd::{MaybeArray, PeripheralInfo};
@@ -82,12 +83,12 @@ pub trait Peripheral {
 pub struct PeripheralSlot<T> {
     pub start: u32,
     pub end: u32,
+    pub tick: bool,
     pub peripheral: T,
 }
 
 pub struct Peripherals {
-    pub peripherals: Vec<PeripheralSlot<RefCell<Box<dyn Peripheral>>>>,
-    pub tick_indices: Vec<usize>,
+    pub bus: RefCell<Bus>,
     pub nvic: RefCell<nvic::Nvic>,
     pub gpio: RefCell<GpioPorts>,
     rcc_enrs: RefCell<(u32, u32, u32)>,
@@ -169,8 +170,7 @@ impl Peripherals {
 
         let rcc_enrs = RefCell::new((0x0000_0014, 0x0000_0000, 0x0000_0000));
         let mut peripherals = Peripherals {
-            peripherals: Vec::new(),
-            tick_indices: Vec::new(),
+            bus: RefCell::new(Bus::new()),
             nvic: RefCell::new(nvic::Nvic::default()),
             gpio: RefCell::new(gpio),
             rcc_enrs,
@@ -200,54 +200,68 @@ impl Peripherals {
             } else {
                 (p.base_address as u32, p.base_address as u32 + size)
             };
-            let peri: Option<Box<dyn Peripheral>> = None
-                .or_else(|| nvic::NvicWrapper::new(name))
-                .or_else(|| SysTick::new(name))
-                .or_else(|| Scb::new(name))
-                .or_else(|| Gpio::new(name))
-                .or_else(|| Usart::new(name, ext_devices))
-                .or_else(|| Rcc::new(name))
-                .or_else(|| Flash::new(name))
-                .or_else(|| Pwr::new(name))
-                .or_else(|| Wwdg::new(name))
-                .or_else(|| Iwdg::new(name))
-                .or_else(|| Rtc::new(name))
-                .or_else(|| Crc::new(name))
-                .or_else(|| I2c::new(name, ext_devices))
-                .or_else(|| Dma::new(name))
-                .or_else(|| Spi::new(name, ext_devices, &mut peripherals.gpio.borrow_mut()))
-                .or_else(|| Timer::new(name))
-                .or_else(|| Adc::new(name))
-                .or_else(|| Can::new(name))
-                .or_else(|| Usb::new(name))
-                .or_else(|| Fsmc::new(name, ext_devices))
-                .or_else(|| Afio::new(name))
-                .or_else(|| Exti::new(name))
-                .or_else(|| Bkp::new(name))
-                .or_else(|| Dac::new(name))
-            ;
+            let peri: Option<Box<dyn Peripheral>> =
+                Self::build_peripheral(name, ext_devices, &mut peripherals.gpio.borrow_mut());
 
             if let Some(peri) = peri {
-                let idx = peripherals.peripherals.len();
-                peripherals.peripherals.push(PeripheralSlot {
-                    start, end,
-                    peripheral: RefCell::new(peri),
-                });
-                if name_has_tick(name) {
-                    peripherals.tick_indices.push(idx);
+                peripherals.bus.get_mut().register(start, end, name_has_tick(name), peri);
+            }
+        }
+
+        // ARM core peripherals are architectural: fixed addresses on every
+        // Cortex-M3. Some SVDs omit them (e.g. STM32F105xx has no SCB/SysTick) —
+        // register defaults so SysTick, faults and deep-sleep always work.
+        for (name, base, size) in [
+            ("NVIC", 0xE000_E000u32, 0x100u32),
+            ("SysTick", 0xE000_E010u32, 0x20u32),
+            ("SCB", 0xE000_ED00u32, 0x100u32),
+        ] {
+            if peripherals.bus.get_mut().get(base).is_none() {
+                if let Some(p) = Self::build_peripheral(name, ext_devices, &mut peripherals.gpio.borrow_mut()) {
+                    peripherals.bus.get_mut().register(base, base + size, false, p);
                 }
             }
         }
 
-        peripherals.finish_registration();
+        peripherals.bus.get_mut().finish_assert_no_overlap();
         peripherals
+    }
+
+    /// Construct a peripheral implementation from its SVD peripheral name.
+    /// Returns None for peripherals this emulator doesn't model (ETH, USB-OTG
+    /// on some chips, ...) — those are silently skipped.
+    fn build_peripheral(name: &str, ext_devices: &ExtDevices, gpio: &mut GpioPorts) -> Option<Box<dyn Peripheral>> {
+        None
+            .or_else(|| nvic::NvicWrapper::new(name))
+            .or_else(|| SysTick::new(name))
+            .or_else(|| Scb::new(name))
+            .or_else(|| Gpio::new(name))
+            .or_else(|| Usart::new(name, ext_devices))
+            .or_else(|| Rcc::new(name))
+            .or_else(|| Flash::new(name))
+            .or_else(|| Pwr::new(name))
+            .or_else(|| Wwdg::new(name))
+            .or_else(|| Iwdg::new(name))
+            .or_else(|| Rtc::new(name))
+            .or_else(|| Crc::new(name))
+            .or_else(|| I2c::new(name, ext_devices))
+            .or_else(|| Dma::new(name))
+            .or_else(|| Spi::new(name, ext_devices, gpio))
+            .or_else(|| Timer::new(name))
+            .or_else(|| Adc::new(name))
+            .or_else(|| Can::new(name))
+            .or_else(|| Usb::new(name))
+            .or_else(|| Fsmc::new(name, ext_devices))
+            .or_else(|| Afio::new(name))
+            .or_else(|| Exti::new(name))
+            .or_else(|| Bkp::new(name))
+            .or_else(|| Dac::new(name))
     }
 
     pub fn new_wasm(gpio: GpioPorts, ext_devices: &ExtDevices) -> Self {
         let rcc_enrs = RefCell::new((0x0000_0014, 0x0000_0000, 0x0000_0000));
         let mut peripherals = Peripherals {
-            peripherals: Vec::new(),
-            tick_indices: Vec::new(),
+            bus: RefCell::new(Bus::new()),
             nvic: RefCell::new(nvic::Nvic::default()),
             gpio: RefCell::new(gpio),
             rcc_enrs,
@@ -260,9 +274,8 @@ impl Peripherals {
             (0x4000_3800, "SPI2"),
             (0x4000_4400, "USART2"), (0x4000_4800, "USART3"),
             (0x4000_5400, "I2C1"), (0x4000_5800, "I2C2"),
-            (0x4000_6000, "DMA1"),
-            (0x4000_6400, "CAN1"),
             (0x4000_5C00, "USB"),
+            (0x4000_6400, "CAN1"),
             (0x4000_6C00, "BKP"),
             (0x4000_7000, "PWR"),
             (0x4000_7400, "DAC"),
@@ -273,6 +286,7 @@ impl Peripherals {
             (0x4001_2C00, "TIM1"),
             (0x4001_3000, "SPI1"),
             (0x4001_3800, "USART1"),
+            (0x4002_0000, "DMA1"), (0x4002_0400, "DMA2"),
             (0x4002_1000, "RCC"),  (0x4002_2000, "FLASH"),
             (0x4002_3000, "CRC"),
             (0xE000_E000, "NVIC"), (0xE000_E010, "SysTick"), (0xE000_ED00, "SCB"),
@@ -283,49 +297,20 @@ impl Peripherals {
             let size = regs.get(i + 1)
                 .map(|&(next, _)| (next - base).min(0x400))
                 .unwrap_or(0x100);
-            let (start, end) = (base, base + size);
 
-            let p: Option<Box<dyn Peripheral>> = None
-                .or_else(|| nvic::NvicWrapper::new(name))
-                .or_else(|| SysTick::new(name))
-                .or_else(|| Scb::new(name))
-                .or_else(|| Gpio::new(name))
-                .or_else(|| Usart::new(name, ext_devices))
-                .or_else(|| Rcc::new(name))
-                .or_else(|| Flash::new(name))
-                .or_else(|| Pwr::new(name))
-                .or_else(|| Wwdg::new(name))
-                .or_else(|| Iwdg::new(name))
-                .or_else(|| Rtc::new(name))
-                .or_else(|| Crc::new(name))
-                .or_else(|| I2c::new(name, ext_devices))
-                .or_else(|| Dma::new(name))
-                .or_else(|| Spi::new(name, ext_devices, &mut peripherals.gpio.borrow_mut()))
-                .or_else(|| Timer::new(name))
-                .or_else(|| Adc::new(name))
-                .or_else(|| Can::new(name))
-                .or_else(|| Usb::new(name))
-                .or_else(|| Fsmc::new(name, ext_devices))
-                .or_else(|| Afio::new(name))
-                .or_else(|| Exti::new(name))
-                .or_else(|| Bkp::new(name))
-                .or_else(|| Dac::new(name))
-            ;
+            let p: Option<Box<dyn Peripheral>> =
+                Self::build_peripheral(name, ext_devices, &mut peripherals.gpio.borrow_mut());
 
             if let Some(p) = p {
-                let idx = peripherals.peripherals.len();
-                peripherals.peripherals.push(PeripheralSlot { start, end, peripheral: RefCell::new(p) });
-                if name_has_tick(name) {
-                    peripherals.tick_indices.push(idx);
-                }
+                peripherals.bus.get_mut().register(base, base + size, name_has_tick(name), p);
             }
         }
 
         if let Some(p) = Fsmc::new("FSMC", ext_devices) {
-            peripherals.peripherals.push(PeripheralSlot { start: 0x6000_0000, end: 0xA000_1000, peripheral: RefCell::new(p) });
+            peripherals.bus.get_mut().register(0x6000_0000, 0xA000_1000, false, p);
         }
 
-        peripherals.finish_registration();
+        peripherals.bus.get_mut().finish_assert_no_overlap();
         peripherals
     }
 
@@ -340,21 +325,14 @@ impl Peripherals {
         sw_spi::SoftwareSpi::register(config, &mut self.gpio.borrow_mut(), ext_devices);
     }
 
-    fn finish_registration(&mut self) {
-        self.peripherals.sort_by_key(|p| p.start);
-        let a = self.peripherals.iter();
-        let mut b = self.peripherals.iter();
-        b.next();
-        for (p1, p2) in a.zip(b) {
-            assert!(p1.end <= p2.start, "Overlap: 0x{:08x}-0x{:08x} vs 0x{:08x}-0x{:08x}",
-                p1.start, p1.end, p2.start, p2.end);
-        }
-    }
-
-    fn get_peripheral<T>(slots: &[PeripheralSlot<T>], addr: u32) -> Option<&PeripheralSlot<T>> {
-        let index = slots.binary_search_by_key(&addr, |p| p.start)
-            .map_or_else(|e| e.checked_sub(1), |v| Some(v));
-        index.map(|i| slots.get(i).filter(|p| addr <= p.end)).flatten()
+    /// Register a peripheral implemented in JS (read/write callbacks receive
+    /// the absolute address + access width). Last registration wins on
+    /// overlap, so custom peripherals can shadow built-ins.
+    pub fn register_js(&self, base: u32, size: u32, read: js_sys::Function, write: js_sys::Function) {
+        self.bus.borrow_mut().register(
+            base, base + size, false,
+            Box::new(JsPeripheral::new(base, read, write)),
+        );
     }
 
     fn bitbanding(addr: u32) -> Option<(u32, u8)> {
@@ -383,6 +361,7 @@ impl Peripherals {
         if base_addr >= 0x4002_1000 && base_addr < 0x4002_2000 { return true; }
         match base_addr {
             0x4002_0000 => (ahbenr & 1) != 0,
+            0x4002_0400 => (ahbenr & (1 << 1)) != 0,
             0x4002_2000 => (ahbenr & (1 << 4)) != 0,
             0x4002_3000 => (ahbenr & (1 << 6)) != 0,
             0x4001_0000 | 0x4001_0400 => (apb2enr & 1) != 0,
@@ -427,7 +406,7 @@ impl Peripherals {
 
     /// PWM duty (0-100) of a timer channel, 0 if the address is not a timer.
     pub fn pwm_duty(&self, addr: u32, channel: u32) -> u32 {
-        if let Some(p) = Self::get_peripheral(&self.peripherals, addr) {
+        if let Some(p) = self.bus.borrow().get(addr) {
             if let Ok(t) = p.peripheral.try_borrow() {
                 return t.pwm_duty(channel).unwrap_or(0);
             }
@@ -449,7 +428,7 @@ impl Peripherals {
         } else { (addr, 0) };
         let value = if Self::NVIC_REGS_BASE <= addr && addr < Self::NVIC_REGS_END {
             self.nvic.borrow_mut().read(sys, addr - Self::NVIC_REGS_BASE)
-        } else if let Some(p) = Self::get_peripheral(&self.peripherals, addr) {
+        } else if let Some(p) = self.bus.borrow().get(addr) {
             p.peripheral.borrow_mut().read_sized(sys, addr - p.start, size)
         } else { 0 };
         if is_reg { value << (8 * byte_offset) } else { value }
@@ -480,32 +459,32 @@ impl Peripherals {
         }
         if Self::NVIC_REGS_BASE <= addr && addr < Self::NVIC_REGS_END {
             self.nvic.borrow_mut().write(sys, addr - Self::NVIC_REGS_BASE, value);
-        } else if let Some(p) = Self::get_peripheral(&self.peripherals, addr) {
+        } else if let Some(p) = self.bus.borrow().get(addr) {
             p.peripheral.borrow_mut().write_sized(sys, addr - p.start, _size, value);
         }
     }
 
     pub fn can_inject_message(&self, sys: &System, addr: u32, tir: u32, tdtr: u32, tdlr: u32, tdhr: u32) -> bool {
-        if let Some(p) = Self::get_peripheral(&self.peripherals, addr) {
+        if let Some(p) = self.bus.borrow().get(addr) {
             p.peripheral.borrow_mut().can_inject_message(sys, tir, tdtr, tdlr, tdhr)
         } else { false }
     }
 
     pub fn rx_byte(&self, sys: &System, addr: u32, byte: u8) -> bool {
-        if let Some(p) = Self::get_peripheral(&self.peripherals, addr) {
+        if let Some(p) = self.bus.borrow().get(addr) {
             p.peripheral.borrow_mut().rx_byte(sys, byte);
             true
         } else { false }
     }
 
     pub fn rx_pending(&self, addr: u32) -> u32 {
-        if let Some(p) = Self::get_peripheral(&self.peripherals, addr) {
+        if let Some(p) = self.bus.borrow().get(addr) {
             p.peripheral.borrow().rx_pending()
         } else { 0 }
     }
 
     /// Queries the AFIO peripheral for the GPIO port mapped to a given EXTI line (0-15).
-    pub fn exti_port_for_line(&self, line: u32) -> Option<char> {        for slot in &self.peripherals {
+    pub fn exti_port_for_line(&self, line: u32) -> Option<char> {        for slot in self.bus.borrow().iter() {
             if slot.start == 0x4001_0000 {
                 return slot.peripheral.borrow().exti_port(line);
             }
@@ -516,7 +495,7 @@ impl Peripherals {
     /// Queries AFIO MAPR remap bits for a given peripheral name.
     /// Returns None if the peripheral has no remap bits or AFIO is unavailable.
     pub fn afio_remap_status(&self, name: &str) -> Option<u32> {
-        for slot in &self.peripherals {
+        for slot in self.bus.borrow().iter() {
             if slot.start == 0x4001_0000 {
                 return slot.peripheral.borrow().remap_status(name);
             }
@@ -527,7 +506,7 @@ impl Peripherals {
     /// Called from GPIO when a pin changes state. Triggers EXTI if the port/pin
     /// matches the AFIO EXTICR mapping and EXTI edge configuration.
     pub fn gpio_exti_trigger(&self, sys: &System, port: u8, pin: u8, rising: bool) {
-        for slot in &self.peripherals {
+        for slot in self.bus.borrow().iter() {
             if slot.start == 0x4001_0400 {
                 slot.peripheral.borrow_mut().gpio_pin_changed(sys, port, pin, rising);
                 return;
@@ -537,7 +516,7 @@ impl Peripherals {
 
     /// Peripheral DMA request: fires the enabled DMA channel if configured.
     pub fn dma_request(&self, sys: &System, channel: u32) {
-        if let Some(p) = Self::get_peripheral(&self.peripherals, 0x4000_6000) {
+        if let Some(p) = self.bus.borrow().get(0x4002_0000) {
             p.peripheral.borrow_mut().dma_request(sys, channel);
         }
     }
@@ -545,7 +524,7 @@ impl Peripherals {
     /// Timer-originated ADC external trigger: fanned out to every ADC, which
     /// gates on its own EXTSEL/JEXTSEL configuration.
     pub fn adc_timer_trigger(&self, sys: &System, tim_base: u32, ch: u8) {
-        for slot in &self.peripherals {
+        for slot in self.bus.borrow().iter() {
             if slot.start == 0x4001_2400 || slot.start == 0x4001_2800 {
                 slot.peripheral.borrow_mut().adc_timer_trigger(sys, tim_base, ch);
             }
@@ -554,7 +533,7 @@ impl Peripherals {
 
     /// EXTI-originated ADC trigger (line 11 = regular, 15 = injected).
     pub fn adc_exti_trigger(&self, sys: &System, line: u32) {
-        for slot in &self.peripherals {
+        for slot in self.bus.borrow().iter() {
             if slot.start == 0x4001_2400 || slot.start == 0x4001_2800 {
                 slot.peripheral.borrow_mut().adc_exti_trigger(sys, line);
             }
@@ -563,7 +542,7 @@ impl Peripherals {
 
     /// Analog voltage driven on a pin by a peripheral (DAC output), if any.
     pub fn dac_output(&self, port: u8, pin: u8) -> Option<u32> {
-        if let Some(p) = Self::get_peripheral(&self.peripherals, 0x4000_7400) {
+        if let Some(p) = self.bus.borrow().get(0x4000_7400) {
             if let Ok(dac) = p.peripheral.try_borrow() {
                 return dac.dac_output(port, pin);
             }
@@ -574,7 +553,7 @@ impl Peripherals {
     /// STOP/STANDBY detection: SCB SCR SLEEPDEEP (bit 2). In deep sleep the core is
     /// halted; only LSI/LSE-clocked peripherals (IWDG, RTC) keep running.
     pub fn in_deep_sleep(&self) -> bool {
-        if let Some(p) = Self::get_peripheral(&self.peripherals, 0xE000_ED00) {
+        if let Some(p) = self.bus.borrow().get(0xE000_ED00) {
             if let Ok(s) = p.peripheral.try_borrow() {
                 return s.in_deep_sleep();
             }
@@ -584,7 +563,7 @@ impl Peripherals {
 
     /// Raise a fault through the SCB (CFSR/HFSR/BFAR + NVIC escalation).
     pub fn raise_fault(&self, sys: &System, kind: u32, addr: u32) {
-        if let Some(p) = Self::get_peripheral(&self.peripherals, 0xE000_ED00) {
+        if let Some(p) = self.bus.borrow().get(0xE000_ED00) {
             p.peripheral.borrow_mut().raise_fault(sys, kind, addr);
         }
     }

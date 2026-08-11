@@ -155,6 +155,10 @@ select:focus { outline: none; border-color: #7dd3fc; }
                     <option value="flash_demo">SPI flash + I2C (JEDEC/EEPROM/OLED)</option>
                     <option value="showcase">Peripheral Showcase (OLED·LCD·7-seg·RGB·buzzer·button)</option>
                 </select>
+                <select id="chipSelect" title="Chip / board (rp2040js-style: pick the peripheral map)">
+                    <option value="stm32f103c8">STM32F103C8 (builtin map)</option>
+                    <option value="stm32f105">STM32F105 (SVD: CAN1+CAN2)</option>
+                </select>
                 <button id="loadPresetBtn" class="primary">Load Preset</button>
                 <label class="file-btn">Load .bin / .hex <input type="file" id="binInput" accept=".bin,.hex"></label>
                 <label class="file-btn">Load .elf <input type="file" id="elfInput" accept=".elf"></label>
@@ -198,6 +202,7 @@ let runStartTs = 0;
 let runStartInst = 0;
 let totalInst = 0;
 let svdXml = null;
+let f105SvdXml = null;
 let autoBytes = [];        // bytes to auto-inject (one at a time, when UART RX is empty)
 let canInjected = false;   // CAN autopilot: true after the single frame is injected
 const CAN_RAM_FLAG = 0x200000b8;  // firmware 'canRxArmed' symbol (arduino_periph_test build)
@@ -210,6 +215,7 @@ let lastTotalInst = 0;
 
 (async () => {
     try { svdXml = await fetch('STM32F103.svd').then(r => r.text()); } catch (e) {}
+    try { f105SvdXml = await fetch('STM32F105xx.svd').then(r => r.text()); } catch (e) {}
 })();
 
 const PORTS = ['A', 'B', 'C', 'D'];
@@ -482,16 +488,21 @@ async function initEmulator(data, name, extDevices = {}) {
     firmwareData = data;
     setState('Initializing…');
     try {
+        const chipSel = $('chipSelect').value;
+        const chip = chipSel === 'stm32f105'
+            ? { name: 'STM32F105', svd: f105SvdXml || svdXml || undefined }
+            : 'stm32f103c8';
         emu = await createEmulator({
-            svd: svdXml || undefined,
+            chip,
+            svd: (chipSel === 'stm32f103c8' && svdXml) ? svdXml : undefined,
             firmware: data,
             flash_size: 0x10000,
             ram_size: 0x5000,
             vector_table: 0x08000000,
             ext_devices: extDevices,
         });
+        log(`Loaded ${name} on ${chipSel === 'stm32f105' ? 'STM32F105' : 'STM32F103C8'} (${data.length} bytes). PC=0x${emu.getRegisters().PC.toString(16).padStart(8, '0')}`);
         if (symbolsData) emu.setSymbols(symbolsData);
-        log(`Loaded ${name} (${data.length} bytes). PC=0x${emu.getRegisters().PC.toString(16).padStart(8, '0')}`);
         $('runBtn').disabled = false;
         $('stopBtn').disabled = true;
         $('resetBtn').disabled = false;

@@ -2,6 +2,7 @@ use std::sync::atomic::Ordering;
 use wasm_bindgen::prelude::*;
 
 mod system;
+pub mod bus;
 pub mod peripherals;
 pub mod ext_devices;
 
@@ -61,6 +62,21 @@ pub fn periph_read(addr: u32, width: u32) -> u32 {
 #[wasm_bindgen]
 pub fn periph_write(addr: u32, width: u32, value: u32) {
     sys().p.write(&*sys(), addr, width as u8, value);
+}
+
+/// Register a peripheral implemented entirely in JS (rp2040js-style custom
+/// chip). Callbacks are invoked with `(addr, size)` / `(addr, value, size)`
+/// where addr is the ABSOLUTE access address. Requires init()/init_svd() first;
+/// last registration wins on overlap. Returns false if not initialized.
+#[wasm_bindgen]
+pub fn register_js_peripheral(base: u32, size: u32, read: js_sys::Function, write: js_sys::Function) -> bool {
+    match unsafe { SYS.as_ref() } {
+        Some(sys) => {
+            sys.p.register_js(base, size, read, write);
+            true
+        }
+        None => false,
+    }
 }
 
 /// DMA periph->mem pump: pop `size` bytes from the peripheral at `addr` via

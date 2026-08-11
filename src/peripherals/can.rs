@@ -186,7 +186,8 @@ impl Peripheral for Can {
     fn write(&mut self, sys: &System, offset: u32, value: u32) {
         match offset {
             0x000 => {
-                let mask = 0x7F3F;
+                // F1 CAN_MCR writeable bits: INRQ..TTCM (0-7), RESET (15), DBF (16)
+                let mask = 0x0001_80FF;
                 self.mcr = (self.mcr & !mask) | (value & mask);
                 let inrq = value & 1;
                 let sleep = (value >> 1) & 1;
