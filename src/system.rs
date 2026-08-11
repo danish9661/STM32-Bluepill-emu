@@ -87,6 +87,9 @@ pub struct WasmSystem {
     pub p: Rc<Peripherals>,
     pending_dma: RefCell<Vec<DmaTransfer>>,
     absorb_buf: RefCell<Vec<u8>>,
+    /// Interrupt-dispatch policy state (batch budget, SVC mirror) — shared by
+    /// cli.mjs and emulator.js so both use one implementation.
+    pub intr: RefCell<crate::interrupts::IntrDispatch>,
 }
 
 impl WasmSystem {
@@ -97,7 +100,7 @@ impl WasmSystem {
         drop(ext);
         Self::register_software_spis(&p);
         Self::register_touchscreen_gpios(&p);
-        WasmSystem { p, pending_dma: RefCell::new(Vec::new()), absorb_buf: RefCell::new(Vec::new()) }
+        WasmSystem { p, pending_dma: RefCell::new(Vec::new()), absorb_buf: RefCell::new(Vec::new()), intr: RefCell::new(crate::interrupts::IntrDispatch::default()) }
     }
 
     pub fn new_svd(svd_xml: &str) -> Self {
@@ -107,7 +110,7 @@ impl WasmSystem {
         drop(ext);
         Self::register_software_spis(&p);
         Self::register_touchscreen_gpios(&p);
-        WasmSystem { p, pending_dma: RefCell::new(Vec::new()), absorb_buf: RefCell::new(Vec::new()) }
+        WasmSystem { p, pending_dma: RefCell::new(Vec::new()), absorb_buf: RefCell::new(Vec::new()), intr: RefCell::new(crate::interrupts::IntrDispatch::default()) }
     }
 
     fn register_software_spis(p: &Peripherals) {

@@ -41,15 +41,24 @@ semantics). Any new peripheral feature is cheaper here than in a merged build.
   touches RAM (`dma_absorb_periph` / `dma_push_periph` replace the per-chunk
   periph_read/periph_write JS loops; cli.mjs + emulator.js processDma are down to 3
   branches and 1 WASM crossing per transfer).
+- **DISPATCH POLICY LANDED** (2026-08-11): `src/interrupts.rs` now owns the parts of
+  interrupt delivery that aren't pure CPU transport — the per-batch 64-IRQ budget
+  (`intr_next()`, reset by step/step_batch) and the SVC frame mirror
+  (`intr_svc_enter/leave/depth`, depth-capped at 8, Cortex-M frame layout in Rust).
+  cli.mjs and emulator.js now share ONE dispatch implementation (they had drifted —
+  the xPSR-restore bug was cli-only), with Rust as the single source of policy.
+  Both JS files also unified on restore-from-stacked-frame (a handler that edits the
+  saved context is honored).
 - What remains: RAM→RAM moves still need Unicorn (`uc.mem_read`/`mem_write` — Rust has
   no CPU memory visibility without a shared-linear-memory map, which was retired as
   moot; DMA RAM traffic is per-transfer, not per-instruction).
-- **Interrupt delivery stays in JS** — bounded by the architecture: Unicorn owns the
-  CPU state (SP/registers/vector fetch), so framing R0-R3/R12/LR/PC/xPSR and the
+- **Registers/vector fetch stay in JS** — bounded by the architecture: Unicorn owns the
+  CPU state (SP/registers/vector fetch), so the R0-R3/R12/LR/PC/xPSR transport and the
   handler `emu_start` cannot move into Rust without a `uc_intr`-style injection API
   (not exposed by this Unicorn build) or stop+re-exec (which is what emulator.js
   already does, one `emu_start` per IRQ). The Rust side already owns all the policy:
-  pending/active sets, priority dispatch, SysTick debt accounting.
+  pending/active sets, priority dispatch, SysTick debt accounting, batch budget, SVC
+  mirror.
 
 ### 3. Evaluate a pure-Rust Cortex-M3 emulator (`cargo-cortex-m` / `mdl`)
 Replace Unicorn entirely: no C build, no `unicorn_arm` binary addon, coherent memory
