@@ -6,7 +6,7 @@ import { parseIntelHex, parseSymbolMap, parseElf } from './emulator.js';
 import * as periph from './stm32_bluepill_wasm.js';
 const { periph_read, periph_write, tick, step, step_batch, get_next_pending_interrupt, dma_pump_all, dma_take_absorbed, dma_get_pending_count,
 dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen,
-add_lcd, add_i2c_oled, can_inject_message, raise_fault,
+add_lcd, add_i2c_oled, reset_ext_devices, can_inject_message, raise_fault,
 init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
 set_intr_masks, clear_current_interrupt, finish_interrupt } = periph;
 
@@ -125,6 +125,7 @@ async function main() {
         console.log(`Loading firmware: ${romFile} (${firmware.length} bytes)`);
 
         // Register external devices from config BEFORE init()
+        reset_ext_devices();
         if (config.devices) {
             for (const [type, devs] of Object.entries(config.devices)) {
                 for (const d of devs || []) {
@@ -182,6 +183,7 @@ async function main() {
         console.log(`Loading firmware: ${firmwarePath} (${firmware.length} bytes)`);
 
         const fwDir = path.dirname(path.resolve(firmwarePath));
+        reset_ext_devices();
         for (const fn of ['eeprom.bin', 'spi_flash.bin']) {
             try {
                 const data = readFileSync(`${fwDir}/${fn}`);

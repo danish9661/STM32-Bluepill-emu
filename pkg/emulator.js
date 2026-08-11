@@ -214,7 +214,7 @@ export async function createEmulator(opts = {}) {
 
     const { periph_read, periph_write, tick, step_batch, get_next_pending_interrupt,
     dma_pump_all, dma_take_absorbed, dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested,
-    add_spi_flash, add_i2c_eeprom, add_touchscreen, add_lcd, add_i2c_oled, add_software_spi,
+    add_spi_flash, add_i2c_eeprom, add_touchscreen, add_lcd, add_i2c_oled, add_software_spi, reset_ext_devices,
     init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
     gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt, finish_interrupt,
     can_inject_message, adc_set_sim_value, gpio_set_analog, adc_set_rc_tau,
@@ -222,6 +222,7 @@ export async function createEmulator(opts = {}) {
     i2c_oled_fb, lcd_fb } = periph;
 
     // Register external devices BEFORE init()
+    reset_ext_devices();
     for (const d of ext_devices.spi_flash || []) {
         add_spi_flash(d.peripheral, parseHex(d.jedec_id), d.data ?? new Uint8Array(0), d.cs ?? null);
     }

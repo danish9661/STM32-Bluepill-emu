@@ -15,6 +15,25 @@ fn sys() -> &'static WasmSystem {
     unsafe { SYS.as_ref().expect("WasmSystem not initialized") }
 }
 
+/// Clear all registered ext devices (spi flash, eeprom, oled, lcd, touchscreen,
+/// fsmc, software spi). Call BEFORE adding devices for a new emulator instance —
+/// otherwise devices from a previous init (stale CS pins reading low on the
+/// fresh GPIO) shadow the new ones during SPI/I2C device selection.
+#[wasm_bindgen]
+pub fn reset_ext_devices() {
+    let mut ext = system::get_ext_devices().lock().unwrap();
+    ext.spi_flashes.clear();
+    ext.i2c_eeproms.clear();
+    ext.usart_probes.clear();
+    ext.lcds.clear();
+    ext.touchscreens.clear();
+    ext.displays.clear();
+    ext.i2c_oleds.clear();
+    ext.fsmc_nors.clear();
+    drop(ext);
+    system::get_software_spi_configs().lock().unwrap().clear();
+}
+
 /// Initialize the emulator with hardcoded peripheral map.
 /// Must be called after adding all ext devices (add_spi_flash, add_i2c_eeprom).
 /// Can be called multiple times to reset emulator state.

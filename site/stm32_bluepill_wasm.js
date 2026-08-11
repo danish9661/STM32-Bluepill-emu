@@ -469,6 +469,16 @@ export function raise_fault(kind, addr) {
 }
 
 /**
+ * Clear all registered ext devices (spi flash, eeprom, oled, lcd, touchscreen,
+ * fsmc, software spi). Call BEFORE adding devices for a new emulator instance —
+ * otherwise devices from a previous init (stale CS pins reading low on the
+ * fresh GPIO) shadow the new ones during SPI/I2C device selection.
+ */
+export function reset_ext_devices() {
+    wasm.reset_ext_devices();
+}
+
+/**
  * Set PRIMASK and BASEPRI values from Unicorn CPU state.
  * @param {number} primask
  * @param {number} basepri
