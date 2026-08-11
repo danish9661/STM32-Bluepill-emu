@@ -114,6 +114,12 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
 - **One dispatch implementation**: cli.mjs and emulator.js now use identical code — `intr_next()` loop (both had different loop shapes: cli capped at 64 with a for-loop, emulator drained all pending), SVC hook via `intr_svc_enter`, catch via `intr_svc_depth()/intr_svc_leave()`. Both also unified on **restore-from-stacked-frame** (was: cli restores from JS locals, emulator from frame read-back) — handler edits to the saved context are now honored in both, and the xPSR restore requirement is covered by the frame.
 - **CI** (`.github/workflows/test.yml`): `cmp` guard extended to all three `pkg`↔`site` artifacts (emulator.js, stm32_bluepill_wasm.js, stm32_bluepill_wasm_bg.wasm), stale "37/37" canary comment → 39/39, added the full 200M config run (`echo -n "AB" | node pkg/cli.mjs --config=... --max=200000000`) after the canary.
 - **Verified**: `tests/test_all.mjs` 224/224; canary 39/39; cli 200M 39/39 @ 9.64s; emulator.js (browser path, node smoke) 200M 39/39 incl. SVC/PendSV/EXTI/TIM — same run shape as the page's run loop.
+### 10. Emulator.js path in CI + stale test fixes (`tests/test_emulator_js.mjs`, `tests/test_esm.mjs`, `tests/test_firmware_formats.mjs`, `.github/workflows/test.yml`)
+- **New `tests/test_emulator_js.mjs`**: drives `createEmulator` + `run()` (the exact page code path, previously only manually verified) with the periph_test firmware + devices, UART RX "AB", CAN autopilot (chunked runs polling `canRxArmed` @ 0x200000b8 like site/index.html:537), asserts no FAIL + SUMMARY 39/39 — 200M in ~10s. Added to CI after the cli 200M step.
+- **test_esm.mjs fixed**: pointed at the current wasm glue (`stm32_periph_wasm.js` → `stm32_bluepill_wasm.js`), made a real pass/fail with exit code (ESM glue loads + Unicorn boots a cortex-m instance).
+- **test_firmware_formats.mjs fixed**: was committed-but-broken (needed a `comprehensive_test` ELF that no longer ships). Rewritten self-contained on the arduino_periph_test artifacts (hex + map committed, ELF copied by CI from site/) with cross-format consistency checks — hex SP == map _estack, hex/elf reset == map Reset_Handler, symbols present, garbage rejection — no hardcoded addresses (those drifted when the sketch/core changed).
+- **CI**: added "Firmware format + ESM smoke tests" step + "Emulator.js path (browser run loop) 200M firmware run" step.
+- Path A (single wasm module) documented as an experiment in docs/NEXT_PHASE.md §4 — see "Next Phase — Long-term Optimizations" item 1.
 ### Unit tests / firmware / misc
 - `tests/test_all.mjs`: 189 → **224 PASS** (DAC→ADC loopback via DOR1/2, TIM1 TRGO/CC1 + EXTI11 external triggers, EXTI 11 → ADC without SWSTART, DMA pump exports `dma_absorb_periph`/`dma_push_periph`; AWD IRQ needs ISER enable: `can_fire` requires the IRQ enabled in the NVIC, real hardware semantics — pending without enable stays pending).
 - Firmware: +SVC (synchronous, `svc #2` in setup()) +PendSV (ICSR-pended, fires next batch) → **39/39**; canary asserts 39.
@@ -136,6 +142,9 @@ cargo check                          # Rust sanity (fast)
 wasm-pack build --target web         # rebuild pkg/stm32_bluepill_wasm_bg* (Rust → wasm)
 node tests/test_all.mjs              # 224 unit tests
 node tests/canary.mjs                # regression canary: 39/39 firmware checks, ~25s
+node tests/test_emulator_js.mjs      # browser run-loop path: 200M, 39/39 (~10s)
+node tests/test_firmware_formats.mjs # hex/map/elf cross-format consistency
+node tests/test_esm.mjs              # ESM glue + unicorn boot smoke
 node tests/bench.mjs                 # benchmarks
 node pkg/cli.mjs tests/arduino_periph_test/build/arduino_periph_test.ino.elf   # run firmware
 echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml --max=200000000
@@ -156,15 +165,16 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 
 ### Immediate (ALL PASS as of this sprint; re-check after any change)
 1. **Verify nothing regressed** — rerun `tests/test_all.mjs` (224) + canary (`node tests/canary.mjs`, 39/39) after any edit to `src/` or `pkg/cli.mjs`
+2. **Path A spike** (next project): Rust → `wasm32-unknown-emscripten` staticlib with raw `#[no_mangle]` exports, link with emcc-compiled unicorn C, boot the firmware — see docs/NEXT_PHASE.md §4 for the acceptance gate. Dual-wasm stays the default until it passes.
 
 ### Known issue (monitor only, mostly explained)
 - Historical `Fatal: undefined Stack: undefined` at ~35M+ instructions — **identified (2026-08-11)**: that text is cli.mjs's own catch handler format (`console.error('Fatal:', e.name, e.message)` + `'Stack:', ...`, present since the initial commit), not any wasm/glue string — no "Fatal:" exists in unicorn_arm.cjs/.js, stm32_bluepill_wasm.js or the .wasm. So the incident was a JS promise rejection with a nameless value (bare string/undefined; wasm-bindgen panics throw `new Error(msg)` with name+message, so a REAL Rust/wasm panic would have printed differently). Current handler is hardened (`e?.name || '(no name)'`, `Type:` dump) so a re-occurrence is now diagnosable. Not reproduced across ~2.5B stress instructions (7 runs); monitor only.
 
 ## Next Phase — Long-term Optimizations
-1. **Single WASM module** (Emscripten): compile Rust peripheral code + Unicorn C into one `emcc` output (Linux toolchain; `wasm32-unknown-emscripten` target). Recommended-free approach elsewhere in docs
+1. **Single WASM module — "Path A" (EXPERIMENT status, see docs/NEXT_PHASE.md §4)**: compile Rust peripherals + Unicorn C into one `emcc` output (`wasm32-unknown-emscripten` + `staticlib` + raw `#[no_mangle]` exports — wasm-bindgen does NOT support the emscripten target, so the ~70 exports need a shim; fetch unicorn C source, `third_party/unicorn/` is gitignored). Dual-wasm stays the default until the acceptance gate passes (224/224, 39/39 both paths, IPS within ~2× of 22M). Gain is architectural, not speed.
 2. ~~**Replace mem hooks with shared linear memory**~~ — **retired (moot)**: `uc_mem_map_ptr(mem, periph_range)` would remove the JS crossing, but peripheral access was measured at 0.001 accesses/instruction (~0.1% of runtime) — no measurable win available
-3. **DMA + interrupts fully in Rust** (no JS round-trip; `uc_intr` or stop+re-exec)
-4. **Alternative: pure-Rust Cortex-M emulator** (cargo-cortex-m / mdl) — evaluate vs porting Unicorn
+3. **DMA + interrupts fully in Rust** (no JS round-trip; `uc_intr` or stop+re-exec) — mostly landed (plan-based pump, intr dispatch §9); remaining RAM→RAM moves need Unicorn memory access
+4. **Pure-Rust Cortex-M core — "Path B" (deferred, do NOT start)**: rewrite Unicorn's core (mdl / cargo-cortex-m, or unicorn's in-progress Rust core upstream). Highest risk (TCG perf parity unproven, decoder drift); only when a feature needs CPU-core changes, or upstream ships it free
 
 ## Files Most Relevant
 - `src/peripherals/i2c.rs` — I2C state machine
