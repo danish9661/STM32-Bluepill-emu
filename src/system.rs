@@ -86,6 +86,7 @@ pub fn set_dma_intr_info(stream_idx: usize, irq: i32, flags: u8) {
 pub struct WasmSystem {
     pub p: Rc<Peripherals>,
     pending_dma: RefCell<Vec<DmaTransfer>>,
+    absorb_buf: RefCell<Vec<u8>>,
 }
 
 impl WasmSystem {
@@ -96,7 +97,7 @@ impl WasmSystem {
         drop(ext);
         Self::register_software_spis(&p);
         Self::register_touchscreen_gpios(&p);
-        WasmSystem { p, pending_dma: RefCell::new(Vec::new()) }
+        WasmSystem { p, pending_dma: RefCell::new(Vec::new()), absorb_buf: RefCell::new(Vec::new()) }
     }
 
     pub fn new_svd(svd_xml: &str) -> Self {
@@ -106,7 +107,7 @@ impl WasmSystem {
         drop(ext);
         Self::register_software_spis(&p);
         Self::register_touchscreen_gpios(&p);
-        WasmSystem { p, pending_dma: RefCell::new(Vec::new()) }
+        WasmSystem { p, pending_dma: RefCell::new(Vec::new()), absorb_buf: RefCell::new(Vec::new()) }
     }
 
     fn register_software_spis(p: &Peripherals) {
@@ -156,6 +157,37 @@ impl WasmSystem {
     pub fn take_pending_dma_transfers(&self) -> Vec<DmaTransfer> {
         let mut pending = self.pending_dma.borrow_mut();
         std::mem::take(&mut *pending)
+    }
+
+    /// DMA pump helper: absorb `size` bytes from the peripheral at `addr`
+    /// (periph_read chunks <= 4, little-endian packed) into the side buffer.
+    /// Returns the byte offset for dma_absorb_take(). Absorbs immediately so
+    /// JS only writes the result to RAM once per transfer.
+    pub fn dma_absorb_store(&self, addr: u32, size: usize) -> usize {
+        let mut buf = self.absorb_buf.borrow_mut();
+        let off = buf.len();
+        let mut j = 0u32;
+        while (j as usize) < size {
+            let chunk = std::cmp::min(4, size as u32 - j);
+            let val = self.p.read(&*self, addr, chunk as u8);
+            for k in 0..chunk {
+                buf.push(((val >> (k * 8)) & 0xFF) as u8);
+            }
+            j += chunk;
+        }
+        off
+    }
+
+    /// Fetch [offset, offset+len) of the absorbed bytes and clear the buffer.
+    pub fn dma_absorb_take(&self, offset: usize, len: usize) -> Vec<u8> {
+        let mut buf = self.absorb_buf.borrow_mut();
+        let out = if offset < buf.len() {
+            buf[offset..buf.len().min(offset + len)].to_vec()
+        } else {
+            Vec::new()
+        };
+        buf.clear();
+        out
     }
 
     pub fn mark_dma_completed(&self, stream_idx: usize, _success: bool) {

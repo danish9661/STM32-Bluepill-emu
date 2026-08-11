@@ -213,10 +213,10 @@ export async function createEmulator(opts = {}) {
     const periph = await getPeriph();
 
     const { periph_read, periph_write, tick, step_batch, get_next_pending_interrupt,
-    dma_get_all_pending, dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested,
+    dma_pump_all, dma_take_absorbed, dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested,
     add_spi_flash, add_i2c_eeprom, add_touchscreen, add_lcd, add_i2c_oled, add_software_spi,
     init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
-    gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt, nvic_systick_take,
+    gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt, finish_interrupt,
     can_inject_message, adc_set_sim_value, gpio_set_analog, adc_set_rc_tau,
     touchscreen_set_touch, pwm_duty, raise_fault,
     i2c_oled_fb, lcd_fb } = periph;
@@ -466,34 +466,21 @@ export async function createEmulator(opts = {}) {
     uc.hook_add(Module.HOOK_INTR, intrHook, null);
 
     const processDma = () => {
-        const flat = dma_get_all_pending();
-        let doneBits = 0;
-        for (let i = 0; i + 7 <= flat.length; i += 7) {
-            const pending = flat.slice(i, i + 7);
-            const dir = pending[0];
-            const stream = pending[1];
-            const src = pending[2];
-            const dst = pending[3];
-            const size = pending[4];
-            const peri_addr = pending[5] || 0;
-            const peripheral = pending[6] || 0;
-            doneBits |= 1 << stream;
+        const plan = dma_pump_all();
+        for (let i = 0; i + 4 <= plan.length; i += 4) {
+            const op = plan[i], a = plan[i + 1], b = plan[i + 2], c = plan[i + 3];
             try {
-                if (dir === 2 || !peripheral) {
-                    const data = uc.mem_read(BigInt(src), size);
-                    uc.mem_write(BigInt(dst), data);
-                } else if (dir === 0) {
-                    // periph -> mem (DmaDir::Read): Rust absorbs bytes, JS stores in RAM
-                    uc.mem_write(BigInt(dst), dma_absorb_periph(peri_addr, size));
-                } else {
-                    // mem -> periph (DmaDir::Write): JS reads RAM, Rust pushes bytes
-                    dma_push_periph(peri_addr, uc.mem_read(BigInt(src), size));
+                if (op === 0) {
+                    uc.mem_write(BigInt(b), uc.mem_read(BigInt(a), c));
+                } else if (op === 1) {
+                    uc.mem_write(BigInt(a), dma_take_absorbed(c, b));
+                } else if (op === 2) {
+                    dma_push_periph(c, uc.mem_read(BigInt(a), b));
+                } else if (op === 3) {
+                    dma_set_completed_many(a);
                 }
-            } catch (e) {
-                // ignore per-transfer errors
-            }
+            } catch (e) { /* ignore per-transfer errors */ }
         }
-        if (doneBits) dma_set_completed_many(doneBits);
     };
 
     const processInterrupts = () => {
@@ -528,8 +515,7 @@ export async function createEmulator(opts = {}) {
             try {
                 uc.emu_start(handler_pc, 0, 0, DEFAULT_MAX_BATCH);
             } catch (e) { /* BX LR EXC_RETURN handled by intrHook */ }
-            clear_current_interrupt();
-            if (irq === -1) { while (nvic_systick_take()) { /* re-pended below */ } }
+            finish_interrupt(irq);
             const savedFrame = uc.mem_read(BigInt(savedAt - 32), 32);
             const savedSv = new DataView(savedFrame.buffer, savedFrame.byteOffset, savedFrame.byteLength);
             uc.reg_write_i32(Module.ARM_REG_R0, savedSv.getUint32(28, true));

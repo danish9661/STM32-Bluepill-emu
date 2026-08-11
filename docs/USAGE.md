@@ -43,6 +43,9 @@ emu.adcSetRcTau(cycles);   // RC sample-and-hold time constant in ADC cycles (1 
 emu.setTouch(periphAddr, x, y, pressure);  // ADS7846 touch injection
 emu.periphRead(addr, width); emu.periphWrite(addr, width, value); // raw register access
 emu.memRead32(addr);       // read emulated RAM/Flash word (e.g. firmware flags)
+emu.onPeriphWrite(fn);     // tap every peripheral write: fn(addr, width, value) — page-side drivers (7-seg shift registers, CS tracking) watch buses like real hardware
+emu.i2cOledFb('I2C1', 0x3C); // 128×64 monochrome framebuffer readback from an i2c_oled device (byte = 8 vertical pixels)
+emu.lcdFb('SPI1');         // 128×64 byte-per-pixel framebuffer readback from an lcd device
 ```
 
 ### `ext_devices` — peripherals the STM32 talks to over SPI/I2C
@@ -65,6 +68,15 @@ enabled (`BCR.MBKEN`; NOR writes also require `BCR.WREN`). Unmapped data accesse
 (no bank backing or bank disabled) are raised as faults, and SVC/PendSV/hard-fault
 handlers in firmware work normally (faults escalate to HardFault unless the SHCSR
 enable bits are set via `SCB.SHCSR`).
+
+### GPIO inputs, EXTI and page-side drivers
+
+- `emu.gpioSetInput(port, pin, true|false)` sets an external input level; a level
+  **change fires EXTI edges** just like a real push-button (IMR/RTSR/FTSR gated), so
+  `attachInterrupt(pin, isr, RISING)` in firmware works with page-driven buttons.
+- External peripherals stay on the JS side: register `emu.onPeriphWrite(fn)` and watch
+  the bus (e.g. SPI1 DR while a CS pin is low) to decode shift-register chains, then
+  render from `i2cOledFb`/`lcdFb` — the WASM core never knows about the widget.
 
 ## CLI (`pkg/cli.mjs`)
 

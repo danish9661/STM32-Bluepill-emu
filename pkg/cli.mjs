@@ -4,11 +4,11 @@ import path from 'path';
 import * as yaml from 'js-yaml';
 import { parseIntelHex, parseSymbolMap, parseElf } from './emulator.js';
 import * as periph from './stm32_bluepill_wasm.js';
-const { periph_read, periph_write, tick, step, step_batch, get_next_pending_interrupt, dma_get_all_pending, 
+const { periph_read, periph_write, tick, step, step_batch, get_next_pending_interrupt, dma_pump_all, dma_take_absorbed, dma_get_pending_count,
 dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen,
 add_lcd, add_i2c_oled, can_inject_message, raise_fault,
 init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
-set_intr_masks, clear_current_interrupt, nvic_systick_take } = periph;
+set_intr_masks, clear_current_interrupt, finish_interrupt } = periph;
 
 periph.initSync({ module: readFileSync(new URL('./stm32_bluepill_wasm_bg.wasm', import.meta.url)) });
 
@@ -404,34 +404,26 @@ async function main() {
     uc.hook_add(Module.HOOK_INTR, intrHook, null);
 
     const processDma = () => {
-        const flat = dma_get_all_pending();
-        let doneBits = 0;
-        for (let i = 0; i + 7 <= flat.length; i += 7) {
-            const pending = flat.slice(i, i + 7);
-            const dir = pending[0];
-            const stream = pending[1];
-            const src = pending[2];
-            const dst = pending[3];
-            const size = pending[4];
-            const peri_addr = pending[5] || 0;
-            const peripheral = pending[6] || 0;
-            doneBits |= 1 << stream;
+        const plan = dma_pump_all();
+        for (let i = 0; i + 4 <= plan.length; i += 4) {
+            const op = plan[i], a = plan[i + 1], b = plan[i + 2], c = plan[i + 3];
             try {
-                if (dir === 2 || !peripheral) {
-                    const data = uc.mem_read(BigInt(src), size);
-                    uc.mem_write(BigInt(dst), data);
-                } else if (dir === 0) {
-                    // periph -> mem (DmaDir::Read): Rust absorbs bytes, JS stores in RAM
-                    uc.mem_write(BigInt(dst), dma_absorb_periph(peri_addr, size));
-                } else {
-                    // mem -> periph (DmaDir::Write): JS reads RAM, Rust pushes bytes
-                    dma_push_periph(peri_addr, uc.mem_read(BigInt(src), size));
+                if (op === 0) {
+                    // RAM -> RAM memcpy
+                    uc.mem_write(BigInt(b), uc.mem_read(BigInt(a), c));
+                } else if (op === 1) {
+                    // periph -> mem: Rust absorbed the bytes, JS stores them
+                    uc.mem_write(BigInt(a), dma_take_absorbed(c, b));
+                } else if (op === 2) {
+                    // mem -> periph: JS reads RAM, Rust pushes the bytes
+                    dma_push_periph(c, uc.mem_read(BigInt(a), b));
+                } else if (op === 3) {
+                    dma_set_completed_many(a);
                 }
             } catch (e) {
                 console.warn('DMA error:', e.message);
             }
         }
-        if (doneBits) dma_set_completed_many(doneBits);
     };
 
     const processInterrupts = () => {
@@ -457,8 +449,7 @@ async function main() {
             } catch (e) {
                 // Handler crashed on BX LR (EXC_RETURN not supported)
             }
-            clear_current_interrupt();
-            if (irq === -1) { while (nvic_systick_take()) { /* re-pended: more 1ms ticks this batch */ } }
+            finish_interrupt(irq);
             uc.reg_write_i32(Module.ARM_REG_R0, savedR0);
             uc.reg_write_i32(Module.ARM_REG_R1, savedR1);
             uc.reg_write_i32(Module.ARM_REG_R2, savedR2);
@@ -481,7 +472,7 @@ async function main() {
     let canInjected = false;
 
     while (!stopRequested) {
-        const dmaBusy = dma_get_all_pending().length > 0;
+        const dmaBusy = dma_get_pending_count() > 0;
         while (stdinQueue.length > 0 && uart_rx_pending(uartAddr) === 0 && !dmaBusy) { const b = stdinQueue.shift(); uart_rx_byte(uartAddr, b); }
 
         processDma();
