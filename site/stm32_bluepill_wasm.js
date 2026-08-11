@@ -192,6 +192,27 @@ export function dma_get_pending_count() {
 }
 
 /**
+ * Rust-side DMA pump: pops ALL pending transfers, performs the peripheral
+ * byte absorb/push internally (periph_read/periph_write chunked), and returns
+ * a flat op plan for JS:
+ *   [op, a, b, c] quadruples:
+ *     op 0 = RAM memcpy (a=src, b=dst, c=size)          -> JS mem_read + mem_write
+ *     op 1 = write absorbed bytes (a=dst, b=size, c=off) -> JS mem_write(dma_take_absorbed(off,size))
+ *     op 2 = read RAM then push to periph (a=src, b=size, c=periAddr) -> JS mem_read + dma_push_periph
+ *     op 3 = done (a=completed stream bits)             -> JS dma_set_completed_many(a)
+ * The plan is built in queue order; absorbed bytes land in a side buffer
+ * fetched with dma_take_absorbed(). Completion is signaled LAST so DMA IRQs
+ * fire only after every RAM move has landed.
+ * @returns {Uint32Array}
+ */
+export function dma_pump_all() {
+    const ret = wasm.dma_pump_all();
+    var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
+}
+
+/**
  * DMA mem->periph pump: push `data` bytes into the peripheral at `addr` via
  * the normal periph_write path (chunks <= 4, little-endian unpacked), so JS
  * only reads RAM once per transfer instead of one crossing per chunk.
@@ -217,6 +238,30 @@ export function dma_set_completed(stream_idx, success) {
  */
 export function dma_set_completed_many(bits) {
     wasm.dma_set_completed_many(bits);
+}
+
+/**
+ * Fetch a slice of the bytes absorbed by the last dma_pump_all() (offset,
+ * length) so JS can mem_write them into RAM. Clears the whole buffer.
+ * @param {number} offset
+ * @param {number} len
+ * @returns {Uint8Array}
+ */
+export function dma_take_absorbed(offset, len) {
+    const ret = wasm.dma_take_absorbed(offset, len);
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
+}
+
+/**
+ * Call after an ISR returns: pops the active priority stack, and for SysTick
+ * (irq == -1) also drains any unconsumed 1ms debt ticks internally (re-pends
+ * each), so JS needs no nvic_systick_take loop.
+ * @param {number} irq
+ */
+export function finish_interrupt(irq) {
+    wasm.finish_interrupt(irq);
 }
 
 /**

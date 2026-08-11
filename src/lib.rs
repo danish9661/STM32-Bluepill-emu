@@ -5,7 +5,7 @@ mod system;
 pub mod peripherals;
 pub mod ext_devices;
 
-use system::WasmSystem;
+use system::{DmaDir, WasmSystem};
 
 // We use static mut since WASM is single-threaded — this allows re-initialization.
 static mut SYS: Option<WasmSystem> = None;
@@ -141,6 +141,18 @@ pub fn clear_current_interrupt() {
     sys().p.nvic.borrow_mut().clear_current_interrupt();
 }
 
+/// Call after an ISR returns: pops the active priority stack, and for SysTick
+/// (irq == -1) also drains any unconsumed 1ms debt ticks internally (re-pends
+/// each), so JS needs no nvic_systick_take loop.
+#[wasm_bindgen]
+pub fn finish_interrupt(irq: i32) {
+    let mut nvic = sys().p.nvic.borrow_mut();
+    nvic.clear_current_interrupt();
+    if irq == -1 {
+        while nvic.systick_take() {}
+    }
+}
+
 /// Re-pend SysTick if unconsumed 1ms ticks remain (fast millis/delay()).
 #[wasm_bindgen]
 pub fn nvic_systick_take() -> bool {
@@ -150,6 +162,48 @@ pub fn nvic_systick_take() -> bool {
 #[wasm_bindgen]
 pub fn dma_get_pending_count() -> u32 {
     sys().pending_dma_count() as u32
+}
+
+/// Rust-side DMA pump: pops ALL pending transfers, performs the peripheral
+/// byte absorb/push internally (periph_read/periph_write chunked), and returns
+/// a flat op plan for JS:
+///   [op, a, b, c] quadruples:
+///     op 0 = RAM memcpy (a=src, b=dst, c=size)          -> JS mem_read + mem_write
+///     op 1 = write absorbed bytes (a=dst, b=size, c=off) -> JS mem_write(dma_take_absorbed(off,size))
+///     op 2 = read RAM then push to periph (a=src, b=size, c=periAddr) -> JS mem_read + dma_push_periph
+///     op 3 = done (a=completed stream bits)             -> JS dma_set_completed_many(a)
+/// The plan is built in queue order; absorbed bytes land in a side buffer
+/// fetched with dma_take_absorbed(). Completion is signaled LAST so DMA IRQs
+/// fire only after every RAM move has landed.
+#[wasm_bindgen]
+pub fn dma_pump_all() -> Vec<u32> {
+    let sys = sys();
+    let mut plan: Vec<u32> = Vec::new();
+    let mut done_bits = 0u32;
+    for t in sys.take_pending_dma_transfers() {
+        done_bits |= 1 << t.stream_idx;
+        if t.direction == DmaDir::MemCopy || !t.peripheral {
+            plan.extend([0, t.src, t.dst, t.size as u32]);
+        } else if t.direction == DmaDir::Read {
+            // periph -> mem: absorb now, JS writes the bytes to RAM
+            let off = sys.dma_absorb_store(t.peri_addr, t.size);
+            plan.extend([1, t.dst, t.size as u32, off as u32]);
+        } else {
+            // mem -> periph: JS reads RAM, then pushes via dma_push_periph
+            plan.extend([2, t.src, t.size as u32, t.peri_addr]);
+        }
+    }
+    if done_bits != 0 {
+        plan.extend([3, done_bits, 0, 0]);
+    }
+    plan
+}
+
+/// Fetch a slice of the bytes absorbed by the last dma_pump_all() (offset,
+/// length) so JS can mem_write them into RAM. Clears the whole buffer.
+#[wasm_bindgen]
+pub fn dma_take_absorbed(offset: u32, len: u32) -> Vec<u8> {
+    sys().dma_absorb_take(offset as usize, len as usize)
 }
 
 #[wasm_bindgen]

@@ -28,9 +28,12 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 │    7. is_watchdog_reset_requested() check                           │
 │                                                                      │
 │  DMA crosses the WASM boundary:                                      │
-│    Rust queues DmaTransfer → JS dma_get_all_pending() →              │
-│    periph bytes pumped in Rust (dma_absorb_periph / dma_push_periph),│
-│    RAM moves via uc.mem_read/mem_write → dma_set_completed_many()    │
+│    Rust queues DmaTransfer → dma_pump_all() pops the whole queue,     │
+│    absorbs/pushes periph bytes internally (dma_absorb_store /         │
+│    dma_push_periph) and returns a flat op plan for JS: [op,a,b,c]:    │
+│    op0=RAM memcpy, op1=store absorbed (dma_take_absorbed),            │
+│    op2=read RAM then push, op3=done bits (dma_set_completed_many);    │
+│    JS only touches Unicorn RAM via uc.mem_read/mem_write              │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -109,7 +112,7 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
 3. **hi2c->Mode patch** (cli.mjs `memWriteHook`): when `0x40005410` (I2C1 DR) is written with the R-bit set, patch RAM `*(0x200002d8)+0x3D` to 0x22 — HAL I2C1 ISR requires `hi2c->Mode == 0x22` (MASTER_RX) before reading DR
 4. **Interrupt frame saved in JS closure variables** (not memory): stack frames get clobbered by handler PUSH; save R0-R3,R12,LR,PC,xPSR in JS locals, restore after handler — restoring xPSR is REQUIRED (see §7: the handler's emu_start clobbers APSR; dropping it mis-evaluates any cmp/beq that straddles the batch boundary)
 5. **64-IRQ loop in `processInterrupts()`** (cli.mjs; emulator.js drains all pending): prevents starvation when high-priority IRQ re-pends itself — paired with the NVIC `last_popped` fairness, a hot IRQ (TXE) alternates with other pendings instead of consuming every slot (e.g. CAN TX IRQ37 prio16 vs I2C EV IRQ31 prio32)
-6. **DMA**: batched `dma_get_all_pending()` / `dma_set_completed_many()` — one WASM call instead of 7; the **periph byte pump now lives in Rust** (`dma_absorb_periph(addr,size)` / `dma_push_periph(addr,bytes)`, keeping the exact per-chunk periph_read/periph_write call pattern) so JS only touches RAM: periph→mem = `uc.mem_write(dst, absorb(peri_addr,size))`, mem→periph = `push(peri_addr, uc.mem_read(src,size))`, dir 2 / non-peripheral = raw memcpy. Note: Vec<u8> returns arrive in JS as a plain number array, not Uint8Array (test_all joins bytes with String.fromCharCode)
+6. **DMA**: the **whole pump loop lives in Rust** — `dma_pump_all()` pops the queue, absorbs periph→mem bytes internally (`dma_absorb_store`/`dma_take_absorbed` side buffer) and returns a flat op plan for JS (`[op,a,b,c]`: 0=RAM memcpy, 1=store absorbed, 2=read RAM then `dma_push_periph`, 3=done bits → `dma_set_completed_many`) — JS only executes `uc.mem_read`/`mem_write` on Unicorn RAM, exactly one crossing per RAM op. Completion is signaled LAST (op 3) so TC IRQs fire only after data lands. The `dma_absorb_periph`/`dma_push_periph` chunked-call pattern is preserved for tests. ISR return is one Rust call: `finish_interrupt(irq)` = `clear_current_interrupt()` + SysTick debt drain (JS `nvic_systick_take` loop gone). Note: Vec<u8> returns arrive in JS as a plain number array, not Uint8Array (test_all joins bytes with String.fromCharCode)
 
 ## To Run / Rebuild
 ```bash
@@ -138,8 +141,8 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 ### Immediate (ALL PASS as of this sprint; re-check after any change)
 1. **Verify nothing regressed** — rerun `tests/test_all.mjs` (210) + canary (`node tests/canary.mjs`, 39/39) after any edit to `src/` or `pkg/cli.mjs`
 
-### Known issue (monitor only)
-- WASM abort (`Fatal: undefined Stack: undefined`) at ~35M+ instructions — seen once, **not reproducible** across ~2.5B stress instructions (7 runs). Re-investigate if it re-occurs
+### Known issue (monitor only, mostly explained)
+- Historical `Fatal: undefined Stack: undefined` at ~35M+ instructions — **identified (2026-08-11)**: that text is cli.mjs's own catch handler format (`console.error('Fatal:', e.name, e.message)` + `'Stack:', ...`, present since the initial commit), not any wasm/glue string — no "Fatal:" exists in unicorn_arm.cjs/.js, stm32_bluepill_wasm.js or the .wasm. So the incident was a JS promise rejection with a nameless value (bare string/undefined; wasm-bindgen panics throw `new Error(msg)` with name+message, so a REAL Rust/wasm panic would have printed differently). Current handler is hardened (`e?.name || '(no name)'`, `Type:` dump) so a re-occurrence is now diagnosable. Not reproduced across ~2.5B stress instructions (7 runs); monitor only.
 
 ## Next Phase — Long-term Optimizations
 1. **Single WASM module** (Emscripten): compile Rust peripheral code + Unicorn C into one `emcc` output (Linux toolchain; `wasm32-unknown-emscripten` target). Recommended-free approach elsewhere in docs
