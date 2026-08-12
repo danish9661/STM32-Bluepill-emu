@@ -105,6 +105,41 @@ async function main() {
     const MUnicorn = await getMUnicorn();
     const Module = await MUnicorn({});
 
+    // unicorn_arm exposes the raw uc_reg_read_batch/write_batch C functions but
+    // no marshalling wrapper — allocate the id/pointer/value arrays so a whole
+    // register set crosses the boundary once instead of once per register
+    // (IRQ dispatch used ~17 individual crossings; now 2).
+    const regsRead = (uc, regIds) => {
+        const n = regIds.length;
+        const handle = Module.getValue(uc.handle_ptr, '*');
+        const idsPtr = Module._malloc(n * 4);
+        const valsPtr = Module._malloc(n * 4);
+        const ptrsPtr = Module._malloc(n * 4);
+        const out = new Array(n);
+        for (let i = 0; i < n; i++) {
+            Module.setValue(idsPtr + i * 4, regIds[i], 'i32');
+            Module.setValue(ptrsPtr + i * 4, valsPtr + i * 4, 'i32');
+        }
+        Module.ccall('uc_reg_read_batch', 'number', ['number', 'number', 'number', 'number'], [handle, idsPtr, ptrsPtr, n]);
+        for (let i = 0; i < n; i++) out[i] = Module.getValue(valsPtr + i * 4, 'i32');
+        Module._free(idsPtr); Module._free(valsPtr); Module._free(ptrsPtr);
+        return out;
+    };
+    const regsWrite = (uc, regIds, values) => {
+        const n = regIds.length;
+        const handle = Module.getValue(uc.handle_ptr, '*');
+        const idsPtr = Module._malloc(n * 4);
+        const valsPtr = Module._malloc(n * 4);
+        const ptrsPtr = Module._malloc(n * 4);
+        for (let i = 0; i < n; i++) {
+            Module.setValue(idsPtr + i * 4, regIds[i], 'i32');
+            Module.setValue(valsPtr + i * 4, values[i], 'i32');
+            Module.setValue(ptrsPtr + i * 4, valsPtr + i * 4, 'i32');
+        }
+        Module.ccall('uc_reg_write_batch', 'number', ['number', 'number', 'number', 'number'], [handle, idsPtr, ptrsPtr, n]);
+        Module._free(idsPtr); Module._free(valsPtr); Module._free(ptrsPtr);
+    };
+
     let firmware;
     let fwBase = null;
     let fwRegions = null;
@@ -383,6 +418,7 @@ async function main() {
             uc.reg_write_i32(Module.ARM_REG_R12, sv.getUint32(12, true));
             uc.reg_write_i32(Module.ARM_REG_LR, sv.getUint32(8, true));
             uc.reg_write_i32(Module.ARM_REG_PC, sv.getUint32(4, true) | 1);
+            uc.reg_write_i32(Module.ARM_REG_XPSR, sv.getUint32(0, true));
             uc.reg_write_i32(Module.ARM_REG_SP, sp + 32);
         } else if (intno === 2) {
             // SVC: stack the interrupted context (mirror + real stack frame,
@@ -441,15 +477,12 @@ async function main() {
             const irq = intr_next();
             if (irq <= -100) return;
 
-            const savedAt = uc.reg_read_i32(Module.ARM_REG_SP);
-            const pc = uc.reg_read_i32(Module.ARM_REG_PC);
-            const lr = uc.reg_read_i32(Module.ARM_REG_LR);
-            const xpsr = uc.reg_read_i32(Module.ARM_REG_XPSR);
-            const r0 = uc.reg_read_i32(Module.ARM_REG_R0);
-            const r1 = uc.reg_read_i32(Module.ARM_REG_R1);
-            const r2 = uc.reg_read_i32(Module.ARM_REG_R2);
-            const r3 = uc.reg_read_i32(Module.ARM_REG_R3);
-            const r12 = uc.reg_read_i32(Module.ARM_REG_R12);
+            const regs = regsRead(uc, [
+                Module.ARM_REG_SP, Module.ARM_REG_PC, Module.ARM_REG_LR, Module.ARM_REG_XPSR,
+                Module.ARM_REG_R0, Module.ARM_REG_R1, Module.ARM_REG_R2, Module.ARM_REG_R3,
+                Module.ARM_REG_R12,
+            ]);
+            const [savedAt, pc, lr, xpsr, r0, r1, r2, r3, r12] = regs;
             const frame = new Uint8Array(32);
             const sv = new DataView(frame.buffer);
             sv.setUint32(0, xpsr, true);
@@ -461,10 +494,8 @@ async function main() {
             sv.setUint32(24, r1, true);
             sv.setUint32(28, r0, true);
             uc.mem_write(BigInt(savedAt - 32), frame);
-            uc.reg_write_i32(Module.ARM_REG_SP, savedAt - 32);
             const handler_pc = read32(vector_table + 4 * (16 + irq));
-            uc.reg_write_i32(Module.ARM_REG_LR, 0xFFFFFFF9);
-            uc.reg_write_i32(Module.ARM_REG_PC, handler_pc);
+            regsWrite(uc, [Module.ARM_REG_SP, Module.ARM_REG_LR, Module.ARM_REG_PC], [savedAt - 32, 0xFFFFFFF9, handler_pc]);
             try {
                 uc.emu_start(BigInt(handler_pc), 0n, 0n, 20000);
             } catch (e) {
@@ -472,19 +503,20 @@ async function main() {
             }
             finish_interrupt(irq);
             // Restore from the stacked frame (not JS locals) so a handler that
-            // edits the saved context is honored; xPSR restore is REQUIRED —
+            // edits the saved context is honored. xPSR restore is REQUIRED —
             // the handler's emu_start clobbers APSR, and a cmp/beq pair split
             // across a batch boundary would evaluate with the handler's flags.
             const savedFrame = uc.mem_read(BigInt(savedAt - 32), 32);
             const savedSv = new DataView(savedFrame.buffer, savedFrame.byteOffset, savedFrame.byteLength);
-            uc.reg_write_i32(Module.ARM_REG_R0, savedSv.getUint32(28, true));
-            uc.reg_write_i32(Module.ARM_REG_R1, savedSv.getUint32(24, true));
-            uc.reg_write_i32(Module.ARM_REG_R2, savedSv.getUint32(20, true));
-            uc.reg_write_i32(Module.ARM_REG_R3, savedSv.getUint32(16, true));
-            uc.reg_write_i32(Module.ARM_REG_R12, savedSv.getUint32(12, true));
-            uc.reg_write_i32(Module.ARM_REG_LR, savedSv.getUint32(8, true));
-            uc.reg_write_i32(Module.ARM_REG_PC, savedSv.getUint32(4, true) | 1);
-            uc.reg_write_i32(Module.ARM_REG_SP, savedAt);
+            regsWrite(uc, [
+                Module.ARM_REG_R0, Module.ARM_REG_R1, Module.ARM_REG_R2, Module.ARM_REG_R3,
+                Module.ARM_REG_R12, Module.ARM_REG_LR, Module.ARM_REG_PC, Module.ARM_REG_XPSR,
+                Module.ARM_REG_SP,
+            ], [
+                savedSv.getUint32(28, true), savedSv.getUint32(24, true), savedSv.getUint32(20, true),
+                savedSv.getUint32(16, true), savedSv.getUint32(12, true), savedSv.getUint32(8, true),
+                savedSv.getUint32(4, true) | 1, savedSv.getUint32(0, true), savedAt,
+            ]);
             processDma();
         }
     };
