@@ -17,7 +17,7 @@ peripherals linked together, shared linear memory) that would eliminate the JS b
 - The "single WASM module" idea was therefore evaluated as **not worth the rebuild** —
   the JS boundary was the whole cost, and it is already gone without any rebuild.
 
-Current status: **224/224 unit tests**, **39/39 firmware checks**, canary ~25s at 100M.
+Current status: **236/236 unit tests**, **39/39 firmware checks**, canary ~25s at 100M.
 
 ## Retired (moot — do not redo)
 
@@ -68,7 +68,7 @@ model (no JS hooks at all — peripherals are plain memory reads). Measure again
 ### 4. Single WASM module (Emscripten link) — "Path A", EXPERIMENT status
 > **Status (2026-08-11): planned experiment, NOT in progress.** The dual-wasm
 > setup (unicorn_arm.cjs/.js + stm32_bluepill_wasm_bg.wasm) stays the default
-> and the shipping artifact until Path A is proven: 224/224 unit tests, 39/39
+> and the shipping artifact until Path A is proven: 236/236 unit tests, 39/39
 > canary, 200M runs on BOTH paths (cli + emulator.js), IPS within ~2× of the
 > ~22M baseline, and the browser page working. Rollback is free — Path A lives
 > on a branch, the current tree is untouched.
@@ -96,7 +96,7 @@ memory reads through `uc_mem_map_ptr` on a shared heap).
 **Acceptance gate (in order):**
 1. Rust → `wasm32-unknown-emscripten` builds as a staticlib with raw exports
 2. Links with emcc-compiled unicorn C into one module; smoke-boots firmware
-3. `tests/test_all.mjs` 224/224 against the merged module
+3. `tests/test_all.mjs` 236/236 against the merged module
 4. canary 39/39 + 200M cli run + `tests/test_emulator_js.mjs` (browser path)
 5. IPS within ~2× of baseline (~22M) — if slower, the module stays experimental
 
@@ -133,4 +133,4 @@ Key measured facts that keep this loop cheap:
 | Hooks per instruction | 0.001 (peripheral access — not a bottleneck) |
 | Batch size | 20K (5× lower IRQ latency vs 100K, zero speed cost) |
 | Canary | 39/39 firmware checks, ~25s at 100M |
-| Unit tests | 224/224 |
+| Unit tests | 236/236 |
