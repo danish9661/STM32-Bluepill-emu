@@ -277,25 +277,32 @@ function boardSvg(ledOn) {
             const isPc13 = name === 'PC13';
             const hi = isPc13 && ledOn;
             const fill = hi ? '#4ade80' : (name === '3V3' || name === '5V') ? '#f87171' : name === 'GND' ? '#334155' : '#94a3b8';
+            const act = PIN_ACTIVITY[name];
+            const flash = act && performance.now() - act.lastToggle < 2000;
+            const stroke = flash ? '#fbbf24' : fill;
+            const title = act ? ` title="${name} — ${act.count} toggles"` : '';
             let r, x1, y1, x2, y2, tx, ty;
             if (side === 'left') {
                 const y = 60 + i * (300 / (n - 1));
-                r = `<line x1="30" y1="${y}" x2="12" y2="${y}" stroke="${fill}" stroke-width="3"/>`;
+                r = `<line x1="30" y1="${y}" x2="12" y2="${y}" stroke="${stroke}" stroke-width="3"${title}/>`;
                 x1 = 24; y1 = y; x2 = 20; y2 = y; tx = 14; ty = y + 3;
             } else if (side === 'right') {
                 const y = 60 + i * (300 / (n - 1));
-                r = `<line x1="300" y1="${y}" x2="318" y2="${y}" stroke="${fill}" stroke-width="3"/>`;
+                r = `<line x1="300" y1="${y}" x2="318" y2="${y}" stroke="${stroke}" stroke-width="3"${title}/>`;
                 x1 = 306; y1 = y; x2 = 310; y2 = y; tx = 322; ty = y + 3;
             } else if (side === 'top') {
                 const x = 48 + i * (234 / (n - 1));
-                r = `<line x1="${x}" y1="10" x2="${x}" y2="26" stroke="${fill}" stroke-width="3"/>`;
+                r = `<line x1="${x}" y1="10" x2="${x}" y2="26" stroke="${stroke}" stroke-width="3"${title}/>`;
                 x1 = x; y1 = 20; x2 = x; y2 = 24; tx = x - 9; ty = 32;
             } else {
                 const x = 48 + i * (234 / (n - 1));
-                r = `<line x1="${x}" y1="430" x2="${x}" y2="414" stroke="${fill}" stroke-width="3"/>`;
+                r = `<line x1="${x}" y1="430" x2="${x}" y2="414" stroke="${stroke}" stroke-width="3"${title}/>`;
                 x1 = x; y1 = 420; x2 = x; y2 = 416; tx = x - 9; ty = 406;
             }
             out += r;
+            if (flash) {
+                out += `<circle cx="${x2}" cy="${y2}" r="4" fill="rgba(251,191,36,0.5)"/>`;
+            }
             if (name.length <= 4) {
                 out += `<text x="${tx}" y="${ty}" fill="#cbd5e1" font-size="7.5">${name}</text>`;
             }
@@ -305,6 +312,7 @@ function boardSvg(ledOn) {
     drawPins('right', pins.right);
     drawPins('top', pins.top);
     drawPins('bottom', pins.bottom);
+    out += `<text x="165" y="392" fill="#64748b" font-size="8" text-anchor="middle">${pinActivityTotal} pin toggles — hover a glowing pin</text>`;
     out += `</svg>`;
     return out;
 }
@@ -400,6 +408,21 @@ const segSpiWatch = (addr, width, value) => {
         if (segBuf.length >= 4) { segDigits = segBuf.slice(0, 4); segBuf = []; }
     }
 };
+
+// Pin-activity monitor: per-pin toggle counters fed by onPinChange (chip-driven
+// output level changes, drained each batch). The board SVG glows recently-toggled
+// pins and tooltips show cumulative toggle counts — proves the event stream is
+// live and highlights which pins the firmware is driving.
+const PIN_ACTIVITY = {};
+let pinActivityTotal = 0;
+const pinActivityKey = (port, pin) => `P${String.fromCharCode(65 + port)}${pin}`;
+const onPinActivity = (port, pin) => {
+    const k = pinActivityKey(port, pin);
+    const a = PIN_ACTIVITY[k] || (PIN_ACTIVITY[k] = { count: 0, lastToggle: 0 });
+    a.count++;
+    a.lastToggle = performance.now();
+    pinActivityTotal++;
+};
 const segSvg = () => {
     const pts = {
         a: 'M3,3 h30 v4 h-30 z', b: 'M35,4 v14', c: 'M35,24 v14', d: 'M33,38 h-30 v-4 h30 z',
@@ -476,6 +499,8 @@ async function initEmulator(data, name, extDevices = {}) {
     runSteps = 0;
     autoBytes = [];
     canInjected = false;
+    for (const k in PIN_ACTIVITY) delete PIN_ACTIVITY[k];
+    pinActivityTotal = 0;
     $('instCount').textContent = '0';
     $('stepCount').textContent = '0';
     $('speed').textContent = '—';
@@ -501,6 +526,7 @@ async function initEmulator(data, name, extDevices = {}) {
             vector_table: 0x08000000,
             ext_devices: extDevices,
         });
+        emu.onPinChange(onPinActivity);
         log(`Loaded ${name} on ${chipSel === 'stm32f105' ? 'STM32F105' : 'STM32F103C8'} (${data.length} bytes). PC=0x${emu.getRegisters().PC.toString(16).padStart(8, '0')}`);
         if (symbolsData) emu.setSymbols(symbolsData);
         $('runBtn').disabled = false;
