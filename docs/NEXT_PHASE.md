@@ -13,7 +13,7 @@ peripherals linked together, shared linear memory) that would eliminate the JS b
   cost ~20% of runtime. That was eliminated by **hookless instruction counting**
   (`emu_start(begin, 0, 0, maxBatch)` stops exactly at maxBatch; each batch credited in
   full; faulted batches ~0.01% are skipped PC+2 and credited anyway). 200M instructions
-  went 10.86s → ~9.0s (**~22M IPS** measured, browser demo 0.5s for the full firmware run).
+  went 10.86s → ~8.3s (**~24M IPS** measured, browser demo 0.5s for the full firmware run).
 - The "single WASM module" idea was therefore evaluated as **not worth the rebuild** —
   the JS boundary was the whole cost, and it is already gone without any rebuild.
 
@@ -129,7 +129,7 @@ Key measured facts that keep this loop cheap:
 
 | Item | Measurement |
 |---|---|
-| Instructions per second | ~22M (200M in ~9.0s; 100M in ~4.8s) |
+| Instructions per second | ~24M (200M in ~8.3s; 100M in ~4.2s) |
 | Hooks per instruction | 0.001 (peripheral access — not a bottleneck) |
 | Batch size | 20K (5× lower IRQ latency vs 100K, zero speed cost) |
 | Canary | 39/39 firmware checks, ~25s at 100M |

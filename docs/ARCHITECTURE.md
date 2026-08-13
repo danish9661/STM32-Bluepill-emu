@@ -202,7 +202,7 @@ byte/16/32-bit accesses. NAND/PC-Card banks are always enabled.
 
 | Metric | Value |
 |---|---|
-| Throughput (periph39 firmware) | **~22M instructions/sec** (200M in ~9.0s) |
+| Throughput (periph39 firmware) | **~24M instructions/sec** (200M in ~8.3s) |
 | Browser demo (periph39 full run) | ~0.5 s wall |
 | Batch size | 20K instructions (≈1.1 ms IRQ latency) |
 | Memory | stable ~150 MB RSS, no growth with instruction count |
@@ -210,4 +210,7 @@ byte/16/32-bit accesses. NAND/PC-Card banks are always enabled.
 
 Historical optimizations, in order: per-instruction tick → once-per-batch `step_batch`
 (3.8×), plain-number counters (1.19×), **hookless batch crediting** (1.16×), 20K batches
-(latency, free).
+(latency, free), **closed-form timer advance** (1.15×; step_batch 1409ms → 11ms — the
+only remaining O(ticks) loop was `tim.rs advance()`, rewritten to jump directly
+to update/compare-match event ticks with bit-identical event sets; Unicorn TCG
+is now ~97.5% of runtime, so the JS/Rust layers are exhausted).

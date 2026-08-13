@@ -91,71 +91,55 @@ impl Timer {
         let enabled = self.cr1 & 1;
         if enabled == 0 { return; }
 
-        let dir = (self.cr1 >> 4) & 1;
         let cms = (self.cr1 >> 5) & 0x3;
+        let down = cms == 0 && (self.cr1 >> 4) & 1 == 1;
+        let arr = self.arr as u64;
 
-        // Process ALL accumulated ticks (bounded by batch size); a cap here
-        // would drop timer events when ticks arrive in per-batch chunks
-        // (e.g. 100K instructions per step_batch with a 1-tick period).
-        for _ in 0..ticks {
-            let old_cnt = self.cnt;
-            match (cms, dir) {
-                (0, 0) => { // Up-counting
-                    if self.cnt < self.arr { self.cnt += 1; }
-                    else {
-                        self.cnt = 0;
-                        self.sr |= 1; // UIF
-                        self.update_event_trigger(sys);
-                        if self.dier & 1 != 0 { // UIE
-                            sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
-                        }
-                        if self.dier & (1 << 8) != 0 { //UDE - DMA request
-                            // would trigger DMA
-                        }
-                    }
-                }
-                (0, 1) => { // Down-counting
-                    if self.cnt > 0 { self.cnt -= 1; }
-                    else {
-                        self.cnt = self.arr;
-                        self.sr |= 1; // UIF
-                        self.update_event_trigger(sys);
-                        if self.dier & 1 != 0 {
-                            sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
-                        }
-                    }
-                }
-                _ => { // Center-aligned modes
-                    if self.cnt < self.arr { self.cnt += 1; }
-                    else {
-                        self.cnt = 0;
-                        self.sr |= 1;
-                        self.update_event_trigger(sys);
-                        if self.dier & 1 != 0 {
-                            sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
-                        }
-                    }
-                }
-            }
-
-            // Output compare / PWM interrupts
+        // Closed-form advance: skip no-event ticks in bulk and only execute the
+        // per-tick body at event ticks (update wrap + CCx compare matches). CNT
+        // is only observable at batch boundaries (step_batch), and all events
+        // (UIF/CCxIF/TRGO/DMA-request) pend into batch-boundary queues, so the
+        // final CNT + fired events are bit-identical to iterating every tick —
+        // without the O(ticks) cost (3 active timers × 20K ticks × 4 channels
+        // dominated step_batch: ~14.5% of runtime).
+        let mut remaining = ticks;
+        while remaining > 0 {
+            let cnt = self.cnt as u64;
+            let mut next = if down {
+                // update fires on the tick AFTER cnt reaches 0 (wrap tick);
+                // if cnt >= remaining the wrap lies beyond this batch
+                if cnt >= remaining { remaining } else { cnt + 1 }
+            } else if cnt < arr {
+                arr - cnt + 1
+            } else {
+                1 // cnt >= arr: next tick wraps
+            };
             for ch in 0..4 {
-                if self.ccer & (1 << (ch * 4)) != 0 { // CCxE
-                    let ccr_val = self.ccr[ch];
-                    let match_up = dir == 0 && old_cnt <= ccr_val && self.cnt >= ccr_val;
-                    let match_down = dir == 1 && old_cnt >= ccr_val && self.cnt <= ccr_val;
-                    let match_overflow = (old_cnt > self.cnt) && (old_cnt <= ccr_val || self.cnt >= ccr_val);
-                    if match_up || match_down || match_overflow {
-                        self.sr |= 1 << (1 + ch); // CC1IF-CC4IF
-                        // ADC external trigger on channel compare events
-                        sys.p.adc_timer_trigger(sys, self.base, ch as u8);
-                        let cc_irq_enable = (self.dier >> (1 + ch)) & 1;
-                        if cc_irq_enable != 0 {
-                            sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
-                        }
-                    }
-                }
+                if self.ccer & (1 << (ch * 4)) == 0 { continue; }
+                let ccr = self.ccr[ch] as u64;
+                // CCx match fires on the tick where cnt crosses ccr (old==ccr
+                // also matches); ccr already passed only re-fires via the wrap
+                // tick's overflow check in tick_once. Down-mode ccr==0 at cnt==0
+                // can't match: that tick wraps (new=arr, no match_down).
+                let d = if down {
+                    if cnt > ccr { cnt - ccr }
+                    else if cnt == ccr { if ccr == 0 { u64::MAX } else { 1 } }
+                    else { u64::MAX }
+                } else if cnt <= ccr {
+                    (ccr - cnt).max(1)
+                } else {
+                    u64::MAX
+                };
+                next = next.min(d);
             }
+            next = next.min(remaining);
+            if next > 1 {
+                if down { self.cnt = (cnt - (next - 1)) as u32; }
+                else { self.cnt = (cnt + next - 1) as u32; }
+                remaining -= next - 1;
+            }
+            self.tick_once(sys);
+            remaining -= 1;
         }
 
         // Update PWM duty based on CCR/ARR
@@ -166,6 +150,62 @@ impl Timer {
         }
 
         self.update_interrupt(sys);
+    }
+
+    /// The original per-tick loop body, executed only at event ticks.
+    fn tick_once(&mut self, sys: &System) {
+        let cms = (self.cr1 >> 5) & 0x3;
+        let down = cms == 0 && (self.cr1 >> 4) & 1 == 1;
+        let old_cnt = self.cnt;
+        let arr = self.arr as u64;
+        let cnt = old_cnt as u64;
+
+        if down {
+            if old_cnt > 0 { self.cnt -= 1; }
+            else {
+                self.cnt = self.arr;
+                self.sr |= 1; // UIF
+                self.update_event_trigger(sys);
+                if self.dier & 1 != 0 { // UIE
+                    sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
+                }
+                if self.dier & (1 << 8) != 0 { //UDE - DMA request
+                    // would trigger DMA
+                }
+            }
+        } else if cnt < arr {
+            self.cnt += 1;
+        } else {
+            self.cnt = 0;
+            self.sr |= 1; // UIF
+            self.update_event_trigger(sys);
+            if self.dier & 1 != 0 { // UIE
+                sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
+            }
+            if self.dier & (1 << 8) != 0 { //UDE - DMA request
+                // would trigger DMA
+            }
+        }
+
+        // Output compare / PWM interrupts
+        for ch in 0..4 {
+            if self.ccer & (1 << (ch * 4)) != 0 { // CCxE
+                let ccr_val = self.ccr[ch];
+                let new_cnt = self.cnt;
+                let match_up = !down && old_cnt <= ccr_val && new_cnt >= ccr_val;
+                let match_down = down && old_cnt >= ccr_val && new_cnt <= ccr_val;
+                let match_overflow = (old_cnt > new_cnt) && (old_cnt <= ccr_val || new_cnt >= ccr_val);
+                if match_up || match_down || match_overflow {
+                    self.sr |= 1 << (1 + ch); // CC1IF-CC4IF
+                    // ADC external trigger on channel compare events
+                    sys.p.adc_timer_trigger(sys, self.base, ch as u8);
+                    let cc_irq_enable = (self.dier >> (1 + ch)) & 1;
+                    if cc_irq_enable != 0 {
+                        sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
+                    }
+                }
+            }
+        }
     }
 
     fn update_event_trigger(&mut self, sys: &System) {
