@@ -4,7 +4,7 @@ import path from 'path';
 import * as yaml from 'js-yaml';
 import { parseIntelHex, parseSymbolMap, parseElf } from './emulator.js';
 import * as periph from './stm32_bluepill_wasm.js';
-const { periph_read, periph_write, tick, step, step_batch, get_next_pending_interrupt, intr_next, intr_svc_enter, intr_svc_leave, intr_svc_depth, dma_pump_all, dma_take_absorbed, dma_get_pending_count,
+const { periph_read, periph_write, tick, step, step_batch, process_batch, get_next_pending_interrupt, intr_next, intr_svc_enter, intr_svc_leave, intr_svc_depth, dma_pump_all, dma_take_absorbed, dma_get_pending_count,
 dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen,
 add_lcd, add_i2c_oled, reset_ext_devices, register_js_peripheral, can_inject_message, raise_fault,
 init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
@@ -472,7 +472,8 @@ async function main() {
         }
     };
 
-    const processInterrupts = () => {
+    const processInterrupts = (anyPending) => {
+        if (!anyPending) return;
         while (true) {
             const irq = intr_next();
             if (irq <= -100) return;
@@ -528,6 +529,7 @@ async function main() {
 
     /* CAN RX injection: firmware sets canRxArmed=1, then waits for a frame */
     let canInjected = false;
+    let anyPending = false;
 
     while (!stopRequested) {
         const dmaBusy = dma_get_pending_count() > 0;
@@ -581,12 +583,13 @@ async function main() {
         instCount += maxBatch;
         batchInstCount += maxBatch;
         if (batchInstCount > 0) {
-            const status = step_batch(batchInstCount);
+            const status = process_batch(batchInstCount);
             batchInstCount = 0;
-            if (status === 1) { stopRequested = true; break; }
+            if (status & 0x80000000) { stopRequested = true; break; }
+            anyPending = (status & 0x40000000) !== 0;
         }
         processDma();
-        try { processInterrupts(); } catch (irqErr) { console.error('processInterrupts error at step', totalSteps, ':', irqErr?.message || irqErr); break; }
+        try { processInterrupts(anyPending); } catch (irqErr) { console.error('processInterrupts error at step', totalSteps, ':', irqErr?.message || irqErr); break; }
         totalSteps++;
 
         if (canArmedSym && !canInjected) {

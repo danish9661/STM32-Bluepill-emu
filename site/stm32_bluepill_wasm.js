@@ -513,6 +513,28 @@ export function periph_write(addr, width, value) {
 }
 
 /**
+ * One-call batch processor: advance the instruction count, reset the IRQ
+ * dispatch budget, tick all peripherals, then report watchdog status and
+ * whether any IRQ is pending — so JS needs one crossing per batch instead of
+ * three (step_batch + a pending probe + the watchdog poll).
+ * Returns:
+ *   0x8000_0000  = watchdog reset requested (stop the run)
+ *   0x4000_0000  = at least one IRQ pending (dispatch via intr_next loop)
+ *   0            = nothing pending
+ * The pending probe is EXACTLY equivalent to the first intr_next() call
+ * (same INTR_MASK statics + same find_highest_pending), minus the pop —
+ * the actual pop still happens in JS after processDma, preserving dispatch
+ * order. Watchdog requests made *during* IRQ handlers are still caught by
+ * the JS is_watchdog_reset_requested() check after processInterrupts.
+ * @param {number} count
+ * @returns {number}
+ */
+export function process_batch(count) {
+    const ret = wasm.process_batch(count);
+    return ret >>> 0;
+}
+
+/**
  * Current PWM duty (0-100) of a timer channel; 0 if addr is not a timer.
  * @param {number} addr
  * @param {number} channel

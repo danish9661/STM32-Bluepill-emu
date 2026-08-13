@@ -255,7 +255,7 @@ export async function createEmulator(opts = {}) {
         Module._free(idsPtr); Module._free(valsPtr); Module._free(ptrsPtr);
     };
 
-    const { periph_read, periph_write, tick, step_batch, get_next_pending_interrupt,
+    const { periph_read, periph_write, tick, step_batch, process_batch, get_next_pending_interrupt,
     intr_next, intr_svc_enter, intr_svc_leave, intr_svc_depth,
     dma_pump_all, dma_take_absorbed, dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested,
     add_spi_flash, add_i2c_eeprom, add_touchscreen, add_lcd, add_i2c_oled, add_software_spi, reset_ext_devices,
@@ -563,7 +563,8 @@ export async function createEmulator(opts = {}) {
         }
     };
 
-    const processInterrupts = () => {
+    const processInterrupts = (anyPending) => {
+        if (!anyPending) return;
         while (true) {
             const irq = intr_next();
             if (irq <= -100) break;
@@ -681,6 +682,7 @@ export async function createEmulator(opts = {}) {
             stopRequested = false;
             const startInst = instCount;
             let totalSteps = 0;
+            let anyPending = false;
             while (!stopRequested) {
                 processDma();
                 const curPc = uc.reg_read_i32(Module.ARM_REG_PC);
@@ -693,12 +695,13 @@ export async function createEmulator(opts = {}) {
                 instCount += DEFAULT_MAX_BATCH;
                 batchInstCount += DEFAULT_MAX_BATCH;
                 if (batchInstCount > 0) {
-                    const status = step_batch(batchInstCount);
+                    const status = process_batch(batchInstCount);
                     batchInstCount = 0;
-                    if (status === 1) { stopRequested = true; break; }
+                    if (status & 0x80000000) { stopRequested = true; break; }
+                    anyPending = (status & 0x40000000) !== 0;
                 }
                 processDma();
-                processInterrupts();
+                processInterrupts(anyPending);
                 drainPinEvents();
                 totalSteps++;
                 if (is_watchdog_reset_requested()) break;
@@ -722,13 +725,15 @@ export async function createEmulator(opts = {}) {
             }
             instCount += maxBatch;
             batchInstCount += maxBatch;
+            let anyPending = false;
             if (batchInstCount > 0) {
-                const status = step_batch(batchInstCount);
+                const status = process_batch(batchInstCount);
                 batchInstCount = 0;
-                if (status === 1) stopRequested = true;
+                if (status & 0x80000000) stopRequested = true;
+                anyPending = (status & 0x40000000) !== 0;
             }
             processDma();
-            processInterrupts();
+            processInterrupts(anyPending);
             drainPinEvents();
             return {
                 pc: uc.reg_read_i32(Module.ARM_REG_PC),

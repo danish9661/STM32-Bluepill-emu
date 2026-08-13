@@ -154,6 +154,37 @@ pub fn step_batch(count: u32) -> u32 {
     if is_watchdog_reset_requested() { 1 } else { 0 }
 }
 
+/// One-call batch processor: advance the instruction count, reset the IRQ
+/// dispatch budget, tick all peripherals, then report watchdog status and
+/// whether any IRQ is pending — so JS needs one crossing per batch instead of
+/// three (step_batch + a pending probe + the watchdog poll).
+/// Returns:
+///   0x8000_0000  = watchdog reset requested (stop the run)
+///   0x4000_0000  = at least one IRQ pending (dispatch via intr_next loop)
+///   0            = nothing pending
+/// The pending probe is EXACTLY equivalent to the first intr_next() call
+/// (same INTR_MASK statics + same find_highest_pending), minus the pop —
+/// the actual pop still happens in JS after processDma, preserving dispatch
+/// order. Watchdog requests made *during* IRQ handlers are still caught by
+/// the JS is_watchdog_reset_requested() check after processInterrupts.
+#[wasm_bindgen]
+pub fn process_batch(count: u32) -> u32 {
+    let sys = sys();
+    system::INSTRUCTION_COUNT.fetch_add(count as u64, Ordering::Relaxed);
+    sys.intr.borrow_mut().reset_budget();
+    sys.tick();
+    if is_watchdog_reset_requested() {
+        return 0x8000_0000;
+    }
+    let primask = system::INTR_MASK_PRIMASK.load(Ordering::Relaxed);
+    let basepri = system::INTR_MASK_BASEPRI.load(Ordering::Relaxed);
+    if sys.p.nvic.borrow().has_pending_masked(primask, basepri) {
+        0x4000_0000
+    } else {
+        0
+    }
+}
+
 /// Check if any interrupt is pending, respecting PRIMASK/BASEPRI.
 #[wasm_bindgen]
 pub fn has_pending_interrupt() -> bool {
