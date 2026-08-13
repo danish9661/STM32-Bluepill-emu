@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Path A merged-module browser smoke</title>
+</head>
+<body>
+<h1>Path A: single-module (merged) browser run</h1>
+<pre id="result">running…</pre>
+<script type="module">
+import { createEmulator } from './browser-emulator.mjs';
+
+const resultEl = document.getElementById('result');
+const BUILD = './assets/';
+const read = async (f) => new Uint8Array(await (await fetch(BUILD + f)).arrayBuffer());
+const MAX = 200000000;
+const CHUNK = 10000000;
+const CAN_RAM_FLAG = 0x200000b8;
+
+let status = 'ERR';
+try {
+    const emu = await createEmulator({
+        firmware: await read('arduino_periph_test.ino.elf'),
+        ext_devices: {
+            i2c_eeprom: [
+                { peripheral: 'I2C1', address: 0x50, data: await read('eeprom.bin') },
+                { peripheral: 'I2C2', address: 0x51, data: await read('eeprom2.bin') },
+            ],
+            i2c_oled: [{ peripheral: 'I2C1', address: 0x3C }],
+            spi_flash: [
+                { peripheral: 'SPI1', jedec_id: 0xEF4016, data: await read('spi_flash.bin'), cs: 'PA4' },
+                { peripheral: 'SPI2', jedec_id: 0xEF4017, data: await read('spi_flash2.bin'), cs: 'PB12' },
+            ],
+            lcd: [{ peripheral: 'SPI1', cs: 'PA1' }],
+            touchscreen: [{ peripheral: 'SPI1', cs: 'PA2', touch_detected_pin: 'PA3' }],
+        },
+    });
+
+    for (const b of [0x41, 0x42]) emu.uartRx(b);
+
+    let canInjected = false, done = 0, lastR;
+    while (done < MAX) {
+        const n = Math.min(CHUNK, MAX - done);
+        const r = await emu.run(n);
+        lastR = r;
+        done += n;
+        if (!canInjected && emu.memRead32(CAN_RAM_FLAG) !== 0) {
+            canInjected = emu.canInjectMessage(0x40006400, 0 << 21, 2, 0xDEAD, 0);
+        }
+        if (r.stopped) break;
+    }
+
+    const out = String(emu.getUartOutput() || '');
+    const summary = out.split('\n').filter((s) => s.includes('SUMMARY')).join(' ').trim();
+    const fails = out.split('\n').filter((s) => s.includes('FAIL'));
+    const pass = canInjected && !fails.length && /pass=39 fail=0/.test(summary);
+    status = pass ? 'PASS 39/39' : `FAIL (can=${canInjected} fails=${fails.length} summary=${summary || '(missing)'})`;
+    resultEl.textContent = `done=${done} stopped=${lastR.stopped}\n${summary}\n${status}`;
+} catch (e) {
+    status = 'ERR ' + String(e && e.message || e);
+    resultEl.textContent = status;
+}
+console.log('BROWSER_SMOKE_RESULT=' + status);
+</script>
+</body>
+</html>

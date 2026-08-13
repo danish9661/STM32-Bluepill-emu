@@ -1,0 +1,640 @@
+#!/usr/bin/env node
+import { readFileSync } from 'fs';
+import path from 'path';
+import * as yaml from 'js-yaml';
+import { parseIntelHex, parseSymbolMap, parseElf } from '../pkg/emulator.js';
+import { loadMerged } from './loader.mjs';
+let periph, unicornMod;
+let periphReady = loadMerged().then((m) => { periph = m.periph; unicornMod = m; });
+let periph_read, periph_write, tick, step, step_batch, get_next_pending_interrupt, intr_next, intr_svc_enter, intr_svc_leave, intr_svc_depth, dma_pump_all, dma_take_absorbed, dma_get_pending_count, dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen, add_lcd, add_i2c_oled, reset_ext_devices, register_js_peripheral, can_inject_message, raise_fault, init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output, set_intr_masks, clear_current_interrupt, finish_interrupt;
+
+
+
+const parseHex = (v) => typeof v === 'number' ? v : parseInt(v, 16);
+
+// Unicorn ARM cannot decode `mrs rX, msp` (used by newlib _sbrk). In thread
+// mode MSP == SP, so rewrite to `mov rX, sp` + nop (same 4-byte footprint).
+function patchMrsMsp(data) {
+    let patched = 0;
+    for (let i = 0; i + 3 < data.length; i++) {
+        if (data[i] === 0xEF && data[i + 1] === 0xF3
+            && data[i + 2] === 0x08 && (data[i + 3] & 0xF0) === 0x80) {
+            const rd = data[i + 3] & 0x0F;
+            const mov = 0x4668 | rd;
+            data[i] = mov & 0xFF;
+            data[i + 1] = mov >> 8;
+            data[i + 2] = 0x00;
+            data[i + 3] = 0xBF;
+            patched++;
+        }
+    }
+    if (patched > 0) console.log(`Patched ${patched} 'mrs msp' instruction(s) to 'mov sp' (malloc/_sbrk support)`);
+    return data;
+}
+
+function loadFirmware(buf) {
+    if (buf.length > 4 && buf[0] === 0x7F && buf[1] === 0x45 && buf[2] === 0x4C && buf[3] === 0x46) {
+        const elf = parseElf(buf);
+        console.log(`Parsed ELF: ${elf.regions.length} load segments, ${elf.symbols.length} symbols`);
+        for (const r of elf.regions) {
+            r.data = patchMrsMsp(r.data);
+        }
+        return { data: new Uint8Array(0), base: null, regions: elf.regions, symbols: elf.symbols };
+    }
+    if (buf.length > 0 && buf[0] === 0x3A) {
+        const parsed = parseIntelHex(new TextDecoder().decode(buf));
+        console.log(`Parsed Intel HEX: base=0x${parsed.base.toString(16)} (${parsed.data.length} bytes)`);
+        return { data: patchMrsMsp(parsed.data), base: parsed.base, regions: null, symbols: null };
+    }
+    return { data: patchMrsMsp(buf), base: null, regions: null, symbols: null };
+}
+
+function makeResolver(symbols) {
+    if (!symbols || !symbols.length) return null;
+    const sorted = symbols.slice().sort((a, b) => a.addr - b.addr);
+    return (addr) => {
+        const a = addr & ~1;
+        let lo = 0, hi = sorted.length - 1, best = -1;
+        while (lo <= hi) {
+            const mid = (lo + hi) >> 1;
+            if (sorted[mid].addr <= a) { best = mid; lo = mid + 1; } else hi = mid - 1;
+        }
+        if (best < 0) return null;
+        const s = sorted[best];
+        const off = a - s.addr;
+        if (off > 0x20000) return null;
+        return off > 0 ? `${s.name}+0x${off.toString(16)}` : s.name;
+    };
+}
+
+async function getMUnicorn() {
+    await periphReady;
+    return async () => unicornMod.Module;
+}
+
+async function main() {
+    await periphReady;
+    ({ periph_read, periph_write, tick, step, step_batch, get_next_pending_interrupt, intr_next, intr_svc_enter, intr_svc_leave, intr_svc_depth, dma_pump_all, dma_take_absorbed, dma_get_pending_count, dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen, add_lcd, add_i2c_oled, reset_ext_devices, register_js_peripheral, can_inject_message, raise_fault, init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output, set_intr_masks, clear_current_interrupt, finish_interrupt } = periph);
+    await null;
+    const args = process.argv.slice(2);
+    const configPaths = args.filter(a => a.startsWith('--config=')).map(a => a.split('=')[1]);
+    const posArgs = args.filter(a => !a.startsWith('--'));
+    const maxInst = parseInt(
+        args.find(a => a.startsWith('--max='))?.split('=')[1]
+        || (configPaths.length > 0 ? posArgs[0] : posArgs[1])
+        || process.env.MAX_INST || '1000000', 10);
+    const showRegs = args.includes('--regs') || process.env.SHOW_REGS === '1';
+    const mapPath = args.find(a => a.startsWith('--map='))?.split('=')[1];
+    const periphPlugin = args.find(a => a.startsWith('--periph-plugin='))?.split('=')[1];
+    let uartAddr = parseInt(args.find(a => a.startsWith('--uart='))?.split('=')[1] || process.env.UART_ADDR || '0x40013800', 16);
+
+    let config = {};
+    if (configPaths.length > 0) {
+        for (const cp of configPaths) {
+            const raw = yaml.load(readFileSync(cp, 'utf8'));
+            const cfgDir = path.dirname(path.resolve(cp));
+            if (raw.regions) raw.regions = raw.regions.map(r => ({ ...r, _dir: cfgDir }));
+            if (raw.patches) raw.patches = raw.patches.map(p => ({ ...p, _dir: cfgDir }));
+            raw._devices_dir = cfgDir;
+            config = { ...config, ...raw, regions: [...(config.regions || []), ...(raw.regions || [])], patches: [...(config.patches || []), ...(raw.patches || [])] };
+        }
+        console.log(`Using config(s): ${configPaths.join(', ')}`);
+    }
+
+    const MUnicorn = await getMUnicorn();
+    const Module = await MUnicorn({});
+
+    // unicorn_arm exposes the raw uc_reg_read_batch/write_batch C functions but
+    // no marshalling wrapper — allocate the id/pointer/value arrays so a whole
+    // register set crosses the boundary once instead of once per register
+    // (IRQ dispatch used ~17 individual crossings; now 2).
+    const regsRead = (uc, regIds) => {
+        const n = regIds.length;
+        const handle = Module.getValue(uc.handle_ptr, '*');
+        const idsPtr = Module._malloc(n * 4);
+        const valsPtr = Module._malloc(n * 4);
+        const ptrsPtr = Module._malloc(n * 4);
+        const out = new Array(n);
+        for (let i = 0; i < n; i++) {
+            Module.setValue(idsPtr + i * 4, regIds[i], 'i32');
+            Module.setValue(ptrsPtr + i * 4, valsPtr + i * 4, 'i32');
+        }
+        Module.ccall('uc_reg_read_batch', 'number', ['number', 'number', 'number', 'number'], [handle, idsPtr, ptrsPtr, n]);
+        for (let i = 0; i < n; i++) out[i] = Module.getValue(valsPtr + i * 4, 'i32');
+        Module._free(idsPtr); Module._free(valsPtr); Module._free(ptrsPtr);
+        return out;
+    };
+    const regsWrite = (uc, regIds, values) => {
+        const n = regIds.length;
+        const handle = Module.getValue(uc.handle_ptr, '*');
+        const idsPtr = Module._malloc(n * 4);
+        const valsPtr = Module._malloc(n * 4);
+        const ptrsPtr = Module._malloc(n * 4);
+        for (let i = 0; i < n; i++) {
+            Module.setValue(idsPtr + i * 4, regIds[i], 'i32');
+            Module.setValue(valsPtr + i * 4, values[i], 'i32');
+            Module.setValue(ptrsPtr + i * 4, valsPtr + i * 4, 'i32');
+        }
+        Module.ccall('uc_reg_write_batch', 'number', ['number', 'number', 'number', 'number'], [handle, idsPtr, ptrsPtr, n]);
+        Module._free(idsPtr); Module._free(valsPtr); Module._free(ptrsPtr);
+    };
+
+    let firmware;
+    let fwBase = null;
+    let fwRegions = null;
+    let fwSymbols = null;
+    let vector_table;
+    let memRegions;
+
+    if (config.regions) {
+        memRegions = config.regions.map(r => ({ ...r, start: parseHex(r.start), size: parseHex(r.size) }));
+        const romRegion = memRegions.find(r => r.load);
+        if (!romRegion) { console.error('No region with load file found'); process.exit(1); }
+        vector_table = parseHex(config.cpu?.vector_table || romRegion.start);
+        const romFile = path.resolve(romRegion._dir || config._devices_dir, romRegion.load);
+        const fw = loadFirmware(readFileSync(romFile));
+        firmware = fw.data;
+        fwBase = fw.base;
+        fwRegions = fw.regions;
+        fwSymbols = fw.symbols;
+        console.log(`Loading firmware: ${romFile} (${firmware.length} bytes)`);
+
+        // Register external devices from config BEFORE init()
+        reset_ext_devices();
+        if (config.devices) {
+            for (const [type, devs] of Object.entries(config.devices)) {
+                for (const d of devs || []) {
+                    if (type === 'i2c_eeprom') {
+                        const data = d.file ? readFileSync(path.resolve(config._devices_dir, d.file)) : new Uint8Array(d.size || 0);
+                        add_i2c_eeprom(d.peripheral, parseHex(d.addr), data);
+                    } else if (type === 'spi_flash') {
+                        const data = d.file ? readFileSync(path.resolve(config._devices_dir, d.file)) : new Uint8Array(d.size || 0);
+                        add_spi_flash(d.peripheral, parseHex(d.jedec_id), data, d.cs || null);
+                    } else if (type === 'usart_probe') {
+                        uartAddr = parseHex(d.peripheral.match(/[0-9a-fA-F]+/)?.[0]) ? parseInt(d.peripheral, 16) : (PERIPH_ADDR[d.peripheral] || uartAddr);
+                    } else if (type === 'touchscreen') {
+                        add_touchscreen(d.peripheral, d.touch_detected_pin || null, d.cs || null);
+                    } else if (type === 'lcd') {
+                        add_lcd(d.peripheral, d.cs || null);
+                    } else if (type === 'i2c_oled') {
+                        add_i2c_oled(d.peripheral, parseInt(d.addr || '0x3C', 16), parseInt(d.width || '128', 10), parseInt(d.height || '64', 10));
+                    }
+                }
+            }
+        }
+
+        // Board selection (rp2040js-style): 'stm32f103c8' = builtin hardcoded map;
+        // cpu.svd (or cpu.chip = { svd: ... }) = any F1-family chip built from SVD.
+        const chipSvd = typeof config.cpu?.chip === 'string' ? null : config.cpu?.chip?.svd;
+        if (config.cpu?.use_hardcoded || (!config.cpu?.svd && !chipSvd)) {
+            init();
+        } else {
+            const svdXml = chipSvd ?? readFileSync(path.resolve(config._devices_dir, config.cpu.svd), 'utf8');
+            init_svd(svdXml);
+        }
+
+        // rp2040js-style custom peripherals from a JS plugin module:
+        //   --periph-plugin=./my_periph.mjs   (default export: array of {base, size, read, write})
+        if (periphPlugin) {
+            const mod = await import(path.resolve(process.cwd(), periphPlugin));
+            const list = mod.default ?? [];
+            for (const jp of list) {
+                register_js_peripheral(jp.base, jp.size, jp.read, jp.write);
+                console.log(`Registered JS peripheral at 0x${jp.base.toString(16)} (${jp.size} bytes)`);
+            }
+        }
+
+        if (config.patches) {
+            for (const p of config.patches) {
+                const start = BigInt(parseHex(p.start));
+                const data = new Uint8Array(p.data);
+                const romRegionStart = BigInt(romRegion.start);
+                const relOff = Number(start - romRegionStart);
+                if (relOff >= 0 && relOff + data.length <= firmware.length) {
+                    data.forEach((b, i) => firmware[relOff + i] = b);
+                    console.log(`Applied patch at 0x${start.toString(16)}: [${data.join(', ')}]`);
+                }
+            }
+        }
+    } else {
+        const firmwarePath = posArgs[0] || process.env.FIRMWARE;
+        if (!firmwarePath) {
+            console.error('Usage: node cli.mjs <firmware.bin|.hex|.elf> [max_instructions] [--config=path] [--max=N] [--map=file.map]');
+            console.error('  or set FIRMWARE env var');
+            process.exit(1);
+        }
+        const fw = loadFirmware(readFileSync(firmwarePath));
+        firmware = fw.data;
+        fwBase = fw.base;
+        fwRegions = fw.regions;
+        fwSymbols = fw.symbols;
+        console.log(`Loading firmware: ${firmwarePath} (${firmware.length} bytes)`);
+
+        const fwDir = path.dirname(path.resolve(firmwarePath));
+        reset_ext_devices();
+        for (const fn of ['eeprom.bin', 'spi_flash.bin']) {
+            try {
+                const data = readFileSync(`${fwDir}/${fn}`);
+                if (fn.startsWith('eeprom')) add_i2c_eeprom("I2C1", 0x50, data);
+                else add_spi_flash("SPI1", 0xef4016, data, null);
+                console.log(`Loaded ext device: ${fwDir}/${fn} (${data.length} bytes)`);
+            } catch (_) {}
+        }
+
+        // Try SVD file, fall back to hardcoded
+        const svdFallbackPaths = [
+            path.resolve(fwDir, 'STM32F103.svd'),
+            path.resolve(process.cwd(), 'STM32F103.svd'),
+            path.resolve(process.cwd(), 'svd', 'STM32F103.svd'),
+        ];
+        let svdLoaded = false;
+        for (const svdPath of svdFallbackPaths) {
+            try {
+                const svdXml = readFileSync(svdPath, 'utf8');
+                init_svd(svdXml);
+                console.log(`Using SVD: ${svdPath}`);
+                svdLoaded = true;
+                break;
+            } catch (_) {}
+        }
+        if (!svdLoaded) {
+            init();
+        }
+        vector_table = 0x08000000;
+        memRegions = [
+            { start: 0x08000000, size: 0x10000 },
+            { start: 0x20000000, size: 0x5000 },
+        ];
+    }
+
+    console.log(`Max instructions: ${maxInst}`);
+    console.log('Initializing Unicorn...');
+
+    const uc = new Module.Unicorn(
+        Module.ARCH_ARM,
+        Module.MODE_THUMB | Module.MODE_LITTLE_ENDIAN
+    );
+
+    for (const r of memRegions) {
+        uc.mem_map(r.start, r.size, Module.PROT_ALL);
+    }
+    if (mapPath) {
+        fwSymbols = parseSymbolMap(readFileSync(path.resolve(mapPath), 'utf8'));
+        console.log(`Loaded ${fwSymbols.length} symbols from map: ${mapPath}`);
+    }
+
+    const romRegion = memRegions.find(r => firmware && (r._firmware || r.load || (r.start <= vector_table && r.start + r.size > vector_table)));
+    const romStart = romRegion ? romRegion.start : (memRegions[0]?.start || 0x08000000);
+    if (fwRegions && fwRegions.length) {
+        for (const r of fwRegions) {
+            uc.mem_write(BigInt(r.start), r.data);
+        }
+    } else if (firmware && fwBase != null) {
+        uc.mem_write(BigInt(fwBase), firmware);
+    } else if (firmware) {
+        uc.mem_write(BigInt(romStart), firmware);
+        if (romStart !== vector_table) uc.mem_write(BigInt(vector_table), firmware);
+    }
+
+    // TEMP WORKAROUND: Unicorn skips the two `bl HAL_NVIC_EnableIRQ` in
+    // i2c_init() (0x8001bb8/0x8001bcc). Replace 0x8001bbc..0x8001bdb with
+    // inline NVIC ISER0/ISER1 writes (SetPriority calls preserved).
+    try {
+        const patchAddr = 0x8001BBCn;
+        const probe = uc.mem_read(patchAddr, 4);
+        if (probe[0] === 0x00 && probe[1] === 0xF0 && probe[2] === 0x92 && probe[3] === 0xFD) {
+            uc.mem_write(patchAddr, new Uint8Array([
+                0x00, 0xF0, 0x92, 0xFD, // bl  HAL_NVIC_SetPriority (r0=31)
+                0x4E, 0xF2, 0x00, 0x13, // movw r3, #0xE100
+                0xCE, 0xF2, 0x00, 0x03, // movt r3, #0xE000  -> r3 = 0xE000E100
+                0x40, 0xF2, 0x00, 0x02, // movw r2, #0x0000
+                0xC8, 0xF2, 0x00, 0x02, // movt r2, #0x8000  -> r2 = 0x80000000
+                0x1A, 0x60,             // str  r2, [r3]     -> ISER0 |= bit31 (IRQ31)
+                0x20, 0x20,             // movs r0, #32
+                0x00, 0xF0, 0x86, 0xFD, // bl  HAL_NVIC_SetPriority (r0=32)
+                0x01, 0x22,             // movs r2, #1
+                0x5A, 0x60,             // str  r2, [r3, #4] -> ISER1 |= 1 (IRQ32)
+            ]));
+            console.log('Applied i2c_init IRQ-enable patch (Unicorn bl skip workaround)');
+        }
+    } catch (e) {
+        console.error('i2c_init patch failed:', e.message);
+    }
+
+    const periphRanges = [
+        [0x40000000, 0xB0000000],
+        [0xE0000000, 0xE1000000],
+    ];
+    for (const [start, end] of periphRanges) {
+        uc.mem_map(start, end - start, Module.PROT_READ | Module.PROT_WRITE);
+    }
+
+    const read32 = (addr) => {
+        const b = uc.mem_read(BigInt(addr), 4);
+        const dt = new DataView(b.buffer, b.byteOffset, b.byteLength);
+        return dt.getUint32(0, true);
+    };
+
+    const sp_init = read32(vector_table);
+    const pc_init = read32(vector_table + 4);
+
+    uc.reg_write_i32(Module.ARM_REG_SP, sp_init);
+    uc.reg_write_i32(Module.ARM_REG_PC, pc_init | 1);
+
+    console.log(`SP=0x${sp_init.toString(16)} PC=0x${(pc_init | 1).toString(16)}`);
+
+    const memReadHook = (handle, type, address, size, value, user_data) => {
+        const addr32 = Number(address);
+        let val;
+        if (addr32 >= 0xE0001000 && addr32 < 0xE0001100) {
+            val = addr32 === 0xE0001004
+                ? Number(instCount & 0xFFFFFFFF)
+                : (addr32 === 0xE0001000 ? 1 : 0);
+        } else {
+            val = periph_read(addr32, size) >>> 0;
+        }
+        const bytes = new Uint8Array(size);
+        for (let i = 0; i < size; i++) {
+            bytes[i] = (val >> (i * 8)) & 0xFF;
+        }
+        uc.mem_write(address, bytes);
+    };
+
+    const memWriteHook = (handle, type, address, size, value, user_data) => {
+        const addr32 = Number(address);
+        const valueNum = Number(value);
+        periph_write(addr32, size, valueNum);
+        if (addr32 === 0x40005410 && (valueNum & 1) === 1) {
+            try {
+                const hi2c1Ptr = read32(0x200002d8);
+                if (hi2c1Ptr && hi2c1Ptr !== 0xFFFFFFFF) {
+                    uc.mem_write(BigInt(hi2c1Ptr + 0x3D), new Uint8Array([0x22]));
+                }
+            } catch (_) {}
+        }
+    };
+
+    /* CAN RX injection: firmware sets canRxArmed=1, then waits for a frame */
+    const canArmedSym = fwSymbols?.find(s => s.name === 'canRxArmed');
+
+    for (const [start, end] of periphRanges) {
+        uc.hook_add(Module.HOOK_MEM_READ, memReadHook, null, start, end);
+        uc.hook_add(Module.HOOK_MEM_WRITE, memWriteHook, null, start, end);
+    }
+
+    let instCount = 0;
+    let batchInstCount = 0;
+    let stopRequested = false;
+
+    // Hookless instruction counting: emu_start(begin, 0, 0, maxBatch) stops exactly at
+    // maxBatch instructions except on a fault (unmapped access, ~0.01% of batches),
+    // where the faulting instruction is skipped and the batch credited in full.
+    // A JS codeHook per instruction cost ~20% of runtime (10.9s -> 8.7s at 200M);
+    // a full-batch credit is exact for normal batches and off by <1 batch on rare
+    // faults. Handler runs (inside processInterrupts) are not credited — the
+    // instruction-delta peripherals self-correct. Actual tick/interrupt processing
+    // still happens in step_batch() after each Unicorn batch.
+
+    const stdinQueue = [];
+    if (process.stdin.isTTY) process.stdin.setRawMode(true);
+    process.stdin.on('data', (chunk) => { for (const b of chunk) stdinQueue.push(b); });
+    process.stdin.resume();
+    if (process.stdin.isTTY) process.on('SIGINT', () => { process.stdin.setRawMode(false); process.exit(0); });
+
+    // SVC frames live in Rust (src/interrupts.rs, shared with emulator.js —
+    // the same mirror used to be duplicated here and in emulator.js and they
+    // kept drifting). The frame is also written to the real stack so handler
+    // code can inspect it (Cortex-M ABI).
+    const intrHook = (handle, intno, user_data) => {
+        if (intno === 8) {
+            const sp = uc.reg_read_i32(Module.ARM_REG_SP);
+            const frame = uc.mem_read(BigInt(sp), 32);
+            const sv = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
+            uc.reg_write_i32(Module.ARM_REG_R0, sv.getUint32(28, true));
+            uc.reg_write_i32(Module.ARM_REG_R1, sv.getUint32(24, true));
+            uc.reg_write_i32(Module.ARM_REG_R2, sv.getUint32(20, true));
+            uc.reg_write_i32(Module.ARM_REG_R3, sv.getUint32(16, true));
+            uc.reg_write_i32(Module.ARM_REG_R12, sv.getUint32(12, true));
+            uc.reg_write_i32(Module.ARM_REG_LR, sv.getUint32(8, true));
+            uc.reg_write_i32(Module.ARM_REG_PC, sv.getUint32(4, true) | 1);
+            uc.reg_write_i32(Module.ARM_REG_XPSR, sv.getUint32(0, true));
+            uc.reg_write_i32(Module.ARM_REG_SP, sp + 32);
+        } else if (intno === 2) {
+            // SVC: stack the interrupted context (mirror + real stack frame,
+            // both built in Rust), enter handler mode (LR = EXC_RETURN), jump
+            // to the SVCall vector. Return happens when the handler executes
+            // `bx lr` (Unicorn faults fetching 0xFFFFFFFx, caught in the main
+            // loop, which pops the mirror via intr_svc_leave).
+            const sp = uc.reg_read_i32(Module.ARM_REG_SP);
+            const frame = intr_svc_enter(
+                uc.reg_read_i32(Module.ARM_REG_R0),
+                uc.reg_read_i32(Module.ARM_REG_R1),
+                uc.reg_read_i32(Module.ARM_REG_R2),
+                uc.reg_read_i32(Module.ARM_REG_R3),
+                uc.reg_read_i32(Module.ARM_REG_R12),
+                uc.reg_read_i32(Module.ARM_REG_LR),
+                uc.reg_read_i32(Module.ARM_REG_PC),
+                uc.reg_read_i32(Module.ARM_REG_XPSR),
+                sp,
+            );
+            if (frame.length) {
+                uc.mem_write(BigInt(sp - 32), frame);
+                uc.reg_write_i32(Module.ARM_REG_SP, sp - 32);
+                const control = uc.reg_read_i32(Module.ARM_REG_CONTROL);
+                uc.reg_write_i32(Module.ARM_REG_LR, control & 1 ? 0xFFFFFFFD : 0xFFFFFFF9);
+                uc.reg_write_i32(Module.ARM_REG_PC, read32(vector_table + 4 * 11));
+            }
+        }
+    };
+    uc.hook_add(Module.HOOK_INTR, intrHook, null);
+
+    const processDma = () => {
+        const plan = dma_pump_all();
+        for (let i = 0; i + 4 <= plan.length; i += 4) {
+            const op = plan[i], a = plan[i + 1], b = plan[i + 2], c = plan[i + 3];
+            try {
+                if (op === 0) {
+                    // RAM -> RAM memcpy
+                    uc.mem_write(BigInt(b), uc.mem_read(BigInt(a), c));
+                } else if (op === 1) {
+                    // periph -> mem: Rust absorbed the bytes, JS stores them
+                    uc.mem_write(BigInt(a), dma_take_absorbed(c, b));
+                } else if (op === 2) {
+                    // mem -> periph: JS reads RAM, Rust pushes the bytes
+                    dma_push_periph(c, uc.mem_read(BigInt(a), b));
+                } else if (op === 3) {
+                    dma_set_completed_many(a);
+                }
+            } catch (e) {
+                console.warn('DMA error:', e.message);
+            }
+        }
+    };
+
+    const processInterrupts = () => {
+        while (true) {
+            const irq = intr_next();
+            if (irq <= -100) return;
+
+            const regs = regsRead(uc, [
+                Module.ARM_REG_SP, Module.ARM_REG_PC, Module.ARM_REG_LR, Module.ARM_REG_XPSR,
+                Module.ARM_REG_R0, Module.ARM_REG_R1, Module.ARM_REG_R2, Module.ARM_REG_R3,
+                Module.ARM_REG_R12,
+            ]);
+            const [savedAt, pc, lr, xpsr, r0, r1, r2, r3, r12] = regs;
+            const frame = new Uint8Array(32);
+            const sv = new DataView(frame.buffer);
+            sv.setUint32(0, xpsr, true);
+            sv.setUint32(4, pc, true);
+            sv.setUint32(8, lr, true);
+            sv.setUint32(12, r12, true);
+            sv.setUint32(16, r3, true);
+            sv.setUint32(20, r2, true);
+            sv.setUint32(24, r1, true);
+            sv.setUint32(28, r0, true);
+            uc.mem_write(BigInt(savedAt - 32), frame);
+            const handler_pc = read32(vector_table + 4 * (16 + irq));
+            regsWrite(uc, [Module.ARM_REG_SP, Module.ARM_REG_LR, Module.ARM_REG_PC], [savedAt - 32, 0xFFFFFFF9, handler_pc]);
+            try {
+                uc.emu_start(BigInt(handler_pc), 0n, 0n, 20000);
+            } catch (e) {
+                // BX LR with EXC_RETURN handled by intrHook
+            }
+            finish_interrupt(irq);
+            // Restore from the stacked frame (not JS locals) so a handler that
+            // edits the saved context is honored. xPSR restore is REQUIRED —
+            // the handler's emu_start clobbers APSR, and a cmp/beq pair split
+            // across a batch boundary would evaluate with the handler's flags.
+            const savedFrame = uc.mem_read(BigInt(savedAt - 32), 32);
+            const savedSv = new DataView(savedFrame.buffer, savedFrame.byteOffset, savedFrame.byteLength);
+            regsWrite(uc, [
+                Module.ARM_REG_R0, Module.ARM_REG_R1, Module.ARM_REG_R2, Module.ARM_REG_R3,
+                Module.ARM_REG_R12, Module.ARM_REG_LR, Module.ARM_REG_PC, Module.ARM_REG_XPSR,
+                Module.ARM_REG_SP,
+            ], [
+                savedSv.getUint32(28, true), savedSv.getUint32(24, true), savedSv.getUint32(20, true),
+                savedSv.getUint32(16, true), savedSv.getUint32(12, true), savedSv.getUint32(8, true),
+                savedSv.getUint32(4, true) | 1, savedSv.getUint32(0, true), savedAt,
+            ]);
+            processDma();
+        }
+    };
+
+    const maxBatch = 20000;
+    let totalSteps = 0;
+    const startTime = Date.now();
+    const traceResolve = makeResolver(fwSymbols);
+
+    /* CAN RX injection: firmware sets canRxArmed=1, then waits for a frame */
+    let canInjected = false;
+
+    while (!stopRequested) {
+        const dmaBusy = dma_get_pending_count() > 0;
+        while (stdinQueue.length > 0 && uart_rx_pending(uartAddr) === 0 && !dmaBusy) { const b = stdinQueue.shift(); uart_rx_byte(uartAddr, b); }
+
+        processDma();
+        const curPc = uc.reg_read_i32(Module.ARM_REG_PC);
+        try {
+            uc.emu_start(BigInt(curPc | 1), 0n, 0n, maxBatch);
+        } catch (e) {
+            const msg = String(e);
+            const pc2 = uc.reg_read_i32(Module.ARM_REG_PC);
+            if (msg.includes('UC_ERR_FETCH_UNMAPPED') && ((pc2 & ~1) >>> 0) >= 0xFFFFFFF0 && intr_svc_depth() > 0) {
+                // SVC handler returned via `bx lr` (EXC_RETURN): restore the
+                // pre-SVC context from the Rust mirror.
+                const st = intr_svc_leave();
+                if (st.length === 8) {
+                    uc.reg_write_i32(Module.ARM_REG_R0, st[0]);
+                    uc.reg_write_i32(Module.ARM_REG_R1, st[1]);
+                    uc.reg_write_i32(Module.ARM_REG_R2, st[2]);
+                    uc.reg_write_i32(Module.ARM_REG_R3, st[3]);
+                    uc.reg_write_i32(Module.ARM_REG_R12, st[4]);
+                    uc.reg_write_i32(Module.ARM_REG_LR, st[5]);
+                    uc.reg_write_i32(Module.ARM_REG_PC, st[6] | 1);
+                    uc.reg_write_i32(Module.ARM_REG_SP, st[7]);
+                }
+            } else if (msg.includes('UC_ERR_READ_UNMAPPED') || msg.includes('UC_ERR_FETCH_UNMAPPED') || msg.includes('UC_ERR_WRITE_UNMAPPED')) {
+                const r0 = uc.reg_read_i32(Module.ARM_REG_R0);
+                const r1 = uc.reg_read_i32(Module.ARM_REG_R1);
+                const lr = uc.reg_read_i32(Module.ARM_REG_LR);
+                const sym = traceResolve ? (traceResolve(pc2) || pc2.toString(16)) : null;
+                console.log(`FAULT @${sym} lr=${traceResolve ? (traceResolve(lr) || lr.toString(16)) : lr.toString(16)} r0=0x${r0.toString(16)} r1=0x${r1.toString(16)} [${msg}]`);
+                if (traceResolve && sym && sym.includes('HAL_NVIC_EnableIRQ')) {
+                    // Known Unicorn `bl` decode artifact at HAL_NVIC_EnableIRQ+0xf:
+                    // not a real fault, skip the faulting instruction like before.
+                    uc.reg_write_i32(Module.ARM_REG_PC, (pc2 + 2) | 1);
+                } else if (traceResolve) {
+                    // Real fault: raise it. The fault handler runs via
+                    // processInterrupts below and CFSR/HFSR/BFAR are populated.
+                    const kind = msg.includes('FETCH_UNMAPPED') ? 0 : (msg.includes('WRITE_UNMAPPED') ? 2 : 1);
+                    raise_fault(kind, 0);
+                } else {
+                    // No symbol table: keep the legacy tolerant skip.
+                    uc.reg_write_i32(Module.ARM_REG_PC, (pc2 + 2) | 1);
+                }
+            } else {
+                console.error('Emulation error:', e.message || e);
+                break;
+            }
+        }
+        instCount += maxBatch;
+        batchInstCount += maxBatch;
+        if (batchInstCount > 0) {
+            const status = step_batch(batchInstCount);
+            batchInstCount = 0;
+            if (status === 1) { stopRequested = true; break; }
+        }
+        processDma();
+        try { processInterrupts(); } catch (irqErr) { console.error('processInterrupts error at step', totalSteps, ':', irqErr?.message || irqErr); break; }
+        totalSteps++;
+
+        if (canArmedSym && !canInjected) {
+            const armedBytes = uc.mem_read(canArmedSym.addr, 4);
+            const armed = armedBytes && armedBytes[0] !== 0;
+            if (armed) {
+                canInjected = can_inject_message(0x40006400, 0 << 21, 2, 0xDEAD, 0);
+            }
+        }
+
+        try { if (stopRequested || is_watchdog_reset_requested()) break; } catch (wdErr) { console.error('WDT check error:', wdErr); break; }
+        if (instCount >= maxInst) break;
+        await new Promise(r => setImmediate(r));
+    }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+    const finalPc = uc.reg_read_i32(Module.ARM_REG_PC);
+    const finalSp = uc.reg_read_i32(Module.ARM_REG_SP);
+
+    const uartOut = get_uart_output();
+    if (uartOut) {
+        console.log(`\n=== UART Output ===\n${uartOut}`);
+    }
+
+    try { if (process.stdin.isTTY) process.stdin.setRawMode(false); } catch (_) {}
+
+    console.log(`\nDone: ${totalSteps} steps, ${instCount} instructions in ${elapsed}s`);
+
+    const resolve = makeResolver(fwSymbols);
+    const pcName = resolve && resolve(finalPc);
+    const spName = resolve && resolve(finalSp);
+    console.log(`PC=0x${finalPc.toString(16)}${pcName ? `  → ${pcName}` : ''} SP=0x${finalSp.toString(16)}${spName ? `  → ${spName}` : ''}`);
+
+    if (showRegs) {
+        for (let i = 0; i <= 12; i++) {
+            const reg = uc[`reg_read_i32`](Module[`ARM_REG_R${i}`]);
+            process.stdout.write(`R${i}=0x${reg.toString(16).padStart(8, '0')} `);
+            if (i % 4 === 3) console.log();
+        }
+        console.log(`LR=0x${uc.reg_read_i32(Module.ARM_REG_LR).toString(16).padStart(8, '0')}`);
+        console.log(`xPSR=0x${uc.reg_read_i32(Module.ARM_REG_XPSR).toString(16).padStart(8, '0')}`);
+    }
+
+    uc.close();
+}
+
+main().catch(e => {
+    console.error('Fatal:', e?.name || '(no name)', e?.message || '(no message)', e?.code || '');
+    console.error('Stack:', e?.stack?.substring(0, 1000) || '(no stack)');
+    console.error('Type:', typeof e, e);
+    process.exit(1);
+});

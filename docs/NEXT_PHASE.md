@@ -66,12 +66,38 @@ model (no JS hooks at all — peripherals are plain memory reads). Measure again
 ~22M IPS baseline before committing.
 
 ### 4. Single WASM module (Emscripten link) — "Path A", EXPERIMENT status
-> **Status (2026-08-11): planned experiment, NOT in progress.** The dual-wasm
+> **Status (2026-08-13): EXPERIMENT ACCEPTED on branch `path-a` — all five acceptance
+> gate items green.** The dual-wasm
 > setup (unicorn_arm.cjs/.js + stm32_bluepill_wasm_bg.wasm) stays the default
-> and the shipping artifact until Path A is proven: 236/236 unit tests, 39/39
-> canary, 200M runs on BOTH paths (cli + emulator.js), IPS within ~2× of the
-> ~22M baseline, and the browser page working. Rollback is free — Path A lives
-> on a branch, the current tree is untouched.
+> and the shipping artifact; Path A lives on branch `path-a` and passes:
+> 236/236 unit tests, 39/39 canary, 200M runs on BOTH paths, IPS within ~2× of
+> the ~22M baseline (merged ~21s/200M wall), browser page working, and the
+> full 10-firmware battery `path-a/test_firmware_merged.mjs` green 32/32.
+> Rollback is free — the current tree is untouched.
+
+**Merged-module details (branch `path-a`, uncommitted there):**
+- `path-a/merged4.wasm` (2.67 MB) + `path-a/merged4.mjs` — build recipe in
+  `path-a/BUILD.md`; rebuilt with the same emcc flags as the smoke builds.
+- `path-a/loader.mjs` / `path-a/loader-core.mjs` — replaces the dual-path
+  loader so cli.mjs/emulator.js can run against the merged module.
+  `uc_mem_map_ptr` (exported) maps the periph+RAM ranges ONTO the same
+  backing memory (`Module._malloc` once per size) — this also FIXES the
+  multi-emulator crash: the dist Unicorn class assigns `mem_map` per
+  instance, so the loader wraps `Module.Unicorn` and patches `u.mem_map`
+  after construction. Key: `Module.getValue(u.handle_ptr, '*')` is the real
+  handle (handle_ptr is the ADDRESS of the handle variable).
+- `path-a/emulator-merged.mjs` — emulator.js copy driving the merged module
+  (identical run loop; the whole battery runs through it).
+- `path-a/test_firmware_merged.mjs` — 10-firmware battery (echo, fade,
+  timer_uart, adc_uart, flash_demo, ws2812, showcase, js_periph, fsmc,
+  f105-SVD). Each section runs in its OWN child process: the merged module
+  maps a ~1.9GB shared backing per process, so 8+ emulator contexts in one
+  process hit the 2GB wasm memory ceiling.
+- Budget fixes found by the battery (firmware cadence, not emulator bugs):
+  echo 3M→15M (`delay(50)` = 3.6M instr/char), ws2812 160M→190M (the
+  `frames=` print fires at t≥2000ms ≈ 170M; uwTick lives at 0x20000474 in
+  this build, not the periph39 build's 0x20000478), showcase 25M→100M +
+  100M tail after the button press (heartbeat prints once per second).
 
 **Goal:** compile Rust peripheral code + Unicorn C into ONE `emcc` output —
 the `wasm32-unknown-emscripten` target links both via C ABI, so the JS memory
