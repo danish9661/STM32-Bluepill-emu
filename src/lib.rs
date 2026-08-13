@@ -43,6 +43,7 @@ pub fn reset_ext_devices() {
 pub fn init() {
     console_error_panic_hook::set_once();
     system::INSTRUCTION_COUNT.store(0, Ordering::Relaxed);
+    peripherals::gpio::clear_pin_events();
     unsafe { SYS = Some(WasmSystem::new()); }
 }
 
@@ -52,6 +53,7 @@ pub fn init() {
 pub fn init_svd(svd_xml: &str) {
     console_error_panic_hook::set_once();
     system::INSTRUCTION_COUNT.store(0, Ordering::Relaxed);
+    peripherals::gpio::clear_pin_events();
     unsafe { SYS = Some(WasmSystem::new_svd(svd_xml)); }
 }
 
@@ -294,6 +296,13 @@ pub fn gpio_set_input(port: u32, pin: u32, value: bool) {
 #[wasm_bindgen]
 pub fn gpio_read_input(port: u32, pin: u32) -> bool {
     sys().p.gpio.borrow().read_input_pin(port as u8, pin as u8)
+}
+
+/// Drain buffered pin-change events as a flat [port, pin, level, ...] array
+/// (chip-driven output level changes only). Cleared on the next init().
+#[wasm_bindgen]
+pub fn gpio_take_pin_events() -> Vec<u32> {
+    peripherals::gpio::take_pin_events()
 }
 
 /// Set an analog wire voltage on a GPIO pin (12-bit, 0xFFFF clears it).

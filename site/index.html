@@ -385,17 +385,17 @@ function renderShowcase() {
 }
 
 const SEG_CS = 'PA4', SEG_CS_BIT = 4, SEG_SPI_DR = 0x4001300C;
-const SEG_GPIOA_ODR = 0x4001080C, SEG_GPIOA_BSRR = 0x40010810, SEG_GPIOA_BRR = 0x40010814;
 let segBuf = [], segDigits = [0x3F, 0x3F, 0x3F, 0x3F], segCsLow = false;
 const SEG_PAT = [0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F, 0x77, 0x7C, 0x39, 0x5E, 0x79, 0x71];
-const segWatch = (addr, width, value) => {
-    if (addr === SEG_GPIOA_ODR) segCsLow = ((value >>> SEG_CS_BIT) & 1) === 0;
-    else if (addr === SEG_GPIOA_BSRR) {
-        if ((value >>> SEG_CS_BIT) & 1) segCsLow = false;
-        if ((value >>> (SEG_CS_BIT + 16)) & 1) segCsLow = true;
-    } else if (addr === SEG_GPIOA_BRR) {
-        if ((value >>> SEG_CS_BIT) & 1) segCsLow = true;
-    } else if (addr === SEG_SPI_DR && segCsLow) {
+// CS level from the pin-change API (port 0 = GPIOA): the chip drives PA4 to a
+// NEW level (ODR/BSRR/BRR writes, or CRL/CRH mode-change re-drives). Pin events
+// drain before each hook's write watchers, so segCsLow is current when the SPI
+// DR write watcher runs — no ODR/BSRR/BRR register parsing needed.
+const segCsWatch = (port, pin, level) => {
+    if (port === 0 && pin === SEG_CS_BIT) segCsLow = level === 0;
+};
+const segSpiWatch = (addr, width, value) => {
+    if (addr === SEG_SPI_DR && segCsLow) {
         segBuf.push(value & 0xFF);
         if (segBuf.length >= 4) { segDigits = segBuf.slice(0, 4); segBuf = []; }
     }
@@ -665,7 +665,8 @@ $('loadPresetBtn').addEventListener('click', async () => {
                 lcd: [{ peripheral: 'SPI1', cs: 'PA8' }],
             });
             segBuf = []; segDigits = [0x3F, 0x3F, 0x3F, 0x3F]; segCsLow = false;
-            emu.onPeriphWrite(segWatch);
+            emu.onPinChange(segCsWatch);
+            emu.onPeriphWrite(segSpiWatch);
             $('showcaseCard').hidden = false;
             log('Press Run — OLED + LCD framebuffers, 7-seg, RGB PWM, buzzer at PB14 and the PB13 button widget go live.', 't-in');
         }
