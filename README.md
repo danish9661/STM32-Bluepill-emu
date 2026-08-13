@@ -13,7 +13,7 @@ emulator compiled to WebAssembly (WASM)** + a **Rust peripheral emulator** imple
 the chip's registers with realistic timing, interrupts, and electrical behavior.
 
 - **Try it live**: [danish9661.github.io/STM32-Bluepill-emu](https://danish9661.github.io/STM32-Bluepill-emu/) — 10 demo presets with a board + LED visualization and a UART terminal, or upload your own `.bin`/`.hex`/`.elf`
-- **~5.1M instructions/sec** in the browser, **~22M instructions/sec** headless (200M instructions in ~9 s)
+- **~5.1M instructions/sec** in the browser, **~24M instructions/sec** headless (200M instructions in ~8.3 s)
 - Runs firmware compiled for the real chip: Arduino core (STM32duino), libopencm3, STM32Cube HAL
 - Verified: `Serial.println()`, `digitalWrite()`, `millis()`, SPI, I2C, CAN, DMA, ADC, timers and interrupts all work
 - **Cycle-accurate timing**: 1 instruction = 1 CPU cycle on a 72 MHz-equivalent time base (SysTick/timer/UART timing matches real silicon); wall speed scales with host throughput, so a "1 s" timer demo runs slower than one line per wall second (~0.2 s of chip time per second of wall time headless)
