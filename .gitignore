@@ -18,6 +18,14 @@ tests/arduino_periph_test/build/*.log
 tests/arduino_echo/build/
 tests/arduino_fade/build/
 tests/arduino_periph_test/build/compile_commands.json
+tests/arduino_ws2812/build/core/
+tests/arduino_ws2812/build/libraries/
+tests/arduino_ws2812/build/sketch/
+tests/arduino_ws2812/build/*.cache
+tests/arduino_ws2812/build/*.log
+tests/arduino_ws2812/build/compile_commands.json
+tests/arduino_ws2812/build/build.options.json
+
 tests/arduino_periph_test/build/build.options.json
 tests/arduino_timer_uart/build/core/
 tests/arduino_timer_uart/build/libraries/

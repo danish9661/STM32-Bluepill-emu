@@ -94,6 +94,9 @@ select:focus { outline: none; border-color: #7dd3fc; }
 #seg-svg .seg { fill: #1e293b; stroke: #334155; stroke-width: 1.5; }
 #seg-svg .seg.on { fill: #ef4444; stroke: #dc2626; }
 #rgb-bar { height: 14px; border-radius: 4px; border: 1px solid #334155; transition: background 150ms; }
+.ws-strip { display: flex; gap: 6px; margin: 8px 0; align-items: center; }
+.ws-led { width: 22px; height: 22px; border-radius: 50%; background: #1e293b; border: 1px solid #334155; transition: background 80ms; }
+.ws-count { font-size: 12px; color: #94a3b8; }
 #buzz-ind { display: inline-block; width: 34px; height: 34px; border-radius: 50%; border: 2px solid #334155; color: #94a3b8; text-align: center; line-height: 32px; font-size: 16px; transition: all 120ms; }
 #buzz-ind.on { border-color: #f59e0b; color: #f59e0b; box-shadow: 0 0 14px rgba(245,158,11,0.7); }
 #btn-widget { width: 100%; padding: 9px; font-size: 13px; }
@@ -138,6 +141,16 @@ select:focus { outline: none; border-color: #7dd3fc; }
                 <div class="periph-dev"><h4>Button · PB13 EXTI13</h4><button id="btn-widget">Press PB13</button></div>
             </div>
         </div>
+        <div class="card" style="margin-top:16px" id="wsCard" hidden>
+            <h2>WS2812 Strip · SPI1 + DMA1 CH3</h2>
+            <div class="ws-strip" id="wsStrip">
+                <div class="ws-led" id="ws-led-0"></div><div class="ws-led" id="ws-led-1"></div>
+                <div class="ws-led" id="ws-led-2"></div><div class="ws-led" id="ws-led-3"></div>
+                <div class="ws-led" id="ws-led-4"></div><div class="ws-led" id="ws-led-5"></div>
+                <div class="ws-led" id="ws-led-6"></div><div class="ws-led" id="ws-led-7"></div>
+            </div>
+            <div class="ws-count" id="wsFrameCount">0 frames</div>
+        </div>
     </div>
 
     <div>
@@ -154,6 +167,7 @@ select:focus { outline: none; border-color: #7dd3fc; }
                     <option value="adc_uart">ADC on UART (adc=1023 each second)</option>
                     <option value="flash_demo">SPI flash + I2C (JEDEC/EEPROM/OLED)</option>
                     <option value="showcase">Peripheral Showcase (OLED·LCD·7-seg·RGB·buzzer·button)</option>
+                    <option value="ws2812">WS2812 Strip (SPI1·DMA1 CH3, 8 LEDs)</option>
                 </select>
                 <select id="chipSelect" title="Chip / board (rp2040js-style: pick the peripheral map)">
                     <option value="stm32f103c8">STM32F103C8 (builtin map)</option>
@@ -183,7 +197,6 @@ select:focus { outline: none; border-color: #7dd3fc; }
             </div>
         </div>
     </div>
-</div>
 
 <script type="module">
 import { createEmulator, parseSymbolMap } from './emulator.js';
@@ -409,6 +422,41 @@ const segSpiWatch = (addr, width, value) => {
     }
 };
 
+// WS2812 strip decoder: the firmware bit-bangs 800kHz WS2812 frames over
+// SPI1 at 2.25MHz (div32) — each WS2812 bit = 3 SPI bits (0b110 = 1, 0b100 = 0),
+// 24 bits/LED, GRB byte order, 8 LEDs = 72 SPI bytes per frame. DMA1 CH3 pushes
+// the bytes straight into SPI1 DR, so onPeriphWrite is the only tap that sees
+// them (processDma feeds the watchers per pushed byte like real hardware).
+const WS_SPI_DR = 0x4001300C;
+const wsBuf = [];
+const wsLeds = Array.from({ length: 8 }, () => ({ r: 0, g: 0, b: 0 }));
+let wsFrames = 0;
+const wsWatch = (addr, width, value) => {
+    if (addr !== WS_SPI_DR) return;
+    wsBuf.push(value & 0xFF);
+    if (wsBuf.length < 72) return;
+    const spi = wsBuf.splice(0, 72);
+    const ledBytes = [];
+    for (let d = 0; d < 24; d++) {
+        const bits = (spi[d * 3] << 16) | (spi[d * 3 + 1] << 8) | spi[d * 3 + 2];
+        let out = 0;
+        for (let i = 23; i >= 2; i -= 3) out = (out << 1) | (((bits >> (i - 2)) & 0b111) === 0b110 ? 1 : 0);
+        ledBytes.push(out);
+    }
+    for (let l = 0; l < 8; l++) {
+        wsLeds[l].g = ledBytes[l * 3];
+        wsLeds[l].r = ledBytes[l * 3 + 1];
+        wsLeds[l].b = ledBytes[l * 3 + 2];
+    }
+    wsFrames++;
+    wsLeds.forEach((led, i) => {
+        const el = document.getElementById(`ws-led-${i}`);
+        if (el) el.style.background = `rgb(${led.r},${led.g},${led.b})`;
+    });
+    const c = document.getElementById('wsFrameCount');
+    if (c) c.textContent = `${wsFrames} frames`;
+};
+
 // Pin-activity monitor: per-pin toggle counters fed by onPinChange (chip-driven
 // output level changes, drained each batch). The board SVG glows recently-toggled
 // pins and tooltips show cumulative toggle counts — proves the event stream is
@@ -506,6 +554,7 @@ async function initEmulator(data, name, extDevices = {}) {
     $('speed').textContent = '—';
     $('avgMips').textContent = '—';
     $('showcaseCard').hidden = true;
+    $('wsCard').hidden = true;
     runStartTs = 0;
     runStartInst = 0;
     totalInst = 0;
@@ -695,6 +744,17 @@ $('loadPresetBtn').addEventListener('click', async () => {
             emu.onPeriphWrite(segSpiWatch);
             $('showcaseCard').hidden = false;
             log('Press Run — OLED + LCD framebuffers, 7-seg, RGB PWM, buzzer at PB14 and the PB13 button widget go live.', 't-in');
+        } else if (preset === 'ws2812') {
+            const fw = await fetch('arduino_ws2812.elf').then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(fw), 'arduino_ws2812.elf (WS2812 strip via SPI1+DMA)');
+            wsBuf.length = 0;
+            wsFrames = 0;
+            wsLeds.forEach(led => { led.r = led.g = led.b = 0; });
+            document.querySelectorAll('.ws-led').forEach(el => el.style.background = '#1e293b');
+            $('wsFrameCount').textContent = '0 frames';
+            emu.onPeriphWrite(wsWatch);
+            $('wsCard').hidden = false;
+            log('Press Run — an 8-LED WS2812 strip (rainbow chase, 800kHz) streams from SPI1 via DMA1 CH3; the LEDs light live as frames decode.', 't-in');
         }
     } catch (e) {
         log(`Failed to load preset: ${e.message || e}`, 't-err');
