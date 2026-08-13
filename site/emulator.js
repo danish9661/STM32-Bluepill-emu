@@ -264,7 +264,7 @@ export async function createEmulator(opts = {}) {
     gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt, finish_interrupt,
     can_inject_message, adc_set_sim_value, gpio_set_analog, adc_set_rc_tau,
     touchscreen_set_touch, pwm_duty, raise_fault,
-    i2c_oled_fb, lcd_fb } = periph;
+    i2c_oled_fb, lcd_fb, gpio_take_pin_events } = periph;
 
     // Register external devices BEFORE init()
     reset_ext_devices();
@@ -443,6 +443,9 @@ export async function createEmulator(opts = {}) {
         }
         // External bus observers: page-side peripheral drivers (7-seg, buzzer, ...) tap
         // the peripheral bus exactly like real hardware taps the pins.
+        // Pin events first: a CS-level change recorded by periph_write must be
+        // visible to the write watchers of the NEXT hook call (SPI DR while CS low).
+        drainPinEvents();
         if (writeWatchers.length) {
             for (let wi = 0; wi < writeWatchers.length; wi++) {
                 try { writeWatchers[wi](addr32, size, valueNum); } catch (e) {}
@@ -459,6 +462,22 @@ export async function createEmulator(opts = {}) {
     let instCount = 0;
     let batchInstCount = 0;
     const writeWatchers = [];
+    const pinWatchers = [];
+
+    // Drain buffered GPIO pin-change events (flat [port, pin, level, ...]) into
+    // the pin watchers. Pull-style: runs at the top of each memWriteHook (so a
+    // CS-low event is visible before the next DR write's watcher runs) and once
+    // per batch in run()/step(). No JS callback ever runs reentrantly inside Rust.
+    const drainPinEvents = () => {
+        if (!pinWatchers.length) return;
+        const ev = gpio_take_pin_events();
+        for (let i = 0; i + 2 < ev.length; i += 3) {
+            const port = ev[i], pin = ev[i + 1], level = ev[i + 2];
+            for (let wi = 0; wi < pinWatchers.length; wi++) {
+                try { pinWatchers[wi](port, pin, level); } catch (e) {}
+            }
+        }
+    };
 
     // Hookless instruction counting: emu_start(begin, 0, 0, maxBatch) stops exactly at
     // maxBatch instructions except on a fault (unmapped access, ~0.01% of batches),
@@ -669,6 +688,7 @@ export async function createEmulator(opts = {}) {
                 }
                 processDma();
                 processInterrupts();
+                drainPinEvents();
                 totalSteps++;
                 if (is_watchdog_reset_requested()) break;
                 if (maxInstructions > 0 && instCount - startInst >= maxInstructions) break;
@@ -698,6 +718,7 @@ export async function createEmulator(opts = {}) {
             }
             processDma();
             processInterrupts();
+            drainPinEvents();
             return {
                 pc: uc.reg_read_i32(Module.ARM_REG_PC),
                 instCount,
@@ -784,6 +805,21 @@ export async function createEmulator(opts = {}) {
                 if (i >= 0) writeWatchers.splice(i, 1);
             };
         },
+
+        /** Watch chip-driven GPIO level changes: fn(port, pin, level) (port 0=GPIOA, level 0/1).
+         *  Fires when the chip drives an output pin to a NEW level (ODR/BSRR/BRR writes, or
+         *  CRL/CRH writes re-driving ODR). Does NOT fire for gpioSetInput (JS→chip direction).
+         *  Drained automatically each batch (and before write watchers at each hook). Returns unsubscribe. */
+        onPinChange(fn) {
+            pinWatchers.push(fn);
+            return () => {
+                const i = pinWatchers.indexOf(fn);
+                if (i >= 0) pinWatchers.splice(i, 1);
+            };
+        },
+
+        /** Drain buffered pin-change events directly (flat [port, pin, level, ...]). */
+        takePinEvents() { return gpio_take_pin_events(); },
 
         /** Current I2C OLED framebuffer, page-major (page*width + col), 1 byte per column. */
         i2cOledFb(peripheral, address = 0x3C) {

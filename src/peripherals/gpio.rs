@@ -1,6 +1,7 @@
 use crate::system::System;
 use super::Peripheral;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
 
 use regex::Regex;
 
@@ -12,6 +13,34 @@ static GPIO_SLEW: AtomicU32 = AtomicU32::new(0);
 
 pub fn set_gpio_slew(inst: u32) {
     GPIO_SLEW.store(inst, Ordering::Relaxed);
+}
+
+/// Pin-change event buffer: flat [port, pin, level] triples, recorded whenever
+/// the chip drives an output pin to a NEW level (ODR/BSRR/BRR writes and
+/// CRL/CRH mode-change re-drives). Drained by JS via gpio_take_pin_events();
+/// cleared by the next init()/init_svd(). Bounded: on overflow the buffer is
+/// dropped wholesale (page drains per batch, so this never happens in practice).
+const MAX_PIN_EVENTS: usize = 1024;
+static GPIO_PIN_EVENTS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+pub fn clear_pin_events() {
+    GPIO_PIN_EVENTS.lock().unwrap().clear();
+}
+
+/// Drain buffered pin-change events as a flat [port, pin, level, ...] array.
+pub fn take_pin_events() -> Vec<u32> {
+    let mut ev = GPIO_PIN_EVENTS.lock().unwrap();
+    std::mem::take(&mut *ev)
+}
+
+fn record_pin_event(port: u8, pin: u8, level: bool) {
+    let mut ev = GPIO_PIN_EVENTS.lock().unwrap();
+    if ev.len() + 3 > MAX_PIN_EVENTS {
+        ev.clear();
+    }
+    ev.push(port as u32);
+    ev.push(pin as u32);
+    ev.push(level as u32);
 }
 
 #[derive(Clone, Copy)]
@@ -121,10 +150,16 @@ impl GpioPorts {
         if v == 0xFFFF { None } else { Some(v) }
     }
 
-    pub fn write_port(&mut self, sys: &System, port: u8, pin: u8, value: bool) {
+    /// Drive an output pin. `record_event` controls whether a NEW driven level
+    /// emits a pin-change event (false for alternate-function pins — PWM/SPI
+    /// clocks churn at MHz and are observed via pwmDuty/onPeriphWrite instead).
+    pub fn write_port(&mut self, sys: &System, port: u8, pin: u8, value: bool, record_event: bool) {
+        let old = (self.output_states[port as usize] >> pin) & 1 != 0;
+        if old != value && record_event {
+            record_pin_event(port, pin, value);
+        }
         let slew = GPIO_SLEW.load(Ordering::Relaxed) as u64;
         if slew > 0 {
-            let old = (self.output_states[port as usize] >> pin) & 1 != 0;
             if old != value {
                 self.pending_transitions[port as usize]
                     .push((pin, crate::system::instruction_count() + slew, old));
@@ -250,6 +285,12 @@ impl Gpio {
         self.pin_mode(pin) != 0
     }
 
+    /// True for alternate-function output pins (cnf=0b10, mode!=0): driven by a
+    /// peripheral, not by ODR — excluded from pin-change events.
+    fn pin_is_af(&self, pin: u8) -> bool {
+        self.pin_mode(pin) != 0 && self.pin_cnf(pin) == 2
+    }
+
     #[allow(dead_code)]
     fn pin_is_analog(&self, pin: u8) -> bool {
         self.pin_mode(pin) == 0 && self.pin_cnf(pin) == 0
@@ -331,15 +372,37 @@ impl Peripheral for Gpio {
 
     fn write(&mut self, sys: &System, offset: u32, value: u32) {
         match offset {
-            0x00 => self.crl = value,
-            0x04 => self.crh = value,
+            0x00 => {
+                let old = self.crl;
+                self.crl = value;
+                let mut gpio = sys.p.gpio.borrow_mut();
+                // Mode change re-drives pins now in output mode with their ODR
+                // level (real HW behavior); write_port records pin events only
+                // when the driven level actually changes.
+                Self::iter_port_reg_changes(old, value, 4, |pin, _| {
+                    if self.pin_is_output(pin) {
+                        gpio.write_port(sys, self.port, pin, ((self.odr >> pin) & 1) != 0, !self.pin_is_af(pin));
+                    }
+                });
+            }
+            0x04 => {
+                let old = self.crh;
+                self.crh = value;
+                let mut gpio = sys.p.gpio.borrow_mut();
+                Self::iter_port_reg_changes(old, value, 4, |pin, _| {
+                    let pin = pin + 8;
+                    if self.pin_is_output(pin) {
+                        gpio.write_port(sys, self.port, pin, ((self.odr >> pin) & 1) != 0, !self.pin_is_af(pin));
+                    }
+                });
+            }
             0x08 => {}
             0x0C => {
                 let old_odr = self.odr;
                 let mut gpio = sys.p.gpio.borrow_mut();
                 Self::iter_port_reg_changes(old_odr, value, 1, |pin, v| {
                     if self.pin_is_output(pin) {
-                        gpio.write_port(sys, self.port, pin, v != 0);
+                        gpio.write_port(sys, self.port, pin, v != 0, !self.pin_is_af(pin));
                         sys.p.gpio_exti_trigger(sys, self.port, pin, v != 0);
                     }
                 });
@@ -352,13 +415,13 @@ impl Peripheral for Gpio {
                 let mut gpio = sys.p.gpio.borrow_mut();
                 Self::iter_port_reg_changes(0, set, 1, |pin, _| {
                     if self.pin_is_output(pin) {
-                        gpio.write_port(sys, self.port, pin, true);
+                        gpio.write_port(sys, self.port, pin, true, !self.pin_is_af(pin));
                         sys.p.gpio_exti_trigger(sys, self.port, pin, true);
                     }
                 });
                 Self::iter_port_reg_changes(0, reset, 1, |pin, _| {
                     if self.pin_is_output(pin) {
-                        gpio.write_port(sys, self.port, pin, false);
+                        gpio.write_port(sys, self.port, pin, false, !self.pin_is_af(pin));
                         sys.p.gpio_exti_trigger(sys, self.port, pin, false);
                     }
                 });
@@ -369,7 +432,7 @@ impl Peripheral for Gpio {
                 let mut gpio = sys.p.gpio.borrow_mut();
                 Self::iter_port_reg_changes(0, value, 1, |pin, _| {
                     if self.pin_is_output(pin) {
-                        gpio.write_port(sys, self.port, pin, false);
+                        gpio.write_port(sys, self.port, pin, false, !self.pin_is_af(pin));
                         sys.p.gpio_exti_trigger(sys, self.port, pin, false);
                     }
                 });

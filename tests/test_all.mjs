@@ -6,7 +6,8 @@ const { init, init_svd, periph_read, periph_write, tick, step_batch, has_pending
         get_next_pending_interrupt, clear_current_interrupt, gpio_read_output, gpio_set_input,
         gpio_read_input, get_uart_output, uart_rx_byte, adc_set_sim_value,
         is_watchdog_reset_requested, can_inject_message, gpio_set_slew, raise_fault,
-        add_fsmc_bank, gpio_set_analog, adc_set_rc_tau, register_js_peripheral } = periph;
+        add_fsmc_bank, gpio_set_analog, adc_set_rc_tau, register_js_peripheral,
+        gpio_take_pin_events } = periph;
 
 let passed = 0, failed = 0;
 
@@ -71,6 +72,64 @@ assert_eq(gpio_read_input(0, 0), false, 'GPIO PA0 input set low');
 // BSRR should only affect set bits — verify no stray change
 periph_write(0x40011010, 4, 0);
 assert_eq(periph_read(0x4001100C, 4) & 0x2000, 0, 'GPIO BSRR=0 no change');
+
+// ============================================================
+// GPIO pin-change events (gpio_take_pin_events)
+// ============================================================
+group('GPIO pin events');
+reset(); // init clears the event buffer
+
+// CRL/CRH mode change to output with ODR=0: re-drives to the same level — silent
+let gpioc_crh = periph_read(0x40011004, 4);
+gpioc_crh = (gpioc_crh & ~(0xF << 20)) | (0x3 << 20); // PC13 output PP 50MHz
+periph_write(0x40011004, 4, gpioc_crh);
+assert_eq(gpio_take_pin_events().length, 0, 'pin event: CRH->output same level silent');
+
+// BSRR set fires (2, 13, 1)
+periph_write(0x40011010, 4, 1 << 13);
+let ev = gpio_take_pin_events();
+assert_eq(ev.length, 3, 'pin event: BSRR set emits one triple');
+assert_eq(ev[0] === 2 && ev[1] === 13 && ev[2] === 1, true, 'pin event: BSRR set = (2,13,1)');
+
+// Same-level BSRR set is silent (old==value guard in write_port)
+periph_write(0x40011010, 4, 1 << 13);
+assert_eq(gpio_take_pin_events().length, 0, 'pin event: same-value BSRR set silent');
+
+// BSRR reset fires (2, 13, 0)
+periph_write(0x40011010, 4, 1 << 29);
+ev = gpio_take_pin_events();
+assert_eq(ev.length === 3 && ev[2] === 0, true, 'pin event: BSRR reset = (2,13,0)');
+
+// ODR same-value write is silent (iter_port_reg_changes skips unchanged pins)
+periph_write(0x4001100C, 4, 0);
+assert_eq(gpio_take_pin_events().length, 0, 'pin event: same-value ODR write silent');
+
+// ODR change write fires
+periph_write(0x4001100C, 4, 1 << 13);
+ev = gpio_take_pin_events();
+assert_eq(ev.length === 3 && ev[2] === 1, true, 'pin event: ODR change = (2,13,1)');
+// CRL/CRH re-drive: input mode (ODR writes don't drive), then back to output —
+// the pin re-drives ODR=0 while the wire was high → event (2,13,0)
+gpioc_crh = (gpioc_crh & ~(0xF << 20)) | (0x4 << 20); // PC13 input floating
+periph_write(0x40011004, 4, gpioc_crh);
+assert_eq(gpio_take_pin_events().length, 0, 'pin event: input mode change silent');
+periph_write(0x4001100C, 4, 0); // ODR=0 while input (no drive)
+assert_eq(gpio_take_pin_events().length, 0, 'pin event: ODR write while input silent');
+gpioc_crh = (gpioc_crh & ~(0xF << 20)) | (0x3 << 20); // back to output
+periph_write(0x40011004, 4, gpioc_crh);
+ev = gpio_take_pin_events();
+assert_eq(ev.length === 3 && ev[2] === 0, true, 'pin event: CRH re-drive fires (2,13,0)');
+
+// AF pins (cnf=0b10) emit nothing: PA7 AF push-pull, toggle ODR bit 7
+let gpioa_crl2 = periph_read(0x40010800, 4);
+gpioa_crl2 = (gpioa_crl2 & ~(0xF << 28)) | (0xB << 28); // PA7 AF output PP 50MHz
+periph_write(0x40010800, 4, gpioa_crl2);
+periph_write(0x40010810, 4, 1 << 7); // BSRR set PA7
+periph_write(0x40010810, 4, 1 << 23); // BSRR reset PA7
+assert_eq(gpio_take_pin_events().length, 0, 'pin event: AF pin toggles emit nothing');
+
+// Drain twice: second drain is empty
+assert_eq(gpio_take_pin_events().length, 0, 'pin event: drain empties the buffer');
 
 // ============================================================
 // USART (UART)
