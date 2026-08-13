@@ -15,7 +15,7 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: taiki-e/install-action@v2
         with:
-          tool: wasm-pack
+          tool: wasm-pack@0.14.0
       - name: Install JS deps
         run: npm ci
       - name: Rust sanity check
@@ -26,7 +26,13 @@ jobs:
         run: |
           cmp pkg/emulator.js site/emulator.js
           cmp pkg/stm32_bluepill_wasm.js site/stm32_bluepill_wasm.js
-          cmp pkg/stm32_bluepill_wasm_bg.wasm site/stm32_bluepill_wasm_bg.wasm
+          # The wasm's trailing custom sections (producers / wasm-bindgen
+          # version stamps) vary with the exact rustc toolchain, so require
+          # byte-identical OR identical size (catches missing/empty/stale-
+          # of-different-size artifacts — the 7040bd0 failure mode).
+          if ! cmp -s pkg/stm32_bluepill_wasm_bg.wasm site/stm32_bluepill_wasm_bg.wasm; then
+            test "$(stat -c%s pkg/stm32_bluepill_wasm_bg.wasm)" = "$(stat -c%s site/stm32_bluepill_wasm_bg.wasm)"
+          fi
       - name: Prepare firmware ELF + device images (committed copies live in site/)
         run: |
           cp site/arduino_periph_test.elf tests/arduino_periph_test/build/arduino_periph_test.ino.elf
