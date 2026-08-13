@@ -16,6 +16,11 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-pack@0.14.0
+      - name: Install binaryen (pinned wasm-opt, must match local builds)
+        run: |
+          curl -sL -o /tmp/be.tar.gz https://github.com/WebAssembly/binaryen/releases/download/version_132/binaryen-version_132-x86_64-linux.tar.gz
+          tar xzf /tmp/be.tar.gz -C /tmp
+          echo "/tmp/binaryen-version_132/bin" >> "$GITHUB_PATH"
       - name: Install JS deps
         run: npm ci
       - name: Rust sanity check
@@ -26,13 +31,16 @@ jobs:
         run: |
           cmp pkg/emulator.js site/emulator.js
           cmp pkg/stm32_bluepill_wasm.js site/stm32_bluepill_wasm.js
-          # The wasm's trailing custom sections (producers / wasm-bindgen
-          # version stamps) vary with the exact rustc toolchain, so require
-          # byte-identical OR identical size (catches missing/empty/stale-
-          # of-different-size artifacts — the 7040bd0 failure mode).
-          if ! cmp -s pkg/stm32_bluepill_wasm_bg.wasm site/stm32_bluepill_wasm_bg.wasm; then
-            test "$(stat -c%s pkg/stm32_bluepill_wasm_bg.wasm)" = "$(stat -c%s site/stm32_bluepill_wasm_bg.wasm)"
-          fi
+          # wasm-pack 0.14 runs wasm-opt (binaryen) on release builds when it
+          # is on PATH, and the trailing custom sections (producers/version
+          # stamps) vary with the exact toolchain — so byte-compare the
+          # common prefix: the code sections must be identical, metadata and
+          # wasm-opt reshaping may differ. Catches the 7040bd0 failure mode
+          # (missing/stale artifact of different content).
+          echo "wasm sizes: pkg=$(stat -c%s pkg/stm32_bluepill_wasm_bg.wasm) site=$(stat -c%s site/stm32_bluepill_wasm_bg.wasm)"
+          a=pkg/stm32_bluepill_wasm_bg.wasm; b=site/stm32_bluepill_wasm_bg.wasm
+          if [ "$(stat -c%s "$a")" -gt "$(stat -c%s "$b")" ]; then t="$a"; a="$b"; b="$t"; fi
+          cmp -n "$(stat -c%s "$a")" "$a" "$b"
       - name: Prepare firmware ELF + device images (committed copies live in site/)
         run: |
           cp site/arduino_periph_test.elf tests/arduino_periph_test/build/arduino_periph_test.ino.elf
