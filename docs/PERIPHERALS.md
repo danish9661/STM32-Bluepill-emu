@@ -37,7 +37,7 @@ including interrupt generation, status flags, and timing. Support levels:
 | GPIO A–D | Full | CRL/CRH/IDR/ODR/BSRR/BRR/LCKR, pull-ups, open-drain, alternate function, `read_pin_effective()` (input callback else driven output) for CS/touch lines. **Electrical model**: IDR readback honors input pull-up/down (ODR bit selects direction), push-pull output readback, open-drain released level (external pull or 0), external drivers win over driven state, and output **slew** (IDR shows the old level until the transition settles, `gpio_set_slew(n)` instructions). Readbacks (`gpio_read_output`, `gpio_read_input`) are exposed to JS. |
 | AFIO | Full | Remap registers, EXTI line selectors. |
 | EXTI | Full | 20 lines, rising/falling/level triggers, software-triggered (SWIER), per-line IRQ mapping to NVIC (including the enable side — IMR writes enable the mapped IRQ). **Input pins fire edges too**: `gpioSetInput()` level changes go through the same edge detection as GPIO output writes, so page-driven button widgets drive `attachInterrupt()`. |
-| DMA1 | Full | 7 channels: peripheral→memory, memory→peripheral, memory→memory; CNDTR counts down across batches; transfer-complete IRQs; **pump runs in Rust** (`dma_pump_all()` pops the queue, absorbs/pushes peripheral bytes internally, returns a flat op plan for JS: memcpy / store-absorbed / read-RAM-then-push / done-bits — JS only touches Unicorn RAM via `uc.mem_read`/`mem_write`; completion signaled last so TC IRQs fire after the data lands). DMA1@0x40020000 / DMA2@0x40020400 on both the builtin map and SVD maps (dual-map bug class removed 2026-08-11). |
+| DMA1 | Full | 7 channels: peripheral→memory, memory→peripheral, memory→memory; CNDTR counts down across batches; transfer-complete IRQs; **pump runs in Rust** (`dma_pump_all()` pops the queue, absorbs/pushes peripheral bytes internally, returns a flat op plan for JS: memcpy / store-absorbed / read-RAM-then-push / done-bits — JS only touches Unicorn RAM via `uc.mem_read`/`mem_write`; completion signaled last so TC IRQs fire after the data lands). DMA1@0x40020000 / DMA2@0x40020400 on both the builtin map and SVD maps (dual-map bug class removed 2026-08-11). **Real-HW semantics (2026-08-13)**: ISR completion flags sit at channel N's real nibble (TCIF_N = `(N-1)*4+1` — was off by one channel, CH4 lit bit 16 instead of 13); DIR follows CMSIS (DIR=1 → push CMAR→CPAR, DIR=0 → absorb CPAR→CMAR, M2M → CPAR→CMAR memcpy per RM0008 — was inverted, so a mem→periph channel silently absorbed from the peripheral address); 8-bit SPI data needs PSIZE/MSIZE=00 (16-bit pushes `max(psize,msize)*ndtr` = 2× the wire bytes, since the F103 SPI clocks only 8 bits per 16-bit DR write). |
 
 ## Serial buses
 
@@ -99,8 +99,8 @@ These are *extra* peripherals the STM32 talks to over SPI/I2C — the "rest of t
 
 ## Verification coverage
 
-- **224 unit tests** (`node tests/test_all.mjs`) — GPIO (incl. electrical model: pull-ups,
-  open-drain, external-driver precedence, slew readback), USART, ADC (real conversion
+- **236 unit tests** (`node tests/test_all.mjs`) — GPIO (incl. electrical model: pull-ups,
+  open-drain, external-driver precedence, slew readback, pin-change events), USART, ADC (real conversion
   timing, RC sample-and-hold via gpioSetAnalog, DAC→ADC loopback, AWD IRQ, TIM1 TRGO /
   TIM1_CC1 / EXTI 11 external triggers), RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C,
   RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX, FSMC
@@ -108,7 +108,12 @@ These are *extra* peripherals the STM32 talks to over SPI/I2C — the "rest of t
   without catch-up), fault escalation (CFSR/HFSR/BFAR, BusFault vs HardFault, IBUSERR,
   SHPR routing).
 - **39-check firmware test** (`node tests/canary.mjs`, 39/39): runs a real Arduino sketch
-  compiled with STM32duino against sync + async scenarios (DMA TX/RX, UART RX, TIM2
+  compiled with STM32duino against sync + async scenarios (DMA TX/RX with real-HW ISR
+  bits + CMSIS DIR, UART RX, TIM2
   overflow IRQ, EXTI0/1/13, CAN RX injection, SysTick, TIM3 PWM, TIM4 CNT, RTC alarm IRQ,
   **SVC + PendSV**).
+- **WS2812 strip demo** (`tests/arduino_ws2812/` + browser preset): an 8-LED 800 kHz strip
+  streamed over SPI1 at 2.25 MHz (div32) via DMA1 CH3 — validates the DMA **mem→peripheral
+  data path** end-to-end (72 bytes/frame decoded to exact GRB colors across frames;
+  previously the direction inversion made such transfers complete with zero bytes moved).
 - CI (`.github/workflows/test.yml`) rebuilds the WASM and runs both suites on every push.
