@@ -26,7 +26,15 @@ jobs:
       - name: Rust sanity check
         run: cargo check
       - name: Build peripheral WASM
-        run: wasm-pack build --target web
+        run: |
+          echo "=== toolchain diagnostics ==="
+          rustc --version; cargo --version; wasm-pack --version
+          echo "PATH=$PATH" | tr ':' '\n' | grep -n -E "binaryen|wasm" || true
+          which wasm-opt && wasm-opt --version || echo "NO wasm-opt on PATH"
+          ls -la /tmp/binaryen-version_132/bin/ 2>&1 | head -4
+          find ~/.cache/.wasm-pack -name wasm-bindgen -o -name wasm-opt 2>/dev/null | while read f; do echo "== $f"; "$f" --version 2>&1 | head -1; done
+          echo "=== building ==="
+          wasm-pack build --target web 2>&1 | grep -E "found wasm-opt|Optimizing|wasm-opt" || true
       - name: site/ must mirror pkg/ (emulator.js + wasm glue + wasm)
         run: |
           cmp pkg/emulator.js site/emulator.js
