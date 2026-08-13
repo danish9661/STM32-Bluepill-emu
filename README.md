@@ -4,6 +4,8 @@
 [![About](https://img.shields.io/badge/about-github%20pages-7dd3fc)](https://danish9661.github.io/STM32-Bluepill-emu/about.html)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
+![Demo — WS2812 strip preset running in the browser](site/og-image.png)
+
 A **full-system emulator for the STM32F103C8 "Blue Pill" microcontroller** that runs
 **real, unmodified Arduino firmware** (STM32duino) — as well as libopencm3 and STM32Cube
 HAL programs — in **Node.js or the browser**. Powered by the **Unicorn ARM Cortex-M3 CPU
