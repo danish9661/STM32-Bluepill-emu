@@ -541,17 +541,17 @@ void loopAsyncChecks() {
     if (!dmaTxDone) {
         if (dmaTxArmed == 0) {
             dmaTxBuf[0] = 'D';
-            reg(DMA1_B + 0x44) = 0;                /* CCR4 = 0 (DIR=0 mem->periph) */
-            reg(DMA1_B + 0x4C) = USART1_B + 0x04;  /* CPAR4 = USART1_DR */
+            reg(DMA1_B + 0x44) = (1 << 4);           /* CCR4 = DIR=1 (mem->periph) */
+            reg(DMA1_B + 0x4C) = USART1_B + 0x04;    /* CPAR4 = USART1_DR */
             reg(DMA1_B + 0x50) = (uint32_t)dmaTxBuf; /* CMAR4 */
-            reg(DMA1_B + 0x48) = 1;                /* CNDTR4 = 1 */
-            reg(DMA1_B + 0x44) = 1;                /* EN */
+            reg(DMA1_B + 0x48) = 1;                  /* CNDTR4 = 1 */
+            reg(DMA1_B + 0x44) = (1 << 4) | 1;       /* EN */
             dmaTxArmed = 1;
         }
         uint32_t ndtr = reg(DMA1_B + 0x48);
         uint32_t en = reg(DMA1_B + 0x44) & 1;
         uint32_t isr = reg(DMA1_B + 0x00);
-        bool tc = (isr & (1 << 20)) != 0;          /* TCIF4 (emulator layout) */
+        bool tc = (isr & (1 << 13)) != 0;          /* TCIF4 (real HW layout) */
         if (ndtr == 0 && en == 0 && tc) {
             char buf[48];
             snprintf(buf, sizeof(buf), "NDTR=0 EN=0 ISR=%08X", isr);
@@ -571,7 +571,7 @@ void loopAsyncChecks() {
         reg(DMA1_B + 0x60) = USART1_B + 0x04;      /* CPAR5 = USART1_DR */
         reg(DMA1_B + 0x64) = (uint32_t)dmaRxBuf;   /* CMAR5 */
         reg(DMA1_B + 0x5C) = 1;                    /* CNDTR5 = 1 */
-        reg(DMA1_B + 0x58) = (1 << 4) | 1;         /* DIR=1 periph->mem, EN */
+        reg(DMA1_B + 0x58) = 1;                    /* DIR=0 periph->mem, EN */
         uint32_t cap = 4000;
         while (reg(DMA1_B + 0x5C) != 0 && --cap != 0) spin(10);
         uint32_t isr = reg(DMA1_B + 0x00);

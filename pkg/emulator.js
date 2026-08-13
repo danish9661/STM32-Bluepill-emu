@@ -544,7 +544,18 @@ export async function createEmulator(opts = {}) {
                 } else if (op === 1) {
                     uc.mem_write(BigInt(a), dma_take_absorbed(c, b));
                 } else if (op === 2) {
-                    dma_push_periph(c, uc.mem_read(BigInt(a), b));
+                    const pushed = uc.mem_read(BigInt(a), b);
+                    dma_push_periph(c, pushed);
+                    // DMA writes the peripheral register, not the CPU — feed the
+                    // bus watchers (onPeriphWrite) one byte at a time like real
+                    // hardware, else page-side decoders never see DMA traffic.
+                    if (writeWatchers.length) {
+                        for (let bi = 0; bi < b; bi++) {
+                            for (let wi = 0; wi < writeWatchers.length; wi++) {
+                                try { writeWatchers[wi](c, 1, pushed[bi]); } catch (e) {}
+                            }
+                        }
+                    }
                 } else if (op === 3) {
                     dma_set_completed_many(a);
                 }

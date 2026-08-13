@@ -40,17 +40,26 @@ impl Channel {
     }
 
     fn do_xfer(&self, name: &str, sys: &System, ch: usize) {
+        let m2m = self.cr & (1 << 14) != 0;
         let dir = self.dir();
-        let src = if dir == 1 { self.par } else { self.mar };
-        let dst = if dir == 1 { self.mar } else { self.par };
+        let (src, dst, direction, peripheral) = if m2m {
+            // RM0008: M2M always transfers CPAR -> CMAR (DIR ignored).
+            (self.par, self.mar, DmaDir::MemCopy, false)
+        } else if dir == 1 {
+            // DIR=1: read from memory (CMAR), write to peripheral (CPAR).
+            (self.mar, self.par, DmaDir::Write, true)
+        } else {
+            // DIR=0: read from peripheral (CPAR), write to memory (CMAR).
+            (self.par, self.mar, DmaDir::Read, true)
+        };
         let size = self.data_size();
         sys.queue_dma_transfer(DmaTransfer {
-            direction: if dir == 1 { DmaDir::Read } else { DmaDir::Write },
+            direction,
             stream_idx: ch,
             dma_name: name.to_string(),
             src, dst, size,
             peri_addr: self.par,
-            peripheral: true,
+            peripheral,
         });
     }
 }
@@ -70,8 +79,12 @@ impl Peripheral for Dma {
         if bits != 0 {
             for ch in 0..7 {
                 if bits & (1 << ch) != 0 {
-                    let shift = ch * 4;
-                    self.isr |= (1 << 4) << shift; // TCIF
+                    // Real HW layout: channel N flags sit at bits (N-1)*4..(N-1)*4+3,
+                    // GIF=(N-1)*4, TCIF=(N-1)*4+1. For 0-based ch: TCIF = ch*4+1.
+                    // (Was: bit (ch+1)*4 — off by one channel, silently wrong; the
+                    // periph39 DMA tests only passed because both transfers completed
+                    // into one shared ISR read.)
+                    self.isr |= 1 << (ch * 4 + 1); // TCIF
                     self.channels[ch].cr &= !1;    // clear EN
                     self.channels[ch].ndtr = 0;
                 }
