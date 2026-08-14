@@ -157,10 +157,6 @@ unsafe impl Send for ExtDevices {}
 unsafe impl Sync for ExtDevices {}
 
 fn parse_pin(s: &str) -> (u8, u8) {
-    let re = regex::Regex::new(r"^P?([A-Za-z])(\d+)$").unwrap();
-    let caps = re.captures(s).expect("Invalid pin format");
-    let port = caps.get(1).unwrap().as_str().to_uppercase().chars().next().unwrap();
-    let port = port as u8 - b'A';
-    let pin: u8 = caps.get(2).unwrap().as_str().parse().unwrap();
-    (port, pin)
+    crate::peripherals::gpio::parse_pin_name(s)
+        .unwrap_or_else(|| panic!("Invalid pin name {:?} (expected e.g. \"PA5\")", s))
 }

@@ -9,12 +9,46 @@ pub mod ext_devices;
 
 use system::{DmaDir, WasmSystem};
 
+#[cfg(test)]
+pub(crate) mod test_util {
+    use crate::system::WasmSystem;
+    use std::sync::{Mutex, OnceLock};
+
+    static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    /// Run `f` against a freshly built emulator system. The ext-device
+    /// registry and the instruction counter are process-wide and WasmSystem
+    /// holds Rc's, so every test that builds one is serialized.
+    pub(crate) fn with_sys<R>(f: impl FnOnce(&WasmSystem) -> R) -> R {
+        let guard = TEST_LOCK.get_or_init(|| Mutex::new(()));
+        let _held = guard.lock().unwrap_or_else(|e| e.into_inner());
+        let sys = WasmSystem::new();
+        f(&sys)
+    }
+}
+
 // We use static mut since WASM is single-threaded — this allows re-initialization.
 static mut SYS: Option<WasmSystem> = None;
 
-#[allow(static_mut_refs)]
+/// Replace the emulator system (init()/init_svd()). Any `&'static WasmSystem`
+/// handed out by sys() dangles afterwards, so this must only be called from a
+/// wasm export with no emulator call in flight — which is the case, since JS
+/// enters the module one export at a time.
+fn set_sys(new: WasmSystem) {
+    unsafe { *std::ptr::addr_of_mut!(SYS) = Some(new); }
+}
+
+/// Borrow the system, or None before init()/init_svd().
+///
+/// Goes through a raw pointer rather than referencing the `static mut`
+/// directly (the 2024-edition `static_mut_refs` lint): the reference is to the
+/// WasmSystem inside, never to the static itself.
+fn try_sys() -> Option<&'static WasmSystem> {
+    unsafe { (*std::ptr::addr_of!(SYS)).as_ref() }
+}
+
 fn sys() -> &'static WasmSystem {
-    unsafe { SYS.as_ref().expect("WasmSystem not initialized") }
+    try_sys().expect("WasmSystem not initialized — call init() or init_svd() first")
 }
 
 /// Clear all registered ext devices (spi flash, eeprom, oled, lcd, touchscreen,
@@ -44,7 +78,7 @@ pub fn init() {
     console_error_panic_hook::set_once();
     system::INSTRUCTION_COUNT.store(0, Ordering::Relaxed);
     peripherals::gpio::clear_pin_events();
-    unsafe { SYS = Some(WasmSystem::new()); }
+    set_sys(WasmSystem::new());
 }
 
 /// Initialize the emulator from an SVD XML string (e.g., STM32F407.svd).
@@ -54,7 +88,7 @@ pub fn init_svd(svd_xml: &str) {
     console_error_panic_hook::set_once();
     system::INSTRUCTION_COUNT.store(0, Ordering::Relaxed);
     peripherals::gpio::clear_pin_events();
-    unsafe { SYS = Some(WasmSystem::new_svd(svd_xml)); }
+    set_sys(WasmSystem::new_svd(svd_xml));
 }
 
 #[wasm_bindgen]
@@ -73,7 +107,7 @@ pub fn periph_write(addr: u32, width: u32, value: u32) {
 /// last registration wins on overlap. Returns false if not initialized.
 #[wasm_bindgen]
 pub fn register_js_peripheral(base: u32, size: u32, read: js_sys::Function, write: js_sys::Function) -> bool {
-    match unsafe { SYS.as_ref() } {
+    match try_sys() {
         Some(sys) => {
             sys.p.register_js(base, size, read, write);
             true
@@ -249,6 +283,7 @@ pub fn dma_get_pending_count() -> u32 {
 #[wasm_bindgen]
 pub fn dma_pump_all() -> Vec<u32> {
     let sys = sys();
+    sys.dma_absorb_reset();
     let mut plan: Vec<u32> = Vec::new();
     let mut done_bits = 0u32;
     for t in sys.take_pending_dma_transfers() {

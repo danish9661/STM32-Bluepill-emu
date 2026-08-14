@@ -3,8 +3,6 @@ use super::Peripheral;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
-use regex::Regex;
-
 const NUM_PORTS: usize = 8;
 
 /// Optional output slew (rise/fall) delay in instructions, 0 = instant.
@@ -49,15 +47,31 @@ pub struct Pin {
     pin: u8,
 }
 
+/// Split a pin name into `(port index, pin number)`: an optional leading `P`,
+/// a port letter A-G (case-insensitive), then the pin number 0-15. Returns
+/// None if the name is malformed.
+///
+/// This is the single parser for pin names — `Pin::from_str` and the
+/// ext-device config path (`ext_devices::parse_pin`) both go through it.
+pub fn parse_pin_name(name: &str) -> Option<(u8, u8)> {
+    let rest = name.strip_prefix(['P', 'p']).unwrap_or(name);
+    let mut chars = rest.chars();
+    let port = GpioPorts::try_port_index(chars.next()?.to_ascii_uppercase())?;
+    let digits = chars.as_str();
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let pin: u8 = digits.parse().ok()?;
+    (pin < 16).then_some((port, pin))
+}
+
 impl Pin {
+    /// Parse a pin name (see [`parse_pin_name`]). Panics on a malformed name:
+    /// these come from the JS `add_*()` device config at setup time, so an
+    /// invalid one is a configuration error, not runtime input.
     pub fn from_str(name: &str) -> Self {
-        let name = name.to_uppercase();
-        let re = Regex::new(r"^P?([A-E])(\d+)$").unwrap();
-        let captures = re.captures(&name).expect("Pin name invalid");
-        let port = captures.get(1).unwrap().as_str().chars().next().unwrap();
-        let port = GpioPorts::port_index(port);
-        let pin = captures.get(2).unwrap().as_str().parse().unwrap();
-        assert!(pin < 16);
+        let (port, pin) = parse_pin_name(name)
+            .unwrap_or_else(|| panic!("Invalid pin name {:?} (expected e.g. \"PA5\")", name));
         Self { port, pin }
     }
 
@@ -94,10 +108,13 @@ impl Default for GpioPorts {
 
 impl GpioPorts {
     pub fn port_index(letter: char) -> u8 {
-        match letter {
-            'A'..='G' => letter as u8 - 'A' as u8,
-            _ => panic!("Invalid GPIO port {}", letter),
-        }
+        Self::try_port_index(letter)
+            .unwrap_or_else(|| panic!("Invalid GPIO port {}", letter))
+    }
+
+    /// Port index for a letter A-G, None if it isn't a port on this device.
+    pub fn try_port_index(letter: char) -> Option<u8> {
+        matches!(letter, 'A'..='G').then(|| letter as u8 - b'A')
     }
 
     pub fn add_read_callback(&mut self, pin: Pin, cb: impl FnMut(&System) -> bool + 'static) {
@@ -445,4 +462,30 @@ impl Peripheral for Gpio {
     }
 
     fn tick(&mut self, _sys: &System) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_pin_name;
+
+    #[test]
+    fn parses_pin_names() {
+        assert_eq!(parse_pin_name("PA5"), Some((0, 5)));
+        assert_eq!(parse_pin_name("A5"), Some((0, 5)));
+        assert_eq!(parse_pin_name("pb0"), Some((1, 0)));
+        assert_eq!(parse_pin_name("PC13"), Some((2, 13)));
+        assert_eq!(parse_pin_name("PG15"), Some((6, 15)));
+    }
+
+    #[test]
+    fn rejects_malformed_names() {
+        assert_eq!(parse_pin_name(""), None);
+        assert_eq!(parse_pin_name("P"), None);
+        assert_eq!(parse_pin_name("PA"), None, "no pin number");
+        assert_eq!(parse_pin_name("PA16"), None, "pin out of range");
+        assert_eq!(parse_pin_name("PZ0"), None, "not a port on this device");
+        assert_eq!(parse_pin_name("PA5x"), None, "trailing garbage");
+        assert_eq!(parse_pin_name("PA 5"), None);
+        assert_eq!(parse_pin_name("PA999"), None, "overflows u8");
+    }
 }

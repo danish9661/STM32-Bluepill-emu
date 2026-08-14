@@ -81,13 +81,17 @@ pub fn intr_svc_enter(
     frame
 }
 
-/// Pop the top SVC mirror: [r0, r1, r2, r3, r12, lr, pc, sp]. Empty vec when
-/// the stack is empty (no SVC in flight).
+/// Pop the top SVC mirror: [r0, r1, r2, r3, r12, lr, pc, sp, xpsr]. Empty vec
+/// when the stack is empty (no SVC in flight).
+///
+/// xPSR is part of the restore for the same reason it is on the IRQ path: the
+/// handler's own emu_start clobbers APSR, so a cmp/beq pair split across the
+/// SVC would otherwise evaluate with the handler's flags.
 #[wasm_bindgen]
 pub fn intr_svc_leave() -> Vec<u32> {
     let mut intr = crate::sys().intr.borrow_mut();
     match intr.svc_stack.pop() {
-        Some(f) => vec![f.r0, f.r1, f.r2, f.r3, f.r12, f.lr, f.pc, f.sp],
+        Some(f) => vec![f.r0, f.r1, f.r2, f.r3, f.r12, f.lr, f.pc, f.sp, f.xpsr],
         None => Vec::new(),
     }
 }

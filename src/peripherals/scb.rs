@@ -101,16 +101,16 @@ impl Peripheral for Scb {
     /// depends on the SHCSR enable bits (else the fault escalates to HardFault).
     fn raise_fault(&mut self, sys: &System, kind: u32, addr: u32) {
         use crate::peripherals::nvic::irq;
-        let (cfsr, target, enabled) = match kind {
+        let (target, enabled) = match kind {
             0 | 1 | 2 => {
                 self.cfsr |= if kind == 0 { 1 << 8 } else { 1 << 9 }; // IBUSERR | PRECISERR
                 self.bfar = addr;
                 self.cfsr |= 1 << 15; // BFARVALID
-                (0, irq::BUS_FAULT, self.shcsr & (1 << 18) != 0) // BUSFAULTENA
+                (irq::BUS_FAULT, self.shcsr & (1 << 18) != 0) // BUSFAULTENA
             }
             _ => {
                 self.cfsr |= 1 << 16; // UNDEFINSTR
-                (0, irq::USAGE_FAULT, self.shcsr & (1 << 16) != 0) // USGFAULTENA
+                (irq::USAGE_FAULT, self.shcsr & (1 << 16) != 0) // USGFAULTENA
             }
         };
         let mut nvic = sys.p.nvic.borrow_mut();

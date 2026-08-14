@@ -350,11 +350,30 @@ impl Peripherals {
         (addr - byte_offset as u32, byte_offset)
     }
 
+    /// Mask of the `size` low-order bytes (size >= 4 → all 32 bits).
+    fn width_mask(size: u8) -> u32 {
+        match size {
+            1 => 0x0000_00FF,
+            2 => 0x0000_FFFF,
+            3 => 0x00FF_FFFF,
+            _ => 0xFFFF_FFFF,
+        }
+    }
+
     fn nvic_priority_check(addr: u32) -> bool {
         const NVIC_PRIO_BASE: u32 = 0xE000E300;
         addr >= NVIC_PRIO_BASE && addr < NVIC_PRIO_BASE + 0x100
     }
 
+    /// Whether the RCC clock for the peripheral at `base_addr` is enabled.
+    ///
+    /// NOT enforced by read()/write(): the emulator deliberately answers
+    /// accesses to unclocked peripherals, so firmware that forgets its
+    /// `RCC_APBxENR` bit still runs here even though it would read back zeros
+    /// on real silicon. Gating on this is a behaviour change (some test
+    /// firmware relies on the lenient path), so it stays opt-in rather than
+    /// being wired in silently — the mapping is kept ready for that switch.
+    #[allow(dead_code)]
     fn clock_enabled(&self, base_addr: u32) -> bool {
         let (ahbenr, apb2enr, apb1enr) = *self.rcc_enrs.borrow();
         if base_addr >= 0xE000_0000 { return true; }
@@ -431,10 +450,20 @@ impl Peripherals {
         } else if let Some(p) = self.bus.borrow().get(addr) {
             p.peripheral.borrow_mut().read_sized(sys, addr - p.start, size)
         } else { 0 };
-        if is_reg { value << (8 * byte_offset) } else { value }
+        // Registers are read as a whole word; a sub-word access wants the byte
+        // lane it addressed, so shift it DOWN into bits [0, 8*size) — the JS
+        // memory hook (and the bit-band path above) take the low bytes of the
+        // returned value.
+        if is_reg && byte_offset != 0 {
+            (value >> (8 * byte_offset as u32)) & Self::width_mask(size)
+        } else if is_reg {
+            value & Self::width_mask(size)
+        } else {
+            value
+        }
     }
 
-    pub fn write(&self, sys: &System, addr: u32, _size: u8, mut value: u32) {
+    pub fn write(&self, sys: &System, addr: u32, size: u8, mut value: u32) {
         if let Some((addr, bit_number)) = Self::bitbanding(addr) {
             let mut v = self.read(sys, addr, 1);
             v &= !(1 << bit_number);
@@ -449,9 +478,23 @@ impl Peripherals {
         let (addr, byte_offset) = if Self::is_register(addr) {
             Self::align_addr_4(addr)
         } else { (addr, 0) };
-        if byte_offset != 0 && Self::is_register(addr) {
+        // NOTE: an ALIGNED sub-word store (byte_offset == 0, size < 4) is
+        // deliberately passed through as a whole-word write instead of being
+        // merged. Merging would require reading the register back, and the
+        // registers written that way are exactly the ones with read side
+        // effects — CMSIS types SPI/USART DR as __IO uint16_t, so `SPI->DR = b`
+        // compiles to strh, and a read-back would consume RXNE/flags. Those
+        // registers have no meaningful bits above the lane, so writing the
+        // narrow value directly is correct for them.
+        if byte_offset != 0 {
+            // Sub-word store into a byte lane above bit 0: merge into the
+            // current word so the bytes OUTSIDE the addressed lane survive —
+            // both below the lane and above it. Only the lanes the access
+            // actually covers (`size` bytes at `byte_offset`) are replaced.
+            let shift = 8 * byte_offset as u32;
+            let lane = Self::width_mask(size).checked_shl(shift).unwrap_or(0);
             let v = self.read(sys, addr, 4);
-            value = (value << 8 * byte_offset) | (v & (0xFFFF_FFFF >> (32 - 8 * byte_offset)));
+            value = (v & !lane) | ((value << shift) & lane);
         }
         // Always allow writes to RCC (0x40021000-0x40021FFF)
         if addr >= 0x4002_1000 && addr < 0x4002_2000 {
@@ -460,7 +503,7 @@ impl Peripherals {
         if Self::NVIC_REGS_BASE <= addr && addr < Self::NVIC_REGS_END {
             self.nvic.borrow_mut().write(sys, addr - Self::NVIC_REGS_BASE, value);
         } else if let Some(p) = self.bus.borrow().get(addr) {
-            p.peripheral.borrow_mut().write_sized(sys, addr - p.start, _size, value);
+            p.peripheral.borrow_mut().write_sized(sys, addr - p.start, size, value);
         }
     }
 
@@ -595,3 +638,71 @@ use exti::Exti;
 use bkp::Bkp;
 use dac::Dac;
 use usb::Usb;
+
+#[cfg(test)]
+mod tests {
+    use super::Peripherals;
+    use crate::test_util::with_sys;
+
+    /// DMA1 channel 1 CMAR: a plain 32-bit scratch register (stored and read
+    /// back unmasked, no read side effects) — ideal for byte-lane assertions.
+    const MAR: u32 = 0x4002_0014;
+
+    #[test]
+    fn reads_the_addressed_byte_lane() {
+        with_sys(|sys| {
+            sys.p.write(sys, MAR, 4, 0xAABB_CCDD);
+
+            assert_eq!(sys.p.read(sys, MAR, 4), 0xAABB_CCDD, "word read");
+            // Upper half-word: shifted DOWN into the low bytes, since the JS
+            // memory hook takes the low `size` bytes of the returned value.
+            assert_eq!(sys.p.read(sys, MAR + 2, 2), 0x0000_AABB, "upper half");
+            assert_eq!(sys.p.read(sys, MAR, 2), 0x0000_CCDD, "lower half");
+            assert_eq!(sys.p.read(sys, MAR + 3, 1), 0x0000_00AA, "byte 3");
+            assert_eq!(sys.p.read(sys, MAR + 1, 1), 0x0000_00CC, "byte 1");
+            assert_eq!(sys.p.read(sys, MAR, 1), 0x0000_00DD, "byte 0");
+        });
+    }
+
+    #[test]
+    fn sub_word_write_preserves_the_other_lanes() {
+        with_sys(|sys| {
+            sys.p.write(sys, MAR, 4, 0xAABB_CCDD);
+            sys.p.write(sys, MAR + 2, 2, 0x0000_1234);
+            assert_eq!(sys.p.read(sys, MAR, 4), 0x1234_CCDD, "upper half store");
+
+            sys.p.write(sys, MAR, 4, 0xAABB_CCDD);
+            sys.p.write(sys, MAR + 1, 1, 0x0000_0099);
+            // Bytes ABOVE the written lane must survive too, not just below.
+            assert_eq!(sys.p.read(sys, MAR, 4), 0xAABB_99DD, "byte 1 store");
+
+            sys.p.write(sys, MAR, 4, 0xAABB_CCDD);
+            sys.p.write(sys, MAR + 3, 1, 0x0000_0011);
+            assert_eq!(sys.p.read(sys, MAR, 4), 0x11BB_CCDD, "byte 3 store");
+        });
+    }
+
+    #[test]
+    fn bit_band_touches_only_its_own_bit() {
+        with_sys(|sys| {
+            // Alias of bit 0 of the byte at MAR+2, i.e. bit 16 of the word.
+            let alias = 0x4200_0000 + (MAR - 0x4000_0000) * 32;
+            sys.p.write(sys, MAR, 4, 0xAABA_CCDD);
+
+            assert_eq!(sys.p.read(sys, alias + 2 * 32, 4), 0, "bit reads clear");
+            sys.p.write(sys, alias + 2 * 32, 4, 1);
+            assert_eq!(sys.p.read(sys, MAR, 4), 0xAABB_CCDD, "set bit 16");
+            assert_eq!(sys.p.read(sys, alias + 2 * 32, 4), 1, "bit reads set");
+
+            sys.p.write(sys, alias + 2 * 32, 4, 0);
+            assert_eq!(sys.p.read(sys, MAR, 4), 0xAABA_CCDD, "clear bit 16");
+        });
+    }
+
+    #[test]
+    fn width_mask_covers_each_access_size() {
+        assert_eq!(Peripherals::width_mask(1), 0x0000_00FF);
+        assert_eq!(Peripherals::width_mask(2), 0x0000_FFFF);
+        assert_eq!(Peripherals::width_mask(4), 0xFFFF_FFFF);
+    }
+}

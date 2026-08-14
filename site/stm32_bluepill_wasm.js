@@ -451,8 +451,12 @@ export function intr_svc_enter(r0, r1, r2, r3, r12, lr, pc, xpsr, sp) {
 }
 
 /**
- * Pop the top SVC mirror: [r0, r1, r2, r3, r12, lr, pc, sp]. Empty vec when
- * the stack is empty (no SVC in flight).
+ * Pop the top SVC mirror: [r0, r1, r2, r3, r12, lr, pc, sp, xpsr]. Empty vec
+ * when the stack is empty (no SVC in flight).
+ *
+ * xPSR is part of the restore for the same reason it is on the IRQ path: the
+ * handler's own emu_start clobbers APSR, so a cmp/beq pair split across the
+ * SVC would otherwise evaluate with the handler's flags.
  * @returns {Uint32Array}
  */
 export function intr_svc_leave() {
