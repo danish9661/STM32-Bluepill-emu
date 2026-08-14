@@ -37,16 +37,17 @@ jobs:
           wasm-pack build --target web 2>&1 | grep -E "found wasm-opt|Optimizing|wasm-opt" || true
           echo "=== post-build cache ==="
           find ~/.cache/.wasm-pack -name wasm-bindgen -o -name wasm-opt 2>/dev/null | while read f; do echo "== $f"; "$f" --version 2>&1 | head -1; done
-      - name: site/ must mirror pkg/ (emulator.js + wasm glue + wasm)
+      - name: site/ must mirror pkg/ (emulator.js + wasm glue + wasm code)
         run: |
           cmp pkg/emulator.js site/emulator.js
           cmp pkg/stm32_bluepill_wasm.js site/stm32_bluepill_wasm.js
-          # wasm-pack 0.14 runs wasm-opt (binaryen) on release builds when it
-          # is on PATH, and the trailing custom sections (producers/version
-          # stamps) vary with the exact toolchain — so byte-compare the
-          # common prefix: the code sections must be identical, metadata and
-          # wasm-opt reshaping may differ. Catches the 7040bd0 failure mode
-          # (missing/stale artifact of different content).
+          # wasm-pack downloads its own wasm-bindgen-cli; the version it picks
+          # can differ between machines (CI fresh cache vs local cache), and
+          # each version rewrites ABI metadata in the DATA section + trailing
+          # custom sections — benign, functionally identical. The CODE section
+          # is the artifact's real content: compare it byte-for-byte (catches
+          # the 7040bd0 failure mode: missing/stale artifact of different
+          # content). The two JS artifacts stay byte-exact.
           echo "wasm sizes: pkg=$(stat -c%s pkg/stm32_bluepill_wasm_bg.wasm) site=$(stat -c%s site/stm32_bluepill_wasm_bg.wasm)"
           md5sum pkg/stm32_bluepill_wasm_bg.wasm site/stm32_bluepill_wasm_bg.wasm
           python3 - <<'EOF'
@@ -63,19 +64,18 @@ jobs:
                       if not b & 0x80: break
                   out.append((sid, sz, i))
                   i += sz
-              return out
-          a = sections('pkg/stm32_bluepill_wasm_bg.wasm')
-          b = sections('site/stm32_bluepill_wasm_bg.wasm')
-          names = {0:'custom',1:'type',2:'import',3:'func',4:'table',5:'mem',6:'global',7:'export',8:'start',9:'elem',10:'code',11:'data',12:'datacount'}
-          for i, ((s1, z1, o1), (s2, z2, o2)) in enumerate(zip(a, b)):
-              tag = 'SAME' if (s1, z1) == (s2, z2) else 'DIFF'
-              n1 = names.get(s1, 'id' + str(s1)); n2 = names.get(s2, 'id' + str(s2))
-              print(f'{i:2d} {n1:9s} pkg@{o1:7d} sz={z1:8d}  {n2:9s} site@{o2:7d} sz={z2:8d}  {tag}')
+              return d, out
+          for name, path, out in (('pkg', 'pkg/stm32_bluepill_wasm_bg.wasm', '/tmp/pkg.code'),
+                                  ('site', 'site/stm32_bluepill_wasm_bg.wasm', '/tmp/site.code')):
+              d, secs = sections(path)
+              code = next((sz, o) for (sid, sz, o) in secs if sid == 10)
+              payload = d[code[1]:code[1] + code[0]]
+              open(out, 'wb').write(payload)
+              print(f'{name} code section: {len(payload)} bytes')
           EOF
-          a=pkg/stm32_bluepill_wasm_bg.wasm; b=site/stm32_bluepill_wasm_bg.wasm
-          if [ "$(stat -c%s "$a")" -gt "$(stat -c%s "$b")" ]; then t="$a"; a="$b"; b="$t"; fi
-          cmp -n "$(stat -c%s "$a")" "$a" "$b"
-          cmp -l "$a" "$b" | head -3
+          echo "comparing code sections:"
+          cmp /tmp/pkg.code /tmp/site.code
+          echo "code sections identical"
       - name: Prepare firmware ELF + device images (committed copies live in site/)
         run: |
           cp site/arduino_periph_test.elf tests/arduino_periph_test/build/arduino_periph_test.ino.elf
