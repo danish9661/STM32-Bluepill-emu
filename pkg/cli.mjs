@@ -546,7 +546,7 @@ async function main() {
                 // SVC handler returned via `bx lr` (EXC_RETURN): restore the
                 // pre-SVC context from the Rust mirror.
                 const st = intr_svc_leave();
-                if (st.length === 8) {
+                if (st.length === 9) {
                     uc.reg_write_i32(Module.ARM_REG_R0, st[0]);
                     uc.reg_write_i32(Module.ARM_REG_R1, st[1]);
                     uc.reg_write_i32(Module.ARM_REG_R2, st[2]);
@@ -555,6 +555,9 @@ async function main() {
                     uc.reg_write_i32(Module.ARM_REG_LR, st[5]);
                     uc.reg_write_i32(Module.ARM_REG_PC, st[6] | 1);
                     uc.reg_write_i32(Module.ARM_REG_SP, st[7]);
+                    // xPSR restore is REQUIRED here for the same reason as on
+                    // the IRQ path: the handler's emu_start clobbers APSR.
+                    uc.reg_write_i32(Module.ARM_REG_XPSR, st[8]);
                 }
             } else if (msg.includes('UC_ERR_READ_UNMAPPED') || msg.includes('UC_ERR_FETCH_UNMAPPED') || msg.includes('UC_ERR_WRITE_UNMAPPED')) {
                 const r0 = uc.reg_read_i32(Module.ARM_REG_R0);

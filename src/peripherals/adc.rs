@@ -254,7 +254,7 @@ impl Adc {
         let len = ((self.jsqr >> 20) & 0x3) as usize + 1;
         let ch = self.injected_channel(0);
         let cycles = self.sample_time(ch);
-        let (target, _real) = self.channel_voltage(sys, ch);
+        let _ = self.channel_voltage(sys, ch); // source resolved at completion
         self.jconv = Some(Conv {
             end_at: instruction_count() + cycles as u64,
             pos: 0,

@@ -59,7 +59,9 @@ impl Bus {
     pub fn get(&self, addr: u32) -> Option<&PeripheralSlot<RefCell<Box<dyn Peripheral>>>> {
         let index = self.slots.binary_search_by_key(&addr, |p| p.start)
             .map_or_else(|e| e.checked_sub(1), |v| Some(v));
-        index.map(|i| self.slots.get(i).filter(|p| addr <= p.end)).flatten()
+        // Ranges are [start, end): an address exactly at `end` belongs to the
+        // next slot (or to a gap), never to this one.
+        index.map(|i| self.slots.get(i).filter(|p| addr < p.end)).flatten()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &PeripheralSlot<RefCell<Box<dyn Peripheral>>>> {
@@ -80,6 +82,56 @@ impl Bus {
 
     pub fn is_empty(&self) -> bool {
         self.slots.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Dummy;
+    impl Peripheral for Dummy {
+        fn read(&mut self, _sys: &System, _offset: u32) -> u32 { 0 }
+        fn write(&mut self, _sys: &System, _offset: u32, _value: u32) {}
+    }
+
+    fn bus_with(ranges: &[(u32, u32)]) -> Bus {
+        let mut bus = Bus::new();
+        for &(start, end) in ranges {
+            bus.register(start, end, false, Box::new(Dummy));
+        }
+        bus
+    }
+
+    #[test]
+    fn decodes_range_as_half_open() {
+        // Two slots with a gap between them, mirroring GPIOD (ends 0x40011800)
+        // and ADC1 (starts 0x40012400) in the hardcoded map.
+        let bus = bus_with(&[(0x4001_1400, 0x4001_1800), (0x4001_2400, 0x4001_2800)]);
+
+        assert_eq!(bus.get(0x4001_1400).map(|s| s.start), Some(0x4001_1400));
+        assert_eq!(bus.get(0x4001_17FF).map(|s| s.start), Some(0x4001_1400));
+        // `end` is exclusive: this address is in the gap, not in the first slot.
+        assert!(bus.get(0x4001_1800).is_none());
+        assert!(bus.get(0x4001_2000).is_none());
+        assert_eq!(bus.get(0x4001_2400).map(|s| s.start), Some(0x4001_2400));
+        assert!(bus.get(0x3FFF_FFFF).is_none());
+    }
+
+    #[test]
+    fn adjacent_slots_do_not_bleed() {
+        let bus = bus_with(&[(0x4000_0000, 0x4000_0400), (0x4000_0400, 0x4000_0800)]);
+        assert_eq!(bus.get(0x4000_03FF).map(|s| s.start), Some(0x4000_0000));
+        assert_eq!(bus.get(0x4000_0400).map(|s| s.start), Some(0x4000_0400));
+    }
+
+    #[test]
+    fn last_registration_wins_on_overlap() {
+        let mut bus = bus_with(&[(0x4000_0000, 0x4000_0400)]);
+        bus.register(0x4000_0200, 0x4000_0600, false, Box::new(Dummy));
+        assert_eq!(bus.len(), 1);
+        assert_eq!(bus.get(0x4000_0300).map(|s| s.start), Some(0x4000_0200));
+        assert!(bus.get(0x4000_0100).is_none());
     }
 }
 

@@ -181,16 +181,27 @@ impl WasmSystem {
         off
     }
 
-    /// Fetch [offset, offset+len) of the absorbed bytes and clear the buffer.
+    /// Fetch [offset, offset+len) of the absorbed bytes. One pump can absorb
+    /// for SEVERAL periph->mem transfers, each taken with its own offset, so
+    /// the buffer is only released once the take reaches its end — clearing on
+    /// the first take dropped every later transfer's bytes. dma_pump_all()
+    /// clears it up front, so an abandoned plan cannot leak into the next pump.
     pub fn dma_absorb_take(&self, offset: usize, len: usize) -> Vec<u8> {
         let mut buf = self.absorb_buf.borrow_mut();
-        let out = if offset < buf.len() {
-            buf[offset..buf.len().min(offset + len)].to_vec()
-        } else {
-            Vec::new()
-        };
-        buf.clear();
+        if offset >= buf.len() {
+            return Vec::new();
+        }
+        let end = buf.len().min(offset.saturating_add(len));
+        let out = buf[offset..end].to_vec();
+        if end >= buf.len() {
+            buf.clear();
+        }
         out
+    }
+
+    /// Drop any bytes left over from a previous pump (see dma_absorb_take).
+    pub fn dma_absorb_reset(&self) {
+        self.absorb_buf.borrow_mut().clear();
     }
 
     pub fn mark_dma_completed(&self, stream_idx: usize, _success: bool) {
@@ -254,3 +265,53 @@ pub type System = WasmSystem;
 
 unsafe impl Sync for WasmSystem {}
 unsafe impl Send for WasmSystem {}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_util::with_sys;
+
+    /// DMA1 channel 1 CMAR — a plain 32-bit register to absorb known bytes from.
+    const MAR: u32 = 0x4002_0014;
+
+    #[test]
+    fn absorb_buffer_serves_every_transfer_in_a_pump() {
+        with_sys(|sys| {
+            sys.p.write(sys, MAR, 4, 0xAABB_CCDD);
+
+            // One pump can absorb for several periph->mem transfers; JS takes
+            // each one by its own offset, in plan order.
+            let first = sys.dma_absorb_store(MAR, 4);
+            let second = sys.dma_absorb_store(MAR, 4);
+            assert_eq!((first, second), (0, 4), "offsets are sequential");
+
+            assert_eq!(sys.dma_absorb_take(first, 4), vec![0xDD, 0xCC, 0xBB, 0xAA]);
+            // Taking the first slice must NOT discard the rest.
+            assert_eq!(sys.dma_absorb_take(second, 4), vec![0xDD, 0xCC, 0xBB, 0xAA]);
+
+            // The final take releases the buffer.
+            assert!(sys.dma_absorb_take(0, 4).is_empty());
+        });
+    }
+
+    #[test]
+    fn absorb_buffer_is_reset_between_pumps() {
+        with_sys(|sys| {
+            sys.p.write(sys, MAR, 4, 0x1122_3344);
+            sys.dma_absorb_store(MAR, 4);
+            // An abandoned plan (JS threw before taking) must not shift the
+            // offsets of the next pump.
+            sys.dma_absorb_reset();
+            assert_eq!(sys.dma_absorb_store(MAR, 4), 0);
+            assert_eq!(sys.dma_absorb_take(0, 4), vec![0x44, 0x33, 0x22, 0x11]);
+        });
+    }
+
+    #[test]
+    fn absorb_take_clamps_out_of_range_requests() {
+        with_sys(|sys| {
+            sys.dma_absorb_store(MAR, 4);
+            assert!(sys.dma_absorb_take(8, 4).is_empty(), "offset past the end");
+            assert_eq!(sys.dma_absorb_take(2, 99).len(), 2, "length past the end");
+        });
+    }
+}

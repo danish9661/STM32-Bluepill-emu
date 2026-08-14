@@ -1,12 +1,6 @@
 use crate::system::System;
 use super::Peripheral;
 
-fn reflect_32(v: u32) -> u32 {
-    let mut r = 0u32;
-    for i in 0..32 { if v & (1 << i) != 0 { r |= 1 << (31 - i); } }
-    r
-}
-
 fn stm32_crc32(crc: u32, data: u32) -> u32 {
     let mut c = crc ^ data;
     for _ in 0..32 {
