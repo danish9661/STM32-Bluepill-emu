@@ -50,27 +50,28 @@ jobs:
           echo "wasm sizes: pkg=$(stat -c%s pkg/stm32_bluepill_wasm_bg.wasm) site=$(stat -c%s site/stm32_bluepill_wasm_bg.wasm)"
           md5sum pkg/stm32_bluepill_wasm_bg.wasm site/stm32_bluepill_wasm_bg.wasm
           python3 - <<'EOF'
-def sections(p):
-    d = open(p, 'rb').read()
-    i = 8
-    out = []
-    while i < len(d):
-        sid = d[i]; i += 1
-        sz = 0; sh = 0
-        while True:
-            b = d[i]; i += 1
-            sz |= (b & 0x7f) << sh; sh += 7
-            if not b & 0x80: break
-        out.append((sid, sz, i))
-        i += sz
-    return out
-a = sections('pkg/stm32_bluepill_wasm_bg.wasm')
-b = sections('site/stm32_bluepill_wasm_bg.wasm')
-names = {0:'custom',1:'type',2:'import',3:'func',4:'table',5:'mem',6:'global',7:'export',8:'start',9:'elem',10:'code',11:'data'}
-for i, ((s1, z1, o1), (s2, z2, o2)) in enumerate(zip(a, b)):
-    tag = 'SAME' if (s1, z1) == (s2, z2) else 'DIFF'
-    print(f'{i:2d} {names.get(s1, s1):7s} pkg@{o1:7d} sz={z1:8d}  site@{o2:7d} sz={z2:8d}  {tag}')
-EOF
+          def sections(p):
+              d = open(p, 'rb').read()
+              i = 8
+              out = []
+              while i < len(d):
+                  sid = d[i]; i += 1
+                  sz = 0; sh = 0
+                  while True:
+                      b = d[i]; i += 1
+                      sz |= (b & 0x7f) << sh; sh += 7
+                      if not b & 0x80: break
+                  out.append((sid, sz, i))
+                  i += sz
+              return out
+          a = sections('pkg/stm32_bluepill_wasm_bg.wasm')
+          b = sections('site/stm32_bluepill_wasm_bg.wasm')
+          names = {0:'custom',1:'type',2:'import',3:'func',4:'table',5:'mem',6:'global',7:'export',8:'start',9:'elem',10:'code',11:'data',12:'datacount'}
+          for i, ((s1, z1, o1), (s2, z2, o2)) in enumerate(zip(a, b)):
+              tag = 'SAME' if (s1, z1) == (s2, z2) else 'DIFF'
+              n1 = names.get(s1, 'id' + str(s1)); n2 = names.get(s2, 'id' + str(s2))
+              print(f'{i:2d} {n1:9s} pkg@{o1:7d} sz={z1:8d}  {n2:9s} site@{o2:7d} sz={z2:8d}  {tag}')
+          EOF
           a=pkg/stm32_bluepill_wasm_bg.wasm; b=site/stm32_bluepill_wasm_bg.wasm
           if [ "$(stat -c%s "$a")" -gt "$(stat -c%s "$b")" ]; then t="$a"; a="$b"; b="$t"; fi
           cmp -n "$(stat -c%s "$a")" "$a" "$b" || true
