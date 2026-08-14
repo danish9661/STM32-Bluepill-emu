@@ -74,8 +74,8 @@ jobs:
           EOF
           a=pkg/stm32_bluepill_wasm_bg.wasm; b=site/stm32_bluepill_wasm_bg.wasm
           if [ "$(stat -c%s "$a")" -gt "$(stat -c%s "$b")" ]; then t="$a"; a="$b"; b="$t"; fi
-          cmp -n "$(stat -c%s "$a")" "$a" "$b" || true
-          cmp -l "$a" "$b" | head -3 || true
+          cmp -n "$(stat -c%s "$a")" "$a" "$b"
+          cmp -l "$a" "$b" | head -3
       - name: Prepare firmware ELF + device images (committed copies live in site/)
         run: |
           cp site/arduino_periph_test.elf tests/arduino_periph_test/build/arduino_periph_test.ino.elf
