@@ -72,6 +72,17 @@ jobs:
               payload = d[code[1]:code[1] + code[0]]
               open(out, 'wb').write(payload)
               print(f'{name} code section: {len(payload)} bytes')
+              customs = [d[o:o + sz] for (sid, sz, o) in secs if sid == 0]
+              print(f'{name} custom sections:')
+              for c in customs:
+                  print('   ', c[:200])
+              print(f'{name} code head b64: {payload[:256].hex()}')
+              datas = [d[o:o + sz] for (sid, sz, o) in secs if sid == 11]
+              print(f'{name} data strings:')
+              for dd in datas:
+                  import re
+                  for s in re.findall(rb'[\x20-\x7e]{4,}', dd):
+                      print('   ', s[:120])
           EOF
           echo "comparing code sections:"
           cmp /tmp/pkg.code /tmp/site.code
