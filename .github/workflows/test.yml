@@ -26,6 +26,12 @@ jobs:
       - name: Rust sanity check
         run: cargo check
       - name: Build peripheral WASM
+        env:
+          # Panic-location file paths ($CARGO_HOME/registry/src/... = /home/runner/...)
+          # are baked into the data section; remap to a canonical prefix so the
+          # artifact is machine-independent (local build must use the same flag:
+          # RUSTFLAGS="--remap-path-prefix=$HOME=/build")
+          RUSTFLAGS: "--remap-path-prefix=/home/runner=/build"
         run: |
           echo "=== toolchain diagnostics ==="
           rustc --version; cargo --version; wasm-pack --version
