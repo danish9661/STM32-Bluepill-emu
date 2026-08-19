@@ -61,7 +61,7 @@ jobs:
 
       - name: Publish to GitHub Packages
         run: |
-          npm pkg set name="@danish9661/stm32-bluepill-emu"
+          npm pkg set name="@danish9661/stm32f1-emu"
           npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

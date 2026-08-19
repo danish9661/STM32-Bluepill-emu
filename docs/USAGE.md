@@ -3,7 +3,7 @@
 ## Install
 
 ```bash
-npm install @d7music/stm32-bluepill-emulator
+npm install stm32f1-emu
 ```
 
 The package ships everything as WASM: the CPU core is embedded in `unicorn_arm.cjs`
@@ -13,7 +13,7 @@ The package ships everything as WASM: the CPU core is embedded in `unicorn_arm.c
 ## Library API (browser / Node)
 
 ```js
-import { createEmulator } from "@d7music/stm32-bluepill-emulator";
+import { createEmulator } from "stm32f1-emu";
 
 const emu = await createEmulator({
   firmware,            // Uint8Array of firmware (ELF, HEX, or raw BIN)
