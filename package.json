@@ -4,16 +4,23 @@
   "description": "Full-system WASM emulator for the STM32F103C8 Bluepill - run Arduino/STM32 firmware in Node.js or the browser",
   "type": "module",
   "main": "./pkg/emulator.js",
+  "types": "./pkg/stm32_bluepill_wasm.d.ts",
   "exports": {
-    ".": "./pkg/emulator.js",
-    "./cli": "./pkg/cli.mjs"
+    ".": {
+      "types": "./pkg/stm32_bluepill_wasm.d.ts",
+      "import": "./pkg/emulator.js"
+    },
+    "./cli": "./pkg/cli.mjs",
+    "./wasm": "./pkg/stm32_bluepill_wasm.js"
   },
   "bin": {
     "bluepill-emu": "./pkg/cli.mjs"
   },
   "files": [
     "pkg/",
-    "README.md"
+    "svd/",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "wasm-pack build --target web --out-dir pkg",
@@ -32,11 +39,16 @@
     "cortex-m3",
     "unicorn"
   ],
+  "author": "Danish",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/danish9661/STM32-Bluepill-emu"
+    "url": "git+https://github.com/danish9661/STM32-Bluepill-emu.git"
   },
+  "bugs": {
+    "url": "https://github.com/danish9661/STM32-Bluepill-emu/issues"
+  },
+  "homepage": "https://github.com/danish9661/STM32-Bluepill-emu#readme",
   "engines": {
     "node": ">=18"
   },
