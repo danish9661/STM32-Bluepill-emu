@@ -1,5 +1,7 @@
 # STM32 Bluepill Emulator (STM32F103C8) — run Arduino firmware in the browser
 
+[![npm version](https://img.shields.io/npm/v/stm32-bluepill-emu.svg?color=cb3837)](https://www.npmjs.com/package/stm32-bluepill-emu)
+[![npm downloads](https://img.shields.io/npm/dm/stm32-bluepill-emu.svg)](https://www.npmjs.com/package/stm32-bluepill-emu)
 [![Live Demo](https://img.shields.io/badge/live%20demo-github%20pages-38bdf8)](https://danish9661.github.io/STM32-Bluepill-emu/)
 [![About](https://img.shields.io/badge/about-github%20pages-7dd3fc)](https://danish9661.github.io/STM32-Bluepill-emu/about.html)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
