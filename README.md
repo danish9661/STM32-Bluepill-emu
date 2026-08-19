@@ -1,14 +1,14 @@
 # STM32 Bluepill Emulator (STM32F103C8) — run Arduino firmware in the browser
 
-[![npm version](https://img.shields.io/npm/v/stm32-bluepill-emu.svg?color=cb3837)](https://www.npmjs.com/package/stm32-bluepill-emu)
-[![npm downloads](https://img.shields.io/npm/dm/stm32-bluepill-emu.svg)](https://www.npmjs.com/package/stm32-bluepill-emu)
+[![npm version](https://img.shields.io/npm/v/stm32f1-emu.svg?color=cb3837)](https://www.npmjs.com/package/stm32f1-emu)
+[![npm downloads](https://img.shields.io/npm/dm/stm32f1-emu.svg)](https://www.npmjs.com/package/stm32f1-emu)
 [![Live Demo](https://img.shields.io/badge/live%20demo-github%20pages-38bdf8)](https://danish9661.github.io/STM32-Bluepill-emu/)
 [![About](https://img.shields.io/badge/about-github%20pages-7dd3fc)](https://danish9661.github.io/STM32-Bluepill-emu/about.html)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
 ![Demo — WS2812 strip preset running in the browser](site/og-image.png)
 
-A **full-system emulator for the STM32F103C8 "Blue Pill" microcontroller** that runs
+A **full-system emulator for the STM32F103C8 "Blue Pill" and STM32F1 family microcontrollers** that runs
 **real, unmodified Arduino firmware** (STM32duino) — as well as libopencm3 and STM32Cube
 HAL programs — in **Node.js or the browser**. Powered by the **Unicorn ARM Cortex-M3 CPU
 emulator compiled to WebAssembly (WASM)** + a **Rust peripheral emulator** implementing
@@ -32,13 +32,13 @@ the chip's registers with realistic timing, interrupts, and electrical behavior.
 ## Install
 
 ```bash
-npm install stm32-bluepill-emu
+npm install stm32f1-emu
 ```
 
 ## Library usage
 
 ```js
-import { createEmulator } from 'stm32-bluepill-emu';
+import { createEmulator } from 'stm32f1-emu';
 import { readFileSync } from 'fs';
 
 const emu = await createEmulator({
@@ -90,7 +90,8 @@ emu.close();
 ## CLI usage
 
 ```bash
-npx bluepill-emu firmware.bin [max_instructions]
+npx stm32f1-emu firmware.bin [max_instructions]
+# or
 npx bluepill-emu --config=config.yaml
 ```
 
@@ -110,7 +111,7 @@ npx bluepill-emu --config=config.yaml
 ```html
 <script src="unicorn_arm.js"></script>
 <script type="module">
-  import { createEmulator } from 'stm32-bluepill-emu';
+  import { createEmulator } from 'stm32f1-emu';
   const emu = await createEmulator({ firmware: await (await fetch('blink.bin')).arrayBuffer() });
   emu.run(1_000_000);
 </script>
