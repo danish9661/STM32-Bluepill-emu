@@ -19,3 +19,12 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+### Third-Party Licenses and Acknowledgements
+
+This project bundles compiled WebAssembly CPU emulation components from:
+- **unicorn.js** by Alexandro Sanchez Bach (AlexAltea) — https://github.com/AlexAltea/unicorn.js
+- **Unicorn Engine** by Nguyen Anh Quynh et al. — https://www.unicorn-engine.org (GPL-2.0 / LGPL-2.1)
+

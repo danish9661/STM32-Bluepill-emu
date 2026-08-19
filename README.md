@@ -152,3 +152,8 @@ Fully implemented: GPIO (A–D), USART1–3, SPI1–2, I2C1–2, TIM1–7 (PWM, 
 
 See `docs/NEXT_PHASE.md` for the roadmap (the historical "merge WASM modules for 5–10×"
 goal was retired — the JS bridge was never the bottleneck; ~22M IPS measured today).
+
+## Acknowledgements
+
+- [AlexAltea/unicorn.js](https://github.com/AlexAltea/unicorn.js) — JavaScript / WebAssembly port of the Unicorn ARM CPU emulator.
+- [Unicorn Engine](https://www.unicorn-engine.org/) — Multi-architecture CPU emulator framework based on QEMU.
