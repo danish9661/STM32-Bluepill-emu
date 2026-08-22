@@ -30,7 +30,7 @@ pub struct SoftwareSpi {
 
 impl SoftwareSpi {
     pub fn register(config: SoftwareSpiConfig, gpio: &mut GpioPorts, ext_devices: &ExtDevices) {
-        let cs = config.cs.as_ref().map(|s| Pin::from_str(s));
+        let cs = config.cs.as_ref().and_then(|s| Pin::from_str(s));
         let clk = Pin::from_str(&config.clk);
         let miso = Pin::from_str(&config.miso);
         let mosi = Pin::from_str(&config.mosi);
@@ -47,14 +47,20 @@ impl SoftwareSpi {
             gpio.add_write_callback(cs, move |sys, v| { s.borrow_mut().write_cs(sys, v) });
         }
 
-        let s = self_.clone();
-        gpio.add_write_callback(clk, move |sys, v| { s.borrow_mut().write_clk(sys, v) });
+        if let Some(clk) = clk {
+            let s = self_.clone();
+            gpio.add_write_callback(clk, move |sys, v| { s.borrow_mut().write_clk(sys, v) });
+        }
 
-        let s = self_.clone();
-        gpio.add_read_callback(miso, move |sys| { s.borrow_mut().read_miso(sys) });
+        if let Some(miso) = miso {
+            let s = self_.clone();
+            gpio.add_read_callback(miso, move |sys| { s.borrow_mut().read_miso(sys) });
+        }
 
-        let s = self_.clone();
-        gpio.add_write_callback(mosi, move |sys, v| { s.borrow_mut().write_mosi(sys, v) });
+        if let Some(mosi) = mosi {
+            let s = self_.clone();
+            gpio.add_write_callback(mosi, move |sys, v| { s.borrow_mut().write_mosi(sys, v) });
+        }
     }
 
     pub fn write_cs(&mut self, _sys: &System, value: bool) {

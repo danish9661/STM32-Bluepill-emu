@@ -66,13 +66,13 @@ pub fn parse_pin_name(name: &str) -> Option<(u8, u8)> {
 }
 
 impl Pin {
-    /// Parse a pin name (see [`parse_pin_name`]). Panics on a malformed name:
-    /// these come from the JS `add_*()` device config at setup time, so an
-    /// invalid one is a configuration error, not runtime input.
-    pub fn from_str(name: &str) -> Self {
-        let (port, pin) = parse_pin_name(name)
-            .unwrap_or_else(|| panic!("Invalid pin name {:?} (expected e.g. \"PA5\")", name));
-        Self { port, pin }
+    /// Parse a pin name (see [`parse_pin_name`]). Returns `None` on a malformed
+    /// name instead of panicking — these names come from the JS `add_*()` device
+    /// config at setup time, and a bad one should be a recoverable config error
+    /// (the device registration is skipped), not a WASM abort.
+    pub fn from_str(name: &str) -> Option<Self> {
+        let (port, pin) = parse_pin_name(name)?;
+        Some(Self { port, pin })
     }
 
     pub fn new(port: u8, pin: u8) -> Self {
@@ -107,9 +107,8 @@ impl Default for GpioPorts {
 }
 
 impl GpioPorts {
-    pub fn port_index(letter: char) -> u8 {
+    pub fn port_index(letter: char) -> Option<u8> {
         Self::try_port_index(letter)
-            .unwrap_or_else(|| panic!("Invalid GPIO port {}", letter))
     }
 
     /// Port index for a letter A-G, None if it isn't a port on this device.
@@ -274,8 +273,8 @@ pub struct Gpio {
 impl Gpio {
     pub fn new(name: &str) -> Option<Box<dyn Peripheral>> {
         if let Some(block) = name.strip_prefix("GPIO") {
-            let port_letter = block.chars().next().unwrap();
-            let port = GpioPorts::port_index(port_letter);
+            let port_letter = block.chars().next()?;
+            let port = GpioPorts::port_index(port_letter)?;
             Some(Box::new(Self { port_letter, port, ..Self::default() }))
         } else {
             None

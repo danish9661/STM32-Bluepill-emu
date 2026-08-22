@@ -48,9 +48,10 @@ impl Touchscreen {
 
     pub fn setup_gpio(&mut self, gpio: &mut GpioPorts) {
         if let Some(ref touch_detected_pin) = self.config.touch_detected_pin {
-            let pin = Pin::from_str(touch_detected_pin);
-            let touching = self.is_touching.clone();
-            gpio.add_read_callback(pin, move |_sys| *touching.borrow());
+            if let Some(pin) = Pin::from_str(touch_detected_pin) {
+                let touching = self.is_touching.clone();
+                gpio.add_read_callback(pin, move |_sys| *touching.borrow());
+            }
         }
     }
 

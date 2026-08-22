@@ -37,7 +37,9 @@ impl Bus {
     /// registration wins), so custom peripherals can shadow built-ins.
     pub fn register(&mut self, start: u32, end: u32, tick: bool, p: Box<dyn Peripheral>) {
         if start >= end {
-            panic!("Bus::register: empty range 0x{:08x}-0x{:08x}", start, end);
+            // Empty range is nonsensical — skip it rather than aborting the WASM
+            // module (a bad registration should never crash the emulator).
+            return;
         }
         let slot = PeripheralSlot { start, end, tick, peripheral: RefCell::new(p) };
         self.slots.retain(|s| s.end <= start || s.start >= end);

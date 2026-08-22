@@ -49,7 +49,7 @@ impl ExtDevices {
         for d in &self.spi_flashes {
             if d.borrow().config.peripheral == peri_name {
                 result.push(SpiDeviceEntry {
-                    cs: d.borrow().config.cs.as_ref().map(|s| parse_pin(s)),
+                    cs: d.borrow().config.cs.as_ref().and_then(|s| parse_pin(s)),
                     device: d.clone() as Rc<RefCell<dyn ExtDevice<(), u8>>>,
                     name: format!("{} spi-flash", peri_name),
                 });
@@ -67,7 +67,7 @@ impl ExtDevices {
         for d in &self.lcds {
             if d.borrow().config.peripheral == peri_name {
                 result.push(SpiDeviceEntry {
-                    cs: d.borrow().config.cs.as_ref().map(|s| parse_pin(s)),
+                    cs: d.borrow().config.cs.as_ref().and_then(|s| parse_pin(s)),
                     device: d.clone() as Rc<RefCell<dyn ExtDevice<(), u8>>>,
                     name: format!("{} lcd", peri_name),
                 });
@@ -76,7 +76,7 @@ impl ExtDevices {
         for d in &self.touchscreens {
             if d.borrow().config.peripheral == peri_name {
                 result.push(SpiDeviceEntry {
-                    cs: d.borrow().config.cs.as_ref().map(|s| parse_pin(s)),
+                    cs: d.borrow().config.cs.as_ref().and_then(|s| parse_pin(s)),
                     device: d.clone() as Rc<RefCell<dyn ExtDevice<(), u8>>>,
                     name: format!("{} touchscreen", peri_name),
                 });
@@ -156,7 +156,6 @@ pub trait ExtDevice<A, T> {
 unsafe impl Send for ExtDevices {}
 unsafe impl Sync for ExtDevices {}
 
-fn parse_pin(s: &str) -> (u8, u8) {
+fn parse_pin(s: &str) -> Option<(u8, u8)> {
     crate::peripherals::gpio::parse_pin_name(s)
-        .unwrap_or_else(|| panic!("Invalid pin name {:?} (expected e.g. \"PA5\")", s))
 }

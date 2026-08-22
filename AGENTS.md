@@ -50,7 +50,14 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 - **Site runLoop**: batch ~4× `step(20000)` per rAF frame (80ms budget), one UI pass per frame; Speed stat divides real frame instructions, not a fixed 500K
 - **Regression canary**: `node tests/canary.mjs` (or `node tests/canary.mjs <maxInstr>` default 100M) — runs firmware, asserts exit 0, no FAIL lines, SUMMARY pass=39 fail=0, ~25s. Faster than the full 200M run.
 
-## Current Status (uncommitted WIP — see "What We Did — Current Sprint" below)
+## Current Status (all work below is committed; see git log)
+
+> Last updated: 2026-08-22. The emulator is **feature-complete and stable**:
+> 236/236 unit tests, 39/39 firmware checks, ~22M IPS headless. Recent work:
+> `--help`/`--verbose` CLI + better errors, comprehensive About page, **removed all
+> `panic!` from user-input paths** (bad pin names / empty bus ranges now degrade
+> gracefully instead of aborting the WASM module), and an audit document
+> (`docs/AUDIT.md`) covering memory, security, overhead and performance.
 ### Test suite: `node tests/test_all.mjs`
 **236/236 unit tests PASS** (GPIO incl. electrical model + pin events, USART, ADC incl. RC sample-and-hold / DAC loopback / external triggers / AWD IRQ, RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C, RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX, FSMC, deep-sleep gating, fault escalation).
 
@@ -67,7 +74,7 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
 - **I2C2/SPI2 devices**: `build/eeprom2.bin` (0x51, 64K) + `build/spi_flash2.bin` (JEDEC `0xEF4017`, CS PB12) — both must be re-created after an arduino-cli rebuild (build dir gets wiped):
   `node -e "const fs=require('fs'); const e2=Buffer.alloc(65536); e2[0]=0x42; e2[1]=0x24; fs.writeFileSync('tests/arduino_periph_test/build/eeprom2.bin', e2); fs.writeFileSync('tests/arduino_periph_test/build/spi_flash2.bin', Buffer.alloc(65536));"`
 
-## What We Did — Current Sprint (uncommitted WIP)
+## What We Did — Current Sprint (committed)
 ### 0. rp2040js-style peripheral bus + custom JS peripherals + multi-chip (`src/bus.rs`, `src/peripherals/mod.rs`, `pkg/cli.mjs`, `pkg/emulator.js`, site/index.html)
 - **Bus**: new `src/bus.rs` — runtime registry (rp2040js `bus.ts` equivalent): `Bus::register(start, end, tick, p)`, sorted slots + binary search (`get()`), tick bookkeeping rebuilt on every register. `Peripherals.peripherals`/`tick_indices` → `bus: RefCell<Bus>`; `PeripheralSlot` gained a `tick` flag. **Last registration wins on overlap** (custom peripherals can shadow built-ins).
 - **JS peripherals**: `JsPeripheral` (impl `Peripheral`, holds `js_sys::Function`s) + wasm export `register_js_peripheral(base, size, read, write) -> bool` — callbacks get `(addr, size)` / `(addr, value, size)` with the ABSOLUTE address; requires init first; cleared by the next init (fresh bus). emulator.js: `emu.addJsPeripheral(...)` + `opts.js_peripherals`; cli.mjs: `--periph-plugin=<file.mjs>` (default export array of {base,size,read,write}).
