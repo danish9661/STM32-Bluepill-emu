@@ -35,8 +35,14 @@ function patchMrsMsp(data) {
 }
 
 function loadFirmware(buf) {
+    if (buf.length === 0) {
+        throw new Error('Firmware file is empty (0 bytes)');
+    }
     if (buf.length > 4 && buf[0] === 0x7F && buf[1] === 0x45 && buf[2] === 0x4C && buf[3] === 0x46) {
         const elf = parseElf(buf);
+        if (!elf.regions || elf.regions.length === 0) {
+            throw new Error('ELF file has no loadable segments — is this a valid ARM Thumb ELF?');
+        }
         console.log(`Parsed ELF: ${elf.regions.length} load segments, ${elf.symbols.length} symbols`);
         for (const r of elf.regions) {
             r.data = patchMrsMsp(r.data);
@@ -45,9 +51,13 @@ function loadFirmware(buf) {
     }
     if (buf.length > 0 && buf[0] === 0x3A) {
         const parsed = parseIntelHex(new TextDecoder().decode(buf));
+        if (parsed.data.length === 0) {
+            throw new Error('Intel HEX parsed to 0 bytes — check the file format');
+        }
         console.log(`Parsed Intel HEX: base=0x${parsed.base.toString(16)} (${parsed.data.length} bytes)`);
         return { data: patchMrsMsp(parsed.data), base: parsed.base, regions: null, symbols: null };
     }
+    console.warn(`Warning: unrecognized firmware format (first bytes: ${Array.from(buf.slice(0, 8)).map(b => '0x' + b.toString(16)).join(' ')}). Loading as raw binary at 0x08000000.`);
     return { data: patchMrsMsp(buf), base: null, regions: null, symbols: null };
 }
 
@@ -78,6 +88,44 @@ async function getMUnicorn() {
 async function main() {
     await null;
     const args = process.argv.slice(2);
+
+    if (args.includes('--help') || args.includes('-h')) {
+        console.log(`
+stm32f1-emu — STM32F1 Blue Pill emulator (WASM + Unicorn ARM Cortex-M3)
+
+Usage:
+  stm32f1-emu <firmware> [max_instructions] [options]
+  stm32f1-emu --config=<path.yaml> [max_instructions] [options]
+
+Firmware formats:
+  .elf    ELF binary (symbols resolved automatically)
+  .hex    Intel HEX
+  .bin    Raw binary (loaded at 0x08000000)
+
+Options:
+  --config=<path>      Load YAML config file (can be repeated)
+  --max=<N>            Max instructions to execute (default: 1000000, or env MAX_INST)
+  --map=<file.map>     Load symbol map for PC → name resolution
+  --uart=<addr>        UART peripheral address (default: 0x40013800, or env UART_ADDR)
+  --regs               Dump registers every batch
+  --verbose            Print peripheral read/write traces (very noisy)
+  --periph-plugin=<m>  Load JS peripheral plugin (default export: [{base,size,read,write}])
+  -h, --help           Show this help
+
+Environment variables:
+  FIRMWARE             Firmware path (alternative to positional arg)
+  MAX_INST             Max instructions (alternative to --max)
+  UART_ADDR            UART address (alternative to --uart)
+  SHOW_REGS=1          Dump registers (alternative to --regs)
+
+Examples:
+  stm32f1-emu firmware.elf 200000000
+  stm32f1-emu --config=tests/arduino_periph_test/config.yaml --max=200000000
+  echo -n "AB" | stm32f1-emu firmware.elf --max=200000000
+  stm32f1-emu firmware.bin --verbose --regs
+`);
+        process.exit(0);
+    }
     const configPaths = args.filter(a => a.startsWith('--config=')).map(a => a.split('=')[1]);
     const posArgs = args.filter(a => !a.startsWith('--'));
     const maxInst = parseInt(
@@ -85,6 +133,7 @@ async function main() {
         || (configPaths.length > 0 ? posArgs[0] : posArgs[1])
         || process.env.MAX_INST || '1000000', 10);
     const showRegs = args.includes('--regs') || process.env.SHOW_REGS === '1';
+    const verbose = args.includes('--verbose');
     const mapPath = args.find(a => a.startsWith('--map='))?.split('=')[1];
     const periphPlugin = args.find(a => a.startsWith('--periph-plugin='))?.split('=')[1];
     let uartAddr = parseInt(args.find(a => a.startsWith('--uart='))?.split('=')[1] || process.env.UART_ADDR || '0x40013800', 16);
@@ -92,7 +141,18 @@ async function main() {
     let config = {};
     if (configPaths.length > 0) {
         for (const cp of configPaths) {
-            const raw = yaml.load(readFileSync(cp, 'utf8'));
+            let raw;
+            try {
+                raw = yaml.load(readFileSync(cp, 'utf8'));
+            } catch (e) {
+                console.error(`Error: cannot read config file: ${cp}`);
+                console.error(`  ${e.code === 'ENOENT' ? 'File not found' : e.message}`);
+                process.exit(1);
+            }
+            if (!raw || typeof raw !== 'object') {
+                console.error(`Error: config file is empty or invalid YAML: ${cp}`);
+                process.exit(1);
+            }
             const cfgDir = path.dirname(path.resolve(cp));
             if (raw.regions) raw.regions = raw.regions.map(r => ({ ...r, _dir: cfgDir }));
             if (raw.patches) raw.patches = raw.patches.map(p => ({ ...p, _dir: cfgDir }));
@@ -150,7 +210,12 @@ async function main() {
     if (config.regions) {
         memRegions = config.regions.map(r => ({ ...r, start: parseHex(r.start), size: parseHex(r.size) }));
         const romRegion = memRegions.find(r => r.load);
-        if (!romRegion) { console.error('No region with load file found'); process.exit(1); }
+        if (!romRegion) {
+            console.error('Error: config defines no region with a "load" file.');
+            console.error('  Each region needs a "load" field pointing to the firmware binary/hex/elf.');
+            console.error('  Example: regions: [{ start: 0x08000000, size: 0x10000, load: firmware.bin }]');
+            process.exit(1);
+        }
         vector_table = parseHex(config.cpu?.vector_table || romRegion.start);
         const romFile = path.resolve(romRegion._dir || config._devices_dir, romRegion.load);
         const fw = loadFirmware(readFileSync(romFile));
@@ -220,11 +285,28 @@ async function main() {
     } else {
         const firmwarePath = posArgs[0] || process.env.FIRMWARE;
         if (!firmwarePath) {
-            console.error('Usage: node cli.mjs <firmware.bin|.hex|.elf> [max_instructions] [--config=path] [--max=N] [--map=file.map]');
-            console.error('  or set FIRMWARE env var');
+            console.error('Error: no firmware file specified.');
+            console.error('');
+            console.error('Provide a firmware as the first argument, or use --config=<path>.');
+            console.error('Run with --help for full usage information.');
             process.exit(1);
         }
-        const fw = loadFirmware(readFileSync(firmwarePath));
+        let fwBuf;
+        try {
+            fwBuf = readFileSync(firmwarePath);
+        } catch (e) {
+            console.error(`Error: cannot read firmware file: ${firmwarePath}`);
+            console.error(`  ${e.code === 'ENOENT' ? 'File not found' : e.message}`);
+            process.exit(1);
+        }
+        let fw;
+        try {
+            fw = loadFirmware(fwBuf);
+        } catch (e) {
+            console.error(`Error loading firmware: ${e.message}`);
+            console.error(`  File: ${path.resolve(firmwarePath)}`);
+            process.exit(1);
+        }
         firmware = fw.data;
         fwBase = fw.base;
         fwRegions = fw.regions;
@@ -339,6 +421,19 @@ async function main() {
     const sp_init = read32(vector_table);
     const pc_init = read32(vector_table + 4);
 
+    if (sp_init === 0 || sp_init === 0xFFFFFFFF) {
+        console.error(`Error: invalid stack pointer at vector table: 0x${sp_init.toString(16)}`);
+        console.error(`  The vector table at 0x${vector_table.toString(16)} may not contain valid firmware data.`);
+        console.error('  Check that the firmware was compiled for the correct memory layout (typically 0x08000000).');
+        process.exit(1);
+    }
+    if (pc_init === 0 || pc_init === 0xFFFFFFFF || (pc_init & 1) === 0) {
+        console.error(`Error: invalid reset vector at vector table: 0x${pc_init.toString(16)}`);
+        console.error('  The reset handler address should be an odd Thumb address (bit 0 set).');
+        console.error('  Check that the firmware was compiled for Cortex-M (ARM Thumb).');
+        process.exit(1);
+    }
+
     uc.reg_write_i32(Module.ARM_REG_SP, sp_init);
     uc.reg_write_i32(Module.ARM_REG_PC, pc_init | 1);
 
@@ -354,6 +449,7 @@ async function main() {
         } else {
             val = periph_read(addr32, size) >>> 0;
         }
+        if (verbose) console.log(`R [0x${addr32.toString(16).padStart(8, '0')}] ${size}B = 0x${val.toString(16)}`);
         const bytes = new Uint8Array(size);
         for (let i = 0; i < size; i++) {
             bytes[i] = (val >> (i * 8)) & 0xFF;
@@ -364,6 +460,7 @@ async function main() {
     const memWriteHook = (handle, type, address, size, value, user_data) => {
         const addr32 = Number(address);
         const valueNum = Number(value);
+        if (verbose) console.log(`W [0x${addr32.toString(16).padStart(8, '0')}] ${size}B = 0x${valueNum.toString(16)}`);
         periph_write(addr32, size, valueNum);
         if (addr32 === 0x40005410 && (valueNum & 1) === 1) {
             try {
@@ -537,6 +634,7 @@ async function main() {
 
         processDma();
         const curPc = uc.reg_read_i32(Module.ARM_REG_PC);
+        if (verbose) console.log(`--- batch ${totalSteps} PC=0x${(curPc >>> 0).toString(16)} inst=${instCount} ---`);
         try {
             uc.emu_start(BigInt(curPc | 1), 0n, 0n, maxBatch);
         } catch (e) {
@@ -640,8 +738,15 @@ async function main() {
 }
 
 main().catch(e => {
-    console.error('Fatal:', e?.name || '(no name)', e?.message || '(no message)', e?.code || '');
-    console.error('Stack:', e?.stack?.substring(0, 1000) || '(no stack)');
-    console.error('Type:', typeof e, e);
+    console.error('');
+    console.error('=== Fatal Error ===');
+    console.error(`  Type: ${typeof e}`);
+    console.error(`  Name: ${e?.name || '(none)'}`);
+    console.error(`  Message: ${e?.message || '(none)'}`);
+    if (e?.code) console.error(`  Code: ${e.code}`);
+    if (e?.stack) console.error(`  Stack: ${e.stack.substring(0, 500)}`);
+    console.error('');
+    console.error('If this is a WASM crash, try re-building with: wasm-pack build --target web');
+    console.error('For bugs, report at: https://github.com/danish9661/STM32-Bluepill-emu/issues');
     process.exit(1);
 });
