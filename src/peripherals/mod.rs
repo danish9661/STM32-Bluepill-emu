@@ -527,10 +527,9 @@ impl Peripherals {
     }
 
     /// Queries the AFIO peripheral for the GPIO port mapped to a given EXTI line (0-15).
-    pub fn exti_port_for_line(&self, line: u32) -> Option<char> {        for slot in self.bus.borrow().iter() {
-            if slot.start == 0x4001_0000 {
-                return slot.peripheral.borrow().exti_port(line);
-            }
+    pub fn exti_port_for_line(&self, line: u32) -> Option<char> {
+        if let Some(slot) = self.bus.borrow().get(0x4001_0000) {
+            return slot.peripheral.borrow().exti_port(line);
         }
         None
     }
@@ -538,10 +537,8 @@ impl Peripherals {
     /// Queries AFIO MAPR remap bits for a given peripheral name.
     /// Returns None if the peripheral has no remap bits or AFIO is unavailable.
     pub fn afio_remap_status(&self, name: &str) -> Option<u32> {
-        for slot in self.bus.borrow().iter() {
-            if slot.start == 0x4001_0000 {
-                return slot.peripheral.borrow().remap_status(name);
-            }
+        if let Some(slot) = self.bus.borrow().get(0x4001_0000) {
+            return slot.peripheral.borrow().remap_status(name);
         }
         None
     }
@@ -549,11 +546,8 @@ impl Peripherals {
     /// Called from GPIO when a pin changes state. Triggers EXTI if the port/pin
     /// matches the AFIO EXTICR mapping and EXTI edge configuration.
     pub fn gpio_exti_trigger(&self, sys: &System, port: u8, pin: u8, rising: bool) {
-        for slot in self.bus.borrow().iter() {
-            if slot.start == 0x4001_0400 {
-                slot.peripheral.borrow_mut().gpio_pin_changed(sys, port, pin, rising);
-                return;
-            }
+        if let Some(slot) = self.bus.borrow().get(0x4001_0400) {
+            slot.peripheral.borrow_mut().gpio_pin_changed(sys, port, pin, rising);
         }
     }
 
@@ -567,19 +561,21 @@ impl Peripherals {
     /// Timer-originated ADC external trigger: fanned out to every ADC, which
     /// gates on its own EXTSEL/JEXTSEL configuration.
     pub fn adc_timer_trigger(&self, sys: &System, tim_base: u32, ch: u8) {
-        for slot in self.bus.borrow().iter() {
-            if slot.start == 0x4001_2400 || slot.start == 0x4001_2800 {
-                slot.peripheral.borrow_mut().adc_timer_trigger(sys, tim_base, ch);
-            }
+        if let Some(slot) = self.bus.borrow().get(0x4001_2400) {
+            slot.peripheral.borrow_mut().adc_timer_trigger(sys, tim_base, ch);
+        }
+        if let Some(slot) = self.bus.borrow().get(0x4001_2800) {
+            slot.peripheral.borrow_mut().adc_timer_trigger(sys, tim_base, ch);
         }
     }
 
     /// EXTI-originated ADC trigger (line 11 = regular, 15 = injected).
     pub fn adc_exti_trigger(&self, sys: &System, line: u32) {
-        for slot in self.bus.borrow().iter() {
-            if slot.start == 0x4001_2400 || slot.start == 0x4001_2800 {
-                slot.peripheral.borrow_mut().adc_exti_trigger(sys, line);
-            }
+        if let Some(slot) = self.bus.borrow().get(0x4001_2400) {
+            slot.peripheral.borrow_mut().adc_exti_trigger(sys, line);
+        }
+        if let Some(slot) = self.bus.borrow().get(0x4001_2800) {
+            slot.peripheral.borrow_mut().adc_exti_trigger(sys, line);
         }
     }
 

@@ -163,12 +163,16 @@ impl Nvic {
     fn find_highest_pending_excluding(&self, primask: u32, basepri: u32, exclude: Option<i32>) -> Option<i32> {
         let mut best: Option<i32> = None;
         let mut best_prio: u8 = 0xFF;
-        let pending = self.pending;
-        if pending == 0 { return None; }
-        for irq in -14..(IRQ_COUNT as i32) {
-            let bit = (IRQ_OFFSET + irq) as u128;
-            if bit >= 128 { break; }
-            if pending & (1u128 << bit) == 0 { continue; }
+        let mut bits = self.pending;
+        // Iterate only the SET pending bits (O(active) instead of scanning all
+        // 111 possible IRQs). Among those, pick the lowest priority number
+        // (highest priority), matching the old linear scan's tie-break
+        // (lowest IRQ first). Identical result, cheaper when few are pending.
+        while bits != 0 {
+            let bit = bits.trailing_zeros() as i32;
+            bits &= bits - 1;
+            let irq = bit - IRQ_OFFSET as i32;
+            if irq < -14 || irq >= IRQ_COUNT as i32 { continue; }
             if Some(irq) == exclude { continue; }
             if !self.can_fire(irq, primask, basepri) { continue; }
             let prio = self.exception_priority(irq);
