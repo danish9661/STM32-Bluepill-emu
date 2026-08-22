@@ -39,11 +39,15 @@ header a.nav { font-size: 12px; color: #7dd3fc; text-decoration: none; border: 1
 header a.nav:hover { background: #1d4ed8; color: #fff; }
 .badge { font-size: 11px; background: #0ea5e9; color: #082f49; padding: 3px 10px; border-radius: 999px; font-weight: 600; }
 .badge.off { background: #475569; color: #cbd5e1; }
-.wrap { display: grid; grid-template-columns: 380px 1fr; gap: 20px; padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
+.wrap { display: grid; grid-template-columns: 380px 1fr; gap: 20px; padding: 20px 24px 0; max-width: 1400px; margin: 0 auto; }
 @media (max-width: 960px) { .wrap { grid-template-columns: 1fr; } }
+.fullrow { max-width: 1400px; margin: 0 auto; padding: 0 24px; margin-top: 16px; }
+.term-section { margin-top: 14px; }
+.term-section h2 { margin-bottom: 8px; }
 .hint { font-size: 11.5px; color: #94a3b8; margin: 0 0 12px; line-height: 1.5; }
 .hint code { background: #0f172a; border: 1px solid #334155; border-radius: 4px; padding: 1px 5px; color: #7dd3fc; font-family: Consolas, monospace; }
-footer { text-align: center; font-size: 11.5px; color: #64748b; padding: 18px 24px 28px; border-top: 1px solid #334155; margin-top: 8px; }
+.gpio-placeholder { color: #64748b; font-size: 13px; padding: 8px 0; font-style: italic; }
+footer { text-align: center; font-size: 11.5px; color: #64748b; padding: 18px 24px 28px; border-top: 1px solid #334155; margin-top: 24px; }
 footer a { color: #7dd3fc; text-decoration: none; }
 footer a:hover { text-decoration: underline; }
 .card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 16px; }
@@ -132,33 +136,6 @@ select:focus { outline: none; border-color: #7dd3fc; }
                 <span><span class="dot in"></span> input mode</span>
             </div>
         </div>
-        <div class="card" style="margin-top:16px" id="gpioCard" hidden>
-            <h2>GPIO State</h2>
-            <div class="gpio-grid" id="gpioGrid"></div>
-        </div>
-        <div class="card" style="margin-top:16px" id="showcaseCard" hidden>
-            <h2>Showcase Peripherals</h2>
-            <div class="periph-grid">
-                <div class="displays">
-                    <div class="periph-dev"><h4>I2C OLED · 0x3C</h4><canvas id="oledCanvas" width="128" height="64"></canvas></div>
-                    <div class="periph-dev"><h4>SPI LCD · 128x64</h4><canvas id="lcdCanvas" width="128" height="64"></canvas></div>
-                </div>
-                <div class="periph-dev"><h4>7-Segment · 74HC595 (SPI1·PA4)</h4><div id="segHost"></div></div>
-                <div class="periph-dev"><h4>RGB LED · TIM2 CH1-3 (PA0-2)</h4><div id="rgb-bar"></div></div>
-                <div class="periph-dev"><h4>Buzzer · PB14</h4><span id="buzz-ind">♪</span></div>
-                <div class="periph-dev"><h4>Button · PB13 EXTI13</h4><button id="btn-widget">Press PB13</button></div>
-            </div>
-        </div>
-        <div class="card" style="margin-top:16px" id="wsCard" hidden>
-            <h2>WS2812 Strip · SPI1 + DMA1 CH3</h2>
-            <div class="ws-strip" id="wsStrip">
-                <div class="ws-led" id="ws-led-0"></div><div class="ws-led" id="ws-led-1"></div>
-                <div class="ws-led" id="ws-led-2"></div><div class="ws-led" id="ws-led-3"></div>
-                <div class="ws-led" id="ws-led-4"></div><div class="ws-led" id="ws-led-5"></div>
-                <div class="ws-led" id="ws-led-6"></div><div class="ws-led" id="ws-led-7"></div>
-            </div>
-            <div class="ws-count" id="wsFrameCount">0 frames</div>
-        </div>
     </div>
 
     <div>
@@ -198,14 +175,55 @@ select:focus { outline: none; border-color: #7dd3fc; }
                 <span class="stat-pc">PC <b id="statPc">--------</b></span>
                 <span>SP <b id="statSp">--------</b></span>
             </div>
-            <h2 style="margin-top:14px">UART Terminal</h2>
-            <div class="terminal" id="terminal"><span class="t-out">Bluepill emulator ready. Load firmware to begin.</span><br></div>
-            <div class="tx-row">
-                <input id="uartInput" placeholder="Type to send bytes to UART RX (Serial.available / read)…" disabled>
-                <button id="sendBtn" disabled>Send</button>
+            <div class="term-section">
+                <h2>UART Terminal</h2>
+                <div class="terminal" id="terminal"><span class="t-out">Bluepill emulator ready. Load firmware to begin.</span><br></div>
+                <div class="tx-row">
+                    <input id="uartInput" placeholder="Type to send bytes to UART RX (Serial.available / read)…" disabled>
+                    <button id="sendBtn" disabled>Send</button>
+                </div>
             </div>
         </div>
     </div>
+</div>
+
+<div class="fullrow">
+    <div class="card" id="showcaseCard" hidden>
+        <h2>Showcase Peripherals</h2>
+        <div class="periph-grid">
+            <div class="displays">
+                <div class="periph-dev"><h4>I2C OLED · 0x3C</h4><canvas id="oledCanvas" width="128" height="64"></canvas></div>
+                <div class="periph-dev"><h4>SPI LCD · 128x64</h4><canvas id="lcdCanvas" width="128" height="64"></canvas></div>
+            </div>
+            <div class="periph-dev"><h4>7-Segment · 74HC595 (SPI1·PA4)</h4><div id="segHost"></div></div>
+            <div class="periph-dev"><h4>RGB LED · TIM2 CH1-3 (PA0-2)</h4><div id="rgb-bar"></div></div>
+            <div class="periph-dev"><h4>Buzzer · PB14</h4><span id="buzz-ind">♪</span></div>
+            <div class="periph-dev"><h4>Button · PB13 EXTI13</h4><button id="btn-widget">Press PB13</button></div>
+        </div>
+    </div>
+</div>
+<div class="fullrow">
+    <div class="card" id="wsCard" hidden>
+        <h2>WS2812 Strip · SPI1 + DMA1 CH3</h2>
+        <div class="ws-strip" id="wsStrip">
+            <div class="ws-led" id="ws-led-0"></div><div class="ws-led" id="ws-led-1"></div>
+            <div class="ws-led" id="ws-led-2"></div><div class="ws-led" id="ws-led-3"></div>
+            <div class="ws-led" id="ws-led-4"></div><div class="ws-led" id="ws-led-5"></div>
+            <div class="ws-led" id="ws-led-6"></div><div class="ws-led" id="ws-led-7"></div>
+        </div>
+        <div class="ws-count" id="wsFrameCount">0 frames</div>
+    </div>
+</div>
+</div>
+
+<div class="fullrow">
+    <div class="card">
+        <h2>GPIO State</h2>
+        <div class="gpio-grid" id="gpioGrid">
+            <div class="gpio-placeholder" id="gpioPlaceholder">Load a preset or firmware to see live GPIO pin state</div>
+        </div>
+    </div>
+</div>
 
 <script type="module">
 import { createEmulator, parseSymbolMap } from './emulator.js';
@@ -344,7 +362,9 @@ function renderBoard(ledOn) {
 }
 
 function renderGpio() {
-    if (!emu) { gpioGrid.innerHTML = ''; return; }
+    if (!emu) { return; }
+    // Remove old port elements but keep the placeholder
+    gpioGrid.querySelectorAll('.gpio-port').forEach(e => e.remove());
     let html = '';
     for (const port of PORTS) {
         const pi = port.charCodeAt(0) - 65;
@@ -564,7 +584,8 @@ async function initEmulator(data, name, extDevices = {}) {
     $('avgMips').textContent = '—';
     $('showcaseCard').hidden = true;
     $('wsCard').hidden = true;
-    $('gpioCard').hidden = true;
+    const ph = $('gpioPlaceholder'); if (ph) ph.style.display = '';
+    $('gpioGrid').querySelectorAll('.gpio-port').forEach(e => e.remove());
     runStartTs = 0;
     runStartInst = 0;
     totalInst = 0;
@@ -596,7 +617,7 @@ async function initEmulator(data, name, extDevices = {}) {
         $('uartInput').focus();
         updateRegs();
         updateVisuals();
-        $('gpioCard').hidden = false;
+        const ph = $('gpioPlaceholder'); if (ph) ph.style.display = 'none';
         setState('Ready');
     } catch (e) {
         log(`Init failed: ${e.message || e}`, 't-err');
