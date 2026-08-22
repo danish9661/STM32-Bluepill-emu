@@ -6,7 +6,7 @@
 //! JS via `register_js_peripheral` (wasm export) — a `JsPeripheral` wrapping
 //! JS read/write callbacks.
 
-use std::cell::RefCell;
+use std::cell::{RefCell, Cell};
 
 use wasm_bindgen::prelude::*;
 
@@ -18,11 +18,18 @@ use crate::system::System;
 pub struct Bus {
     slots: Vec<PeripheralSlot<RefCell<Box<dyn Peripheral>>>>,
     tick_indices: Vec<usize>,
+    /// Temporal-locality cache for `get()`: the last matched slot's
+    /// `[start, end)` range + index. WASM is single-threaded, so `Cell`
+    /// interior mutability is safe. Cleared on every `register()` so it can
+    /// never go stale when the bus is rebuilt (e.g. `register_js_peripheral`
+    /// after init). A hit only short-circuits when the address still falls in
+    /// the cached slot, so behavior is identical to the binary search.
+    last: Cell<Option<(u32, u32, usize)>>,
 }
 
 impl Bus {
     pub fn new() -> Self {
-        Bus { slots: Vec::new(), tick_indices: Vec::new() }
+        Bus { slots: Vec::new(), tick_indices: Vec::new(), last: Cell::new(None) }
     }
 
     /// Register a peripheral covering `[start, end)`. Re-registering an
@@ -37,6 +44,7 @@ impl Bus {
         self.slots.push(slot);
         self.slots.sort_by_key(|s| s.start);
         self.rebuild_tick_indices();
+        self.last.set(None);
     }
 
     /// Builder-time overlap check (used by the board constructors).
@@ -55,13 +63,28 @@ impl Bus {
             .collect();
     }
 
-    /// Binary search for the slot covering `addr`.
+    /// Binary search for the slot covering `addr`. A same-slot hit (same
+    /// address, or sequential accesses within one peripheral / FSMC bank)
+    /// returns the cached slot without re-searching.
     pub fn get(&self, addr: u32) -> Option<&PeripheralSlot<RefCell<Box<dyn Peripheral>>>> {
+        if let Some((start, end, idx)) = self.last.get() {
+            if addr >= start && addr < end {
+                // idx is valid: slots only change via register(), which clears
+                // the cache. Coverage is already guaranteed by the range check.
+                return self.slots.get(idx);
+            }
+        }
         let index = self.slots.binary_search_by_key(&addr, |p| p.start)
             .map_or_else(|e| e.checked_sub(1), |v| Some(v));
         // Ranges are [start, end): an address exactly at `end` belongs to the
         // next slot (or to a gap), never to this one.
-        index.map(|i| self.slots.get(i).filter(|p| addr < p.end)).flatten()
+        let found = index.and_then(|i| self.slots.get(i).filter(|p| addr < p.end));
+        if let Some(s) = found {
+            if let Some(i) = index {
+                self.last.set(Some((s.start, s.end, i)));
+            }
+        }
+        found
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &PeripheralSlot<RefCell<Box<dyn Peripheral>>>> {
