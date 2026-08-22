@@ -205,8 +205,12 @@ audit and are not part of the published package.
 ## 8. Recommendations
 
 1. **(Done)** Remove `panic!` from user-input paths → `Option`. ✅
-2. **(Optional)** Add a `console.warn` in `Bus::register` empty-range no-op
-   for debuggability (currently silent).
+2. **(Done)** Add `console_warn` on silent-skipped bad input — `Bus::register`
+   empty range, and invalid pin names in `ext_devices::parse_pin` /
+   `Pin::from_str` (software-SPI + touchscreen config). Zero new deps (raw
+   `js_sys` reflection); fires only on bad input, verified silent on clean runs.
+   Also added `description`/`repository`/`license`/etc. to `Cargo.toml` so
+   `wasm-pack` no longer warns and `pkg/package.json` carries full metadata. ✅
 3. **(Optional)** Implement real USB-FS if a use case appears; otherwise keep
    the stub.
 4. **(No action)** Performance is at the Unicorn-TCG ceiling; do not pursue

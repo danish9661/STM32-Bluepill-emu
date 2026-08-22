@@ -39,6 +39,8 @@ impl Bus {
         if start >= end {
             // Empty range is nonsensical — skip it rather than aborting the WASM
             // module (a bad registration should never crash the emulator).
+            crate::console_warn(&format!(
+                "Bus::register ignored empty range 0x{:08x}-0x{:08x}", start, end));
             return;
         }
         let slot = PeripheralSlot { start, end, tick, peripheral: RefCell::new(p) };

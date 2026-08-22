@@ -9,6 +9,20 @@ pub mod ext_devices;
 
 use system::{DmaDir, WasmSystem};
 
+/// Emit a `console.warn` from Rust without pulling in `web_sys` (zero extra
+/// wasm size). Works in both the browser and Node.js. Used for recoverable
+/// configuration/deprecation notices — never for hot paths.
+pub(crate) fn console_warn(msg: &str) {
+    let global = js_sys::global();
+    if let Ok(console) = js_sys::Reflect::get(&global, &JsValue::from_str("console")) {
+        if let Ok(warn) = js_sys::Reflect::get(&console, &JsValue::from_str("warn")) {
+            if let Some(f) = warn.dyn_ref::<js_sys::Function>() {
+                let _ = f.call1(&console, &JsValue::from_str(msg));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod test_util {
     use crate::system::WasmSystem;

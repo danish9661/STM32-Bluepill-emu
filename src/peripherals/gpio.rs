@@ -71,8 +71,16 @@ impl Pin {
     /// config at setup time, and a bad one should be a recoverable config error
     /// (the device registration is skipped), not a WASM abort.
     pub fn from_str(name: &str) -> Option<Self> {
-        let (port, pin) = parse_pin_name(name)?;
-        Some(Self { port, pin })
+        match parse_pin_name(name) {
+            Some((port, pin)) => Some(Self { port, pin }),
+            None => {
+                if !name.is_empty() {
+                    crate::console_warn(&format!(
+                        "Ignoring pin with invalid name '{}'", name));
+                }
+                None
+            }
+        }
     }
 
     pub fn new(port: u8, pin: u8) -> Self {

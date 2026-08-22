@@ -157,5 +157,16 @@ unsafe impl Send for ExtDevices {}
 unsafe impl Sync for ExtDevices {}
 
 fn parse_pin(s: &str) -> Option<(u8, u8)> {
-    crate::peripherals::gpio::parse_pin_name(s)
+    match crate::peripherals::gpio::parse_pin_name(s) {
+        Some(p) => Some(p),
+        None => {
+            // Empty string is valid (means "no CS pin"); a non-empty but
+            // unparseable name is a real config mistake worth surfacing.
+            if !s.is_empty() {
+                crate::console_warn(&format!(
+                    "Ignoring device with invalid CS pin name '{}'", s));
+            }
+            None
+        }
+    }
 }
