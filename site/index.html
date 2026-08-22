@@ -35,13 +35,20 @@ header { background: #1e293b; border-bottom: 1px solid #334155; padding: 14px 24
 header h1 { font-size: 17px; color: #38bdf8; font-weight: 600; letter-spacing: 0.3px; }
 header .sub { font-size: 12px; color: #94a3b8; }
 header .spacer { flex: 1; }
+header a.nav { font-size: 12px; color: #7dd3fc; text-decoration: none; border: 1px solid #0ea5e9; padding: 3px 10px; border-radius: 999px; }
+header a.nav:hover { background: #1d4ed8; color: #fff; }
 .badge { font-size: 11px; background: #0ea5e9; color: #082f49; padding: 3px 10px; border-radius: 999px; font-weight: 600; }
 .badge.off { background: #475569; color: #cbd5e1; }
 .wrap { display: grid; grid-template-columns: 380px 1fr; gap: 20px; padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
 @media (max-width: 960px) { .wrap { grid-template-columns: 1fr; } }
+.hint { font-size: 11.5px; color: #94a3b8; margin: 0 0 12px; line-height: 1.5; }
+.hint code { background: #0f172a; border: 1px solid #334155; border-radius: 4px; padding: 1px 5px; color: #7dd3fc; font-family: Consolas, monospace; }
+footer { text-align: center; font-size: 11.5px; color: #64748b; padding: 18px 24px 28px; border-top: 1px solid #334155; margin-top: 8px; }
+footer a { color: #7dd3fc; text-decoration: none; }
+footer a:hover { text-decoration: underline; }
 .card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 16px; }
 .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #7dd3fc; margin-bottom: 12px; }
-.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
 button { background: #0f172a; color: #38bdf8; border: 1px solid #0ea5e9; padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
 button:hover:not(:disabled) { background: #1d4ed8; color: #fff; }
 button:disabled { opacity: 0.35; cursor: not-allowed; }
@@ -109,14 +116,15 @@ select:focus { outline: none; border-color: #7dd3fc; }
     <h1>STM32 Bluepill Emulator</h1>
     <span class="sub">STM32F103C8 · full-system WASM emulation in your browser</span>
     <span class="spacer"></span>
-    <a href="about.html" style="font-size:12px;color:#7dd3fc;text-decoration:none;border:1px solid #0ea5e9;padding:3px 10px;border-radius:999px;">About</a>
+    <a class="nav" href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">GitHub</a>
+    <a class="nav" href="about.html">About</a>
     <span id="stateBadge" class="badge off">Idle</span>
 </header>
 
 <div class="wrap">
     <div>
         <div class="card">
-            <h2>Blue Pill Board · PC13</h2>
+            <h2>Blue Pill Board</h2>
             <div class="board-wrap" id="boardWrap"></div>
             <div class="legend">
                 <span><span class="dot hi"></span> output high</span>
@@ -124,7 +132,7 @@ select:focus { outline: none; border-color: #7dd3fc; }
                 <span><span class="dot in"></span> input mode</span>
             </div>
         </div>
-        <div class="card" style="margin-top:16px">
+        <div class="card" style="margin-top:16px" id="gpioCard" hidden>
             <h2>GPIO State</h2>
             <div class="gpio-grid" id="gpioGrid"></div>
         </div>
@@ -156,6 +164,7 @@ select:focus { outline: none; border-color: #7dd3fc; }
     <div>
         <div class="card">
             <h2>Run Controls</h2>
+            <p class="hint">Pick a <b>preset</b> (or load your own <code>.bin</code>/<code>.hex</code>/<code>.elf</code>), then press <b>Run</b>. Some demos auto-run and print results in the terminal below. Load a <code>.map</code> after the firmware for PC&nbsp;→&nbsp;symbol names.</p>
             <div class="toolbar">
                 <select id="presetSelect">
                     <option value="blink">Blink Demo (Arduino)</option>
@@ -555,6 +564,7 @@ async function initEmulator(data, name, extDevices = {}) {
     $('avgMips').textContent = '—';
     $('showcaseCard').hidden = true;
     $('wsCard').hidden = true;
+    $('gpioCard').hidden = true;
     runStartTs = 0;
     runStartInst = 0;
     totalInst = 0;
@@ -586,6 +596,7 @@ async function initEmulator(data, name, extDevices = {}) {
         $('uartInput').focus();
         updateRegs();
         updateVisuals();
+        $('gpioCard').hidden = false;
         setState('Ready');
     } catch (e) {
         log(`Init failed: ${e.message || e}`, 't-err');
@@ -841,5 +852,10 @@ function sendUart() {
 renderBoard(false);
 log('Pick a preset firmware, or load a .bin/.hex/.elf firmware and a .map for symbol names. Upload .map after the firmware for PC → symbol resolution.');
 </script>
+<footer>
+    STM32 Bluepill Emulator · full-system emulation via WebAssembly + Unicorn ARM Cortex-M3 ·
+    <a href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">Source</a> ·
+    <a href="about.html">About</a>
+</footer>
 </body>
 </html>
