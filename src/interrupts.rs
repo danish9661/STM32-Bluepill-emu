@@ -13,14 +13,14 @@ pub struct IntrDispatch {
     /// `svcStack`. Each frame is written to the real stack too, so handler
     /// code can inspect it — this mirror is what the JS catch pops on
     /// `bx lr` to EXC_RETURN (Unicorn faults fetching 0xFFFFFFFx).
-    svc_stack: Vec<SvcFrame>,
+    pub(crate) svc_stack: Vec<SvcFrame>,
     /// IRQs served so far this batch (reset by step/step_batch). Caps the
     /// dispatch loop at 64 per batch, matching the old JS for-loop.
     budget: u32,
 }
 
 #[derive(Clone, Copy)]
-struct SvcFrame {
+pub(crate) struct SvcFrame {
     sp: u32,
     r0: u32,
     r1: u32,
@@ -52,6 +52,7 @@ impl IntrDispatch {
 
 /// Next pending IRQ within the batch budget (like get_next_pending_interrupt,
 /// but capped at 64 per step/step_batch so one hot IRQ can't starve others).
+#[cfg(not(target_os = "emscripten"))]
 #[wasm_bindgen]
 pub fn intr_next() -> i32 {
     let sys = crate::sys();
@@ -62,6 +63,7 @@ pub fn intr_next() -> i32 {
 /// and return the 32-byte Cortex-M exception frame to write to the real stack.
 /// Empty vec when the cap is hit (SVC ignored, like the old JS guard).
 /// Frame layout: [xpsr, pc, lr, r12, r3, r2, r1, r0] little-endian.
+#[cfg(not(target_os = "emscripten"))]
 #[wasm_bindgen]
 pub fn intr_svc_enter(
     r0: u32, r1: u32, r2: u32, r3: u32, r12: u32,
@@ -87,6 +89,7 @@ pub fn intr_svc_enter(
 /// xPSR is part of the restore for the same reason it is on the IRQ path: the
 /// handler's own emu_start clobbers APSR, so a cmp/beq pair split across the
 /// SVC would otherwise evaluate with the handler's flags.
+#[cfg(not(target_os = "emscripten"))]
 #[wasm_bindgen]
 pub fn intr_svc_leave() -> Vec<u32> {
     let mut intr = crate::sys().intr.borrow_mut();
@@ -97,6 +100,7 @@ pub fn intr_svc_leave() -> Vec<u32> {
 }
 
 /// Number of SVC frames currently in flight (guard for the JS catch).
+#[cfg(not(target_os = "emscripten"))]
 #[wasm_bindgen]
 pub fn intr_svc_depth() -> u32 {
     crate::sys().intr.borrow().svc_stack.len() as u32

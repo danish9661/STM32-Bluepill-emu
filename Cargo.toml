@@ -12,7 +12,7 @@ categories = ["emulators", "hardware-support", "wasm"]
 [lib]
 # rlib alongside cdylib so `cargo test` can link the crate and unit-test the
 # pure-Rust logic (bus decoding, byte-lane merges, DMA absorb buffer) natively.
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib", "rlib", "staticlib"]
 
 [dependencies]
 wasm-bindgen = "0.2"
