@@ -27,3 +27,9 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 panic = "abort"
+
+# The merged (Path A) build links the debug staticlib into emscripten Unicorn;
+# abort (not unwind) avoids referencing C++ exception symbols the older
+# emscripten libcxxabi lacks.
+[profile.dev]
+panic = "abort"

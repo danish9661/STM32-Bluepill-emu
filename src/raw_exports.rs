@@ -27,6 +27,14 @@ pub extern "C" fn init() {
 }
 
 #[no_mangle]
+pub extern "C" fn init_svd(xml_ptr: *const u8, xml_len: u32) {
+    let xml = read_str(xml_ptr, xml_len).to_string();
+    system::INSTRUCTION_COUNT.store(0, Ordering::Relaxed);
+    peripherals::gpio::clear_pin_events();
+    set_sys(crate::system::WasmSystem::new_svd(&xml));
+}
+
+#[no_mangle]
 pub extern "C" fn reset_ext_devices() {
     let mut ext = system::get_ext_devices().lock().unwrap();
     ext.spi_flashes.clear();
@@ -242,10 +250,248 @@ pub extern "C" fn intr_svc_depth() -> u32 {
     sys().intr.borrow().svc_stack.len() as u32
 }
 
-// TODO (next step): string/Vec/&[u8]/String exports:
-//   init_svd, register_js_peripheral, dma_absorb_periph, dma_push_periph,
-//   dma_pump_all, dma_take_absorbed, dma_get_pending, dma_get_all_pending,
-//   gpio_take_pin_events, get_uart_output, add_spi_flash, add_i2c_eeprom,
-//   add_fsmc_bank, add_software_spi, add_lcd, add_i2c_oled, add_touchscreen,
-//   touchscreen_set_touch, lcd_fb, i2c_oled_fb, i2c_oled_writes,
-//   intr_svc_enter, intr_svc_leave
+// --- string / Vec / &[u8] / String exports (Path A integration) ---
+//
+// Calling convention:
+//   * `&str` / `&[u8]` inputs arrive as `(ptr: *const u8, len: u32)`; the
+//     caller (JS) owns the buffer and frees it after the call.
+//   * `Option<String>` inputs arrive as `(ptr: *const u8, len: u32)` where
+//     `len == 0` means `None`.
+//   * `Vec<u8>` / `Vec<u32>` returns are leaked (`Vec::leak`) and returned via
+//     two out-pointers `(out_ptr: *mut u32, out_len: *mut u32)` carrying
+//     `(heap_ptr, len)`. The caller reads the bytes/words then frees `heap_ptr`
+//     with the module's `_free`.
+
+fn read_str(ptr: *const u8, len: u32) -> &'static str {
+    if ptr.is_null() || len == 0 {
+        ""
+    } else {
+        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len as usize)) }
+    }
+}
+
+fn read_bytes(ptr: *const u8, len: u32) -> Vec<u8> {
+    if ptr.is_null() || len == 0 {
+        Vec::new()
+    } else {
+        unsafe { std::slice::from_raw_parts(ptr, len as usize).to_vec() }
+    }
+}
+
+fn opt_string(ptr: *const u8, len: u32) -> Option<String> {
+    if ptr.is_null() || len == 0 {
+        None
+    } else {
+        Some(read_str(ptr, len).to_string())
+    }
+}
+
+fn return_leaked_u8(v: Vec<u8>, out_ptr: *mut u32, out_len: *mut u32) {
+    let v = v.leak();
+    unsafe {
+        *out_ptr = v.as_ptr() as u32;
+        *out_len = v.len() as u32;
+    }
+}
+
+fn return_leaked_u32(v: Vec<u32>, out_ptr: *mut u32, out_len: *mut u32) {
+    let v = v.leak();
+    unsafe {
+        *out_ptr = v.as_ptr() as u32;
+        *out_len = v.len() as u32;
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn intr_svc_enter(
+    r0: u32, r1: u32, r2: u32, r3: u32, r12: u32,
+    lr: u32, pc: u32, xpsr: u32, sp: u32,
+    out_ptr: *mut u32, out_len: *mut u32,
+) {
+    use crate::interrupts::SvcFrame;
+    let mut intr = crate::sys().intr.borrow_mut();
+    if intr.svc_stack.len() >= 8 {
+        return_leaked_u8(Vec::new(), out_ptr, out_len);
+        return;
+    }
+    intr.svc_stack.push(SvcFrame { sp, r0, r1, r2, r3, r12, lr, pc, xpsr });
+    let mut frame = Vec::with_capacity(32);
+    for v in [xpsr, pc, lr, r12, r3, r2, r1, r0] {
+        frame.extend_from_slice(&v.to_le_bytes());
+    }
+    return_leaked_u8(frame, out_ptr, out_len);
+}
+
+#[no_mangle]
+pub extern "C" fn intr_svc_leave(out_ptr: *mut u32, out_len: *mut u32) {
+    let mut intr = crate::sys().intr.borrow_mut();
+    let v = match intr.svc_stack.pop() {
+        Some(f) => vec![f.r0, f.r1, f.r2, f.r3, f.r12, f.lr, f.pc, f.sp, f.xpsr],
+        None => Vec::new(),
+    };
+    return_leaked_u32(v, out_ptr, out_len);
+}
+
+#[no_mangle]
+pub extern "C" fn dma_pump_all(out_ptr: *mut u32, out_len: *mut u32) {
+    use crate::DmaDir;
+    let sys = crate::sys();
+    sys.dma_absorb_reset();
+    let mut plan: Vec<u32> = Vec::new();
+    let mut done_bits = 0u32;
+    for t in sys.take_pending_dma_transfers() {
+        done_bits |= 1 << t.stream_idx;
+        if t.direction == DmaDir::MemCopy || !t.peripheral {
+            plan.extend([0, t.src, t.dst, t.size as u32]);
+        } else if t.direction == DmaDir::Read {
+            let off = sys.dma_absorb_store(t.peri_addr, t.size);
+            plan.extend([1, t.dst, t.size as u32, off as u32]);
+        } else {
+            plan.extend([2, t.src, t.size as u32, t.peri_addr]);
+        }
+    }
+    if done_bits != 0 {
+        plan.extend([3, done_bits, 0, 0]);
+    }
+    return_leaked_u32(plan, out_ptr, out_len);
+}
+
+#[no_mangle]
+pub extern "C" fn dma_take_absorbed(offset: u32, len: u32, out_ptr: *mut u32, out_len: *mut u32) {
+    let v = crate::sys().dma_absorb_take(offset as usize, len as usize);
+    return_leaked_u8(v, out_ptr, out_len);
+}
+
+#[no_mangle]
+pub extern "C" fn dma_push_periph(addr: u32, data_ptr: *const u8, data_len: u32) {
+    let data = read_bytes(data_ptr, data_len);
+    let mut j = 0usize;
+    while j < data.len() {
+        let chunk = std::cmp::min(4, data.len() - j);
+        let mut val = 0u32;
+        for k in 0..chunk {
+            val |= (data[j + k] as u32) << (k * 8);
+        }
+        crate::sys().p.write(&*crate::sys(), addr, chunk as u8, val);
+        j += chunk;
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn dma_absorb_periph(addr: u32, size: u32, out_ptr: *mut u32, out_len: *mut u32) {
+    let mut out = Vec::with_capacity(size as usize);
+    let mut j = 0u32;
+    while j < size {
+        let chunk = std::cmp::min(4, size - j);
+        let val = crate::sys().p.read(&*crate::sys(), addr, chunk as u8);
+        for k in 0..chunk {
+            out.push(((val >> (k * 8)) & 0xFF) as u8);
+        }
+        j += chunk;
+    }
+    return_leaked_u8(out, out_ptr, out_len);
+}
+
+#[no_mangle]
+pub extern "C" fn get_uart_output(out_ptr: *mut u32, out_len: *mut u32) {
+    let s = std::mem::take(&mut *crate::system::get_uart_output().lock().unwrap());
+    return_leaked_u8(s.into_bytes(), out_ptr, out_len);
+}
+
+#[no_mangle]
+pub extern "C" fn add_i2c_eeprom(
+    periph_ptr: *const u8, periph_len: u32, address: u8,
+    data_ptr: *const u8, data_len: u32,
+) {
+    use crate::ext_devices::i2c_eeprom::{I2cEeprom, I2cEepromConfig};
+    let peripheral = read_str(periph_ptr, periph_len).to_string();
+    let data = read_bytes(data_ptr, data_len);
+    let config = I2cEepromConfig {
+        peripheral,
+        address,
+        content: data.clone(),
+        size: data.len(),
+    };
+    let eeprom = I2cEeprom::new(config);
+    crate::system::get_ext_devices().lock().unwrap().i2c_eeproms
+        .push(std::rc::Rc::new(std::cell::RefCell::new(eeprom)));
+}
+
+#[no_mangle]
+pub extern "C" fn add_spi_flash(
+    periph_ptr: *const u8, periph_len: u32, jedec_id: u32,
+    data_ptr: *const u8, data_len: u32,
+    cs_ptr: *const u8, cs_len: u32,
+) {
+    use crate::ext_devices::spi_flash::{SpiFlash, SpiFlashConfig};
+    let peripheral = read_str(periph_ptr, periph_len).to_string();
+    let data = read_bytes(data_ptr, data_len);
+    let config = SpiFlashConfig {
+        peripheral,
+        jedec_id,
+        content: data.clone(),
+        size: data.len(),
+        cs: opt_string(cs_ptr, cs_len),
+    };
+    let flash = SpiFlash::new(config);
+    crate::system::get_ext_devices().lock().unwrap().spi_flashes
+        .push(std::rc::Rc::new(std::cell::RefCell::new(flash)));
+}
+
+#[no_mangle]
+pub extern "C" fn add_lcd(
+    periph_ptr: *const u8, periph_len: u32,
+    cs_ptr: *const u8, cs_len: u32,
+) {
+    use crate::ext_devices::lcd::{Lcd, LcdConfig};
+    let peripheral = read_str(periph_ptr, periph_len).to_string();
+    let config = LcdConfig {
+        peripheral,
+        framebuffer: String::new(),
+        cs: opt_string(cs_ptr, cs_len),
+    };
+    let lcd = Lcd::new(config);
+    crate::system::get_ext_devices().lock().unwrap().lcds
+        .push(std::rc::Rc::new(std::cell::RefCell::new(lcd)));
+}
+
+#[no_mangle]
+pub extern "C" fn add_i2c_oled(
+    periph_ptr: *const u8, periph_len: u32,
+    address: u8, width: u16, height: u16,
+) {
+    use crate::ext_devices::i2c_oled::{I2cOled, I2cOledConfig};
+    let peripheral = read_str(periph_ptr, periph_len).to_string();
+    let config = I2cOledConfig {
+        peripheral,
+        address,
+        width,
+        height,
+    };
+    let oled = I2cOled::new(config);
+    crate::system::get_ext_devices().lock().unwrap().i2c_oleds
+        .push(std::rc::Rc::new(std::cell::RefCell::new(oled)));
+}
+
+#[no_mangle]
+pub extern "C" fn add_touchscreen(
+    periph_ptr: *const u8, periph_len: u32,
+    td_ptr: *const u8, td_len: u32,
+    cs_ptr: *const u8, cs_len: u32,
+) {
+    use crate::ext_devices::touchscreen::{Touchscreen, TouchscreenConfig};
+    let peripheral = read_str(periph_ptr, periph_len).to_string();
+    let config = TouchscreenConfig {
+        peripheral,
+        framebuffer: String::new(),
+        flip_x: None,
+        flip_y: None,
+        swap_x_y: None,
+        touch_detected_pin: opt_string(td_ptr, td_len),
+        scale_down: None,
+        cs: opt_string(cs_ptr, cs_len),
+    };
+    let ts = Touchscreen::new(config);
+    crate::system::get_ext_devices().lock().unwrap().touchscreens
+        .push(std::rc::Rc::new(std::cell::RefCell::new(ts)));
+}
