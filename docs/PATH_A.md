@@ -90,6 +90,51 @@ drives both over 6 firmwares, diffing UART output for correctness.
   at different granularity (Path A every 20K-instruction batch, dual every 5M
   chunk). The emulation is identical.
 
+## Maintenance — when a new Unicorn.js version ships
+
+Path A freezes the Unicorn engine at whatever `libunicorn.a` was built from, so a
+new Unicorn release is an **engine upgrade**, not a Rust change. The peripheral
+code in `src/` is untouched; only the FFI bridge may need edits. Procedure:
+
+1. **Replace the source.** Update `patha_spike/unicorn.js` (must stay
+   byte-identical to `unicorn_exp/unicorn_rebuild/unicorn.js`) with the new
+   Unicorn.js release — both the C source and its Emscripten glue
+   (`unicorn_arm.js`).
+2. **Rebuild `libunicorn.a` at Release.** Run `build.py` (or the equivalent
+   CMake step). **Critical:** keep `CMAKE_BUILD_TYPE=Release` / `-O2`. A Debug
+   build freezes Unicorn's C at `-O0` into the archive and `emcc -O2` cannot
+   re-optimize it — the merged module silently drops to ~3 MIPS (the bug we hit
+   initially). If the new release changes the CMake flags, re-confirm Release.
+3. **Pin the toolchain.** Link with **emscripten 6.0.6** (3.1.30's bundled
+   `wasm-opt` rejects `--enable-bulk-memory-opt` and the `-O2` link fails). If
+   the new Unicorn needs a different emscripten or wasm feature set, revisit
+   `ASSERTIONS=0` / `SAFE_HEAP=0` and the `wasm-bigint`/`bulk-memory` flags.
+4. **Re-link the merged module.** Run `build.py` to combine the new
+   `libunicorn.a` with the Rust `staticlib` (`target/wasm32-unknown-emscripten/debug/libstm32_bluepill_wasm.a`) into `dist/unicorn_arm.js`.
+5. **Audit the FFI surface.** This is the main risk — raw C FFI has no bindgen
+   safety net. Check the new Unicorn C API against `src/raw_exports.rs`:
+   - renamed / added / removed `uc_*` functions (`uc_open`, `uc_emu_start`,
+     `uc_mem_map_ptr`, `uc_reg_read_batch`, `uc_hook_add`, …) → update the
+     `#[no_mangle] extern "C"` wrappers and their signatures.
+   - changed **struct layouts** (`uc_context`, `uc_hook`) or **register/exception
+     enums** → fix any manual struct packing / integer constants in the bridge
+     (e.g. the EXC_RETURN / LR handling, register-id tables).
+   - changed `uc_mem_map_ptr` semantics → re-verify the shared-memory peripheral
+     bus still maps correctly.
+6. **Re-validate.** Run `tests/cmp_firmwares.sh` (6 firmwares, UART diff) plus
+   `node tests/canary.mjs` (39/39) and `node tests/test_all.mjs` (236/236).
+   Compare the MIPS table against the one above — a new Unicorn with a different
+   TCG or memory model may shift speed; confirm no correctness regression.
+7. **Determinism.** If the Rust side is also rebuilt, keep the
+   `panic = "abort"` profile and any `--remap-path-prefix` so the produced
+   `.wasm` stays reproducible (Path A is a single artifact, so there is no
+   `pkg`↔`site` CI guard to catch drift — the merged file *is* the release).
+
+**What does NOT change:** the ~70 export *semantics* (they mirror the original
+wasm-bindgen API), the Rust peripheral implementation, and the `bench_merged.mjs`
+runner CLI. Only the C engine underneath and, at most, the FFI signatures in
+`src/raw_exports.rs` move.
+
 ## Files
 
 - `src/raw_exports.rs` — ~70 raw `__cdecl` FFI exports bridging Rust ↔ Unicorn C.
