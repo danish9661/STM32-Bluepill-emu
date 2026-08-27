@@ -241,6 +241,12 @@ let running = false;
 let runStartTs = 0;
 let runStartInst = 0;
 let totalInst = 0;
+let lastBoardSig = '';
+let uiFrame = 0;
+// DOM-decoupling: the emulation steps every rAF frame (~60fps) for full throughput,
+// but the (expensive) visual layer is rendered only every UI_THROTTLE frames (~12fps).
+// Stepping is never starved by rendering; this keeps browser MIPS high without a worker.
+const UI_THROTTLE = 5;
 let svdXml = null;
 let f105SvdXml = null;
 let autoBytes = [];        // bytes to auto-inject (one at a time, when UART RX is empty)
@@ -358,6 +364,16 @@ function boardSvg(ledOn) {
 }
 
 function renderBoard(ledOn) {
+    // Dirty-skip: rebuild the SVG only when something visible changed. Most frames the
+    // board is static, so this avoids a full innerHTML parse on every rendered frame.
+    const flashing = [];
+    for (const k in PIN_ACTIVITY) {
+        const a = PIN_ACTIVITY[k];
+        if (performance.now() - a.lastToggle < 2000) flashing.push(k);
+    }
+    const sig = `${ledOn ? 1 : 0}|${pinActivityTotal}|${flashing.sort().join(',')}`;
+    if (sig === lastBoardSig) return;
+    lastBoardSig = sig;
     boardWrap.innerHTML = boardSvg(ledOn);
 }
 
@@ -589,6 +605,8 @@ async function initEmulator(data, name, extDevices = {}) {
     runStartTs = 0;
     runStartInst = 0;
     totalInst = 0;
+    lastBoardSig = '';
+    uiFrame = 0;
     lastTotalInst = 0;
     firmwareData = data;
     setState('Initializing…');
@@ -672,8 +690,11 @@ function runLoop() {
         console.error(e);
         return;
     }
-    updateRegs();
-    updateVisuals();
+    // Visual layer throttled to every UI_THROTTLE frames; stepping above is never starved.
+    if ((uiFrame++ % UI_THROTTLE) === 0) {
+        updateRegs();
+        updateVisuals();
+    }
     pollUart();
     if (autopilot) {
         const termText = terminal.textContent;
