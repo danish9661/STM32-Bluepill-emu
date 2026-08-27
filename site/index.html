@@ -326,7 +326,15 @@ function boardSvg(ledOn) {
             const act = PIN_ACTIVITY[name];
             const flash = act && performance.now() - act.lastToggle < 2000;
             const stroke = flash ? '#fbbf24' : fill;
-            const title = act ? ` title="${name} — ${act.count} toggles"` : '';
+            // Pin-activity tooltip tweak: report both the cumulative toggle count
+            // and the current driven logic level, so a hovered pin shows activity + state.
+            let title = '';
+            const pm = name.match(/^P([ABC])(\d+)$/);
+            if (act || (pm && emu)) {
+                const lvl = pm && emu ? (emu.gpioReadOutput(pm[1].charCodeAt(0) - 65, +pm[2]) ? 'HIGH' : 'LOW') : null;
+                const body = act ? `${act.count} toggles` : 'idle';
+                title = ` title="${name} — ${body}${lvl ? ', ' + lvl : ''}"`;
+            }
             let r, x1, y1, x2, y2, tx, ty;
             if (side === 'left') {
                 const y = 60 + i * (300 / (n - 1));
