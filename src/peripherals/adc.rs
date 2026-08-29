@@ -264,6 +264,10 @@ impl Adc {
         });
     }
 
+    fn adc_num(&self) -> u8 {
+        self.dma_channel
+    }
+
     /// Complete the conversion `c` and schedule the next one in the sequence.
     fn advance_regular(&mut self, sys: &System, c: &Conv, now: u64) {
         // For any channel the value settles via RC from the cap's held level;
@@ -284,6 +288,7 @@ impl Adc {
         if self.cr2 & (1 << 10) == 0 || last {
             self.sr |= 1 << 1; // EOC
         }
+        sys.push_event(crate::system::VmEvent::AdcDone { adc: self.adc_num(), chan: self.regular_channel(c.pos) });
         if c.pos == 0 {
             self.sr |= 1 << 4; // STRT at sequence start
         }
@@ -328,6 +333,7 @@ impl Adc {
             self.jdata[c.pos] = dr;
         }
         self.sr |= 1 << 2; // JEOC
+        sys.push_event(crate::system::VmEvent::AdcDone { adc: self.adc_num(), chan: self.injected_channel(c.pos) });
         if c.pos == 0 {
             self.sr |= 1 << 3; // JSTRT at sequence start
         }

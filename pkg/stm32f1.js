@@ -174,6 +174,12 @@ export class STM32F1 {
         for (let ch = 1; ch <= 3; ch++) this.i2c[ch] = new I2C(this, ch);
         this.spi1 = this.spi[1]; this.spi2 = this.spi[2]; this.spi3 = this.spi[3];
         this.i2c1 = this.i2c[1]; this.i2c2 = this.i2c[2]; this.i2c3 = this.i2c[3];
+        /** EXTI line edge callback: onExtiEdge(line) */
+        this.onExtiEdge = null;
+        /** ADC conversion-complete callback: onAdcDone(adc, chan) */
+        this.onAdcDone = null;
+        /** TIM update (overflow) callback: onTimUpdate(tim) */
+        this.onTimUpdate = null;
         this._pinUnsub = null;
         this._wire();
     }
@@ -217,6 +223,15 @@ export class STM32F1 {
             } else if (type === 5) { // I2cStop [channel]
                 const ch = flat[i++];
                 const bus = this.i2c[ch]; if (bus) bus._stop();
+            } else if (type === 7) { // ExtiEdge [line]
+                const line = flat[i++];
+                if (this.onExtiEdge) this.onExtiEdge(line);
+            } else if (type === 8) { // AdcDone [adc, chan]
+                const adc = flat[i++]; const chan = flat[i++];
+                if (this.onAdcDone) this.onAdcDone(adc, chan);
+            } else if (type === 9) { // TimUpdate [tim]
+                const tim = flat[i++];
+                if (this.onTimUpdate) this.onTimUpdate(tim);
             } else {
                 break; // unknown discriminant: stop to avoid desync
             }

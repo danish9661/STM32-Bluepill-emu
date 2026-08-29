@@ -106,6 +106,26 @@ mcu.i2c1.injectRx([0x12, 0x34]);
 As above; every transmitted byte is delivered here, regardless of which USART
 (the core captures all of them, not just USART1).
 
+## System-level events
+
+Beyond the bus transactions above, the core also emits chip-level events:
+
+```js
+mcu.onExtiEdge  = (line)    => console.log('EXTI', line);   // GPIO input edge -> EXTI line 0..15
+mcu.onAdcDone   = (adc, ch) => console.log('ADC', adc, 'chan', ch); // conversion complete (adc=1/2, ch=0..17)
+mcu.onTimUpdate = (tim)     => console.log('TIM', tim, 'update');   // timer overflow/update (tim=1..8)
+```
+
+- `onExtiEdge(line)` fires when a GPIO input pin changes level and the EXTI line
+  is unmasked + edge-configured (`exti.rs` `gpio_pin_changed`). This is what
+  `attachInterrupt()` + an external edge (e.g. a button via `pin.setInput`) sees.
+- `onAdcDone(adc, ch)` fires on every ADC EOC (regular + injected) in `adc.rs`.
+- `onTimUpdate(tim)` fires on every timer update event (UIF / overflow) in `tim.rs`.
+
+These are top-level callbacks on the `STM32F1` instance (assigned directly, like
+`usart1.onData`); they are dispatched from the same per-batch `drain_events()`
+that serves the bus events.
+
 ## Implementation notes
 
 - The event queue lives on `WasmSystem` (`src/system.rs`, `VmEvent` enum). The

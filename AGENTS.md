@@ -201,6 +201,11 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - **Tests**: `tests/test_stm32f1_api.mjs` (7: USART1 TX + SPI1 transfers via ws2812 elf), `tests/test_i2c_events.mjs` (3: I2C1 Start/Write/Stop via periph_test + empty-data div-by-zero guard on spi_flash requires non-empty image). Both wired into `.github/workflows/test.yml`. `docs/STM32F1_API.md` written.
 - **Rebuild note**: wasm rebuilt with pinned binaryen `version_132` (downloaded to `/tmp/binaryen-version_132` locally) + `RUSTFLAGS="--remap-path-prefix=$HOME=/build"`; `pkg/` and `site/` re-synced (CI byte-exact guard).
 
+### 15. Extend virtual-peripheral event queue to EXTI / ADC / TIM (`src/system.rs`, `src/peripherals/{exti,adc,tim}.rs`, `src/lib.rs`, `pkg/stm32f1.js`) [implemented, NOT yet committed]
+- `VmEvent` gained `ExtiEdge{line}`, `AdcDone{adc,chan}`, `TimUpdate{tim}` (flat discriminants 7/8/9). Pushed in `exti.rs::gpio_pin_changed` (hardware edge), `adc.rs::advance_regular/advance_injected` (EOC/JEOC), `tim.rs::tick_once` + `generate_update` (UIF). Encoded in `src/lib.rs::drain_events`.
+- `STM32F1` gained top-level callbacks `onExtiEdge(line)`, `onAdcDone(adc,chan)`, `onTimUpdate(tim)` (dispatched from `_drain_events`).
+- Tests: `tests/test_extra_events.mjs` (TIM + ADC via periph_test; periph_test headless does NOT self-trigger EXTI edges, so EXTI is logged, not asserted there), `tests/test_exti_events.mjs` (deterministic: configure EXTI0/1 via the bus, drive PA0/PA1 high via `gpioSetInput` -> ExtiEdge{0,1}). Both wired into CI. `docs/STM32F1_API.md` updated.
+
 
 ## Next Phase — Long-term Optimizations
 1. **Single WASM module — "Path A" (EXPERIMENT status, see docs/NEXT_PHASE.md §4)**: compile Rust peripherals + Unicorn C into one `emcc` output (`wasm32-unknown-emscripten` + `staticlib` + raw `#[no_mangle]` exports — wasm-bindgen does NOT support the emscripten target, so the ~70 exports need a shim; fetch unicorn C source, `third_party/unicorn/` is gitignored). Dual-wasm stays the default until the acceptance gate passes (224/224, 39/39 both paths, IPS within ~2× of 22M). Gain is architectural, not speed.

@@ -93,6 +93,9 @@ pub enum VmEvent {
     I2cRead { channel: u8 },
     I2cStop { channel: u8 },
     UartTx { usart: u8, byte: u8 },
+    ExtiEdge { line: u8 },
+    AdcDone { adc: u8, chan: u8 },
+    TimUpdate { tim: u8 },
 }
 
 pub struct WasmSystem {

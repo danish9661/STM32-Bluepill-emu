@@ -67,6 +67,7 @@ impl Peripheral for Exti {
         }
         self.pr |= mask;
         sys.p.nvic.borrow_mut().set_intr_pending(exti_irq(line));
+        sys.push_event(crate::system::VmEvent::ExtiEdge { line: line as u8 });
         // Lines 11/15 are the ADC external trigger inputs (regular/injected)
         if rising {
             sys.p.adc_exti_trigger(sys, line);

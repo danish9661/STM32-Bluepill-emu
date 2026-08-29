@@ -118,3 +118,7 @@ jobs:
         run: node tests/test_stm32f1_api.mjs
       - name: I2C/SPI/USART virtual-peripheral event queue
         run: node tests/test_i2c_events.mjs
+      - name: TIM/ADC virtual-peripheral events (extended queue)
+        run: node tests/test_extra_events.mjs
+      - name: EXTI edge virtual-peripheral events (extended queue)
+        run: node tests/test_exti_events.mjs

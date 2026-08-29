@@ -414,6 +414,9 @@ pub fn drain_events() -> Vec<i32> {
                     VmEvent::I2cRead { channel } => { out.push(4); out.push(*channel as i32); }
                     VmEvent::I2cStop { channel } => { out.push(5); out.push(*channel as i32); }
                     VmEvent::UartTx { usart, byte } => { out.push(6); out.push(*usart as i32); out.push(*byte as i32); }
+                    VmEvent::ExtiEdge { line } => { out.push(7); out.push(*line as i32); }
+                    VmEvent::AdcDone { adc, chan } => { out.push(8); out.push(*adc as i32); out.push(*chan as i32); }
+                    VmEvent::TimUpdate { tim } => { out.push(9); out.push(*tim as i32); }
                 }
             }
             out

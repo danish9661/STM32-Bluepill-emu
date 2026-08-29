@@ -153,6 +153,10 @@ impl Timer {
     }
 
     /// The original per-tick loop body, executed only at event ticks.
+    fn tim_num(&self) -> u8 {
+        self.name.trim_start_matches("TIM").parse::<u8>().unwrap_or(0)
+    }
+
     fn tick_once(&mut self, sys: &System) {
         let cms = (self.cr1 >> 5) & 0x3;
         let down = cms == 0 && (self.cr1 >> 4) & 1 == 1;
@@ -166,6 +170,7 @@ impl Timer {
                 self.cnt = self.arr;
                 self.sr |= 1; // UIF
                 self.update_event_trigger(sys);
+                sys.push_event(crate::system::VmEvent::TimUpdate { tim: self.tim_num() });
                 if self.dier & 1 != 0 { // UIE
                     sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
                 }
@@ -179,6 +184,7 @@ impl Timer {
             self.cnt = 0;
             self.sr |= 1; // UIF
             self.update_event_trigger(sys);
+            sys.push_event(crate::system::VmEvent::TimUpdate { tim: self.tim_num() });
             if self.dier & 1 != 0 { // UIE
                 sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
             }
@@ -223,6 +229,7 @@ impl Timer {
         self.cnt = 0;
         self.sr |= 1; // UIF
         self.update_event_trigger(sys);
+        sys.push_event(crate::system::VmEvent::TimUpdate { tim: self.tim_num() });
         if self.dier & 1 != 0 {
             sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
         }
