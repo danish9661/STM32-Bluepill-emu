@@ -84,6 +84,7 @@ impl Peripheral for Rtc {
 
             let alarm = ((self.alrh as u32) << 16) | self.alrl as u32;
             if self.crh & 1 != 0 && self.last_cnt < alarm && self.cnt >= alarm {
+                sys.push_event(crate::system::VmEvent::RtcAlarm { alarm });
                 sys.p.nvic.borrow_mut().set_intr_pending(RTC_IRQ);
             }
             if self.cnt < self.last_cnt && self.crh & 2 != 0 {

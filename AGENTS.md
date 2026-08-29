@@ -206,6 +206,12 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - `STM32F1` gained top-level callbacks `onExtiEdge(line)`, `onAdcDone(adc,chan)`, `onTimUpdate(tim)` (dispatched from `_drain_events`).
 - Tests: `tests/test_extra_events.mjs` (TIM + ADC via periph_test; periph_test headless does NOT self-trigger EXTI edges, so EXTI is logged, not asserted there), `tests/test_exti_events.mjs` (deterministic: configure EXTI0/1 via the bus, drive PA0/PA1 high via `gpioSetInput` -> ExtiEdge{0,1}). Both wired into CI. `docs/STM32F1_API.md` updated.
 
+### 16. More virtual-peripheral events: DAC/CRC/RTC/Watchdog/CAN (`src/system.rs`, `src/peripherals/{dac,crc,rtc,iwdg,wwdg,can}.rs`, `src/lib.rs`, `pkg/stm32f1.js`) [implemented, NOT yet committed]
+- `VmEvent` gained `DacWrite{chan,value}` (disc 10, dac.rs DHR write), `CrcResult{value}` (disc 11, crc.rs DR read), `RtcAlarm{alarm}` (disc 12, rtc.rs tick when alarm crossed), `WdogReset{which}` (disc 13, iwdg.rs/wwdg.rs reset request — which: 1=IWDG,2=WWDG), `CanTx{can,id,len,data[8]}` (disc 14, can.rs TX mailbox submit), `CanRx{can,id,len,data[8]}` (disc 15, can.rs inject_message). Encoded in `src/lib.rs::drain_events` (id = 11-bit STDID or 29-bit EXTID, len = DLC, data = 8 bytes).
+- `STM32F1` gained top-level callbacks `onDacWrite/onCrcResult/onRtcAlarm/onWdogReset/onCanTx/onCanRx` (dispatched from `_drain_events`).
+- Tests: `tests/test_more_events.mjs` (DAC/CRC/RTC fire naturally in periph_test; CAN RX/TX driven deterministically by configuring a pass-all filter + inject / submitting a mailbox). Wired into CI. `docs/STM32F1_API.md` updated.
+- **Note**: F103 has no onboard comparator, and TIM input-capture isn't modeled (only PWM/output-compare), so "PWM-capture"/comparator events were skipped — the queue stays honest (no false events).
+
 
 ## Next Phase — Long-term Optimizations
 1. **Single WASM module — "Path A" (EXPERIMENT status, see docs/NEXT_PHASE.md §4)**: compile Rust peripherals + Unicorn C into one `emcc` output (`wasm32-unknown-emscripten` + `staticlib` + raw `#[no_mangle]` exports — wasm-bindgen does NOT support the emscripten target, so the ~70 exports need a shim; fetch unicorn C source, `third_party/unicorn/` is gitignored). Dual-wasm stays the default until the acceptance gate passes (224/224, 39/39 both paths, IPS within ~2× of 22M). Gain is architectural, not speed.

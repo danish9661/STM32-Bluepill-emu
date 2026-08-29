@@ -126,6 +126,31 @@ These are top-level callbacks on the `STM32F1` instance (assigned directly, like
 `usart1.onData`); they are dispatched from the same per-batch `drain_events()`
 that serves the bus events.
 
+## More system / peripheral events
+
+```js
+mcu.onDacWrite   = (chan, value)   => ...; // DAC channel 1/2 output a new 12-bit value
+mcu.onCrcResult  = (value)         => ...; // CRC_DR read -> computed 32-bit result
+mcu.onRtcAlarm   = (alarm)         => ...; // RTC alarm time reached (crl CNF matched)
+mcu.onWdogReset  = (which)         => ...; // 1 = IWDG, 2 = WWDG reset requested
+mcu.onCanTx      = (can, id, len, data) => ...; // CAN frame queued for transmit (data[8])
+mcu.onCanRx      = (can, id, len, data) => ...; // CAN frame received into a FIFO (data[8])
+```
+
+- `onDacWrite(chan, value)` fires on every DAC DHR write (`dac.rs`), `value` is the
+  12-bit `DOR` driven on the pin (chan 1 = PA4, chan 2 = PA5).
+- `onCrcResult(value)` fires when `CRC_DR` is read (`crc.rs`) — `value` is the
+  accumulated 32-bit result.
+- `onRtcAlarm(alarm)` fires when the RTC counter crosses the alarm value with the
+  alarm interrupt enabled (`rtc.rs`).
+- `onWdogReset(which)` fires when IWDG (`which=1`) or WWDG (`which=2`) rolls over
+  and requests a core reset (`iwdg.rs` / `wwdg.rs`).
+- `onCanTx` / `onCanRx` fire on CAN mailbox submission / reception (`can.rs`).
+  `can` is 1 (CAN1) or 2 (CAN2); `id` is the 11-bit STDID or 29-bit EXTID; `len`
+  is the DLC and `data` is an 8-byte array. These mirror Wokwi's CAN bus model.
+
+All of the above are encoded as flat `drain_events()` discriminants 10–15.
+
 ## Implementation notes
 
 - The event queue lives on `WasmSystem` (`src/system.rs`, `VmEvent` enum). The

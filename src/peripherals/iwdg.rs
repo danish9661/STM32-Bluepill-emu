@@ -28,7 +28,7 @@ impl Iwdg {
         (ticks as u64).min(self.counter as u64) as u32
     }
 
-    fn decrement_counter(&mut self) {
+    fn decrement_counter(&mut self, sys: &System) {
         let now = INSTRUCTION_COUNT.load(Ordering::Relaxed);
         if self.sr != 0 && now.saturating_sub(self.sr_tick) >= self.tick_instructions() { self.sr = 0; }
         if !self.enabled { return; }
@@ -36,14 +36,14 @@ impl Iwdg {
         let ticks = elapsed / self.tick_instructions();
         if ticks == 0 { return; }
         self.last_tick = now;
-        if self.counter <= ticks as u32 { self.counter = 0; request_watchdog_reset(); }
+        if self.counter <= ticks as u32 { self.counter = 0; sys.push_event(crate::system::VmEvent::WdogReset { which: 1 }); request_watchdog_reset(); }
         else { self.counter -= ticks as u32; }
     }
 }
 
 impl Peripheral for Iwdg {
-    fn read(&mut self, _sys: &System, offset: u32) -> u32 {
-        self.decrement_counter();
+    fn read(&mut self, sys: &System, offset: u32) -> u32 {
+        self.decrement_counter(sys);
         match offset {
             0x04 => self.pr, 0x08 => self.rlr,
             0x0C => { let sr = self.sr; self.sr = 0; sr }
@@ -51,8 +51,8 @@ impl Peripheral for Iwdg {
         }
     }
 
-    fn write(&mut self, _sys: &System, offset: u32, value: u32) {
-        self.decrement_counter();
+    fn write(&mut self, sys: &System, offset: u32, value: u32) {
+        self.decrement_counter(sys);
         match offset {
             0x00 => {
                 self.kr = value;

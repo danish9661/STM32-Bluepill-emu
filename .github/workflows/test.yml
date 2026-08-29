@@ -122,3 +122,5 @@ jobs:
         run: node tests/test_extra_events.mjs
       - name: EXTI edge virtual-peripheral events (extended queue)
         run: node tests/test_exti_events.mjs
+      - name: DAC/CRC/RTC/CAN virtual-peripheral events (extended queue)
+        run: node tests/test_more_events.mjs

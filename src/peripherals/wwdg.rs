@@ -40,7 +40,7 @@ impl Wwdg {
             self.cr = (self.cr & !0x7F) | 0x3F;
             self.sr |= 1;
             if self.cfr & 0x200 != 0 { sys.p.nvic.borrow_mut().set_intr_pending(0); }
-            if self.wdga_enabled() { request_watchdog_reset(); }
+            if self.wdga_enabled() { sys.push_event(crate::system::VmEvent::WdogReset { which: 2 }); request_watchdog_reset(); }
             return;
         }
         let new_counter = counter - ticks;
@@ -69,7 +69,7 @@ impl Peripheral for Wwdg {
             0x00 => {
                 self.decrement_counter(sys);
                 if value & 0x80 != 0 && self.cfr & 0x7F != 0 {
-                    if (self.cr & 0x7F) > (self.cfr & 0x7F) { request_watchdog_reset(); }
+                    if (self.cr & 0x7F) > (self.cfr & 0x7F) { sys.push_event(crate::system::VmEvent::WdogReset { which: 2 }); request_watchdog_reset(); }
                 }
                 self.refresh(value);
             }

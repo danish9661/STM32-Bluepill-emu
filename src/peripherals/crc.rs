@@ -18,8 +18,13 @@ impl Crc {
 }
 
 impl Peripheral for Crc {
-    fn read(&mut self, _sys: &System, offset: u32) -> u32 {
-        match offset { 0x00 => self.dr, 0x04 => self.idr, 0x08 => self.cr, _ => 0 }
+    fn read(&mut self, sys: &System, offset: u32) -> u32 {
+        match offset {
+            0x00 => { let v = self.dr; sys.push_event(crate::system::VmEvent::CrcResult { value: v }); v }
+            0x04 => self.idr,
+            0x08 => self.cr,
+            _ => 0,
+        }
     }
 
     fn write(&mut self, _sys: &System, offset: u32, value: u32) {

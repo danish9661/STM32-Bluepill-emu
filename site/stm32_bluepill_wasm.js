@@ -263,6 +263,15 @@ export function dma_take_absorbed(offset, len) {
  *   4 I2cRead      [4, channel]
  *   5 I2cStop      [5, channel]
  *   6 UartTx       [6, usart, byte]
+ *   7 ExtiEdge     [7, line]
+ *   8 AdcDone      [8, adc, chan]
+ *   9 TimUpdate    [9, tim]
+ *  10 DacWrite     [10, chan, value]
+ *  11 CrcResult    [11, value]
+ *  12 RtcAlarm     [12, alarm]
+ *  13 WdogReset    [13, which]   (1=IWDG, 2=WWDG)
+ *  14 CanTx        [14, can, id, len, d0..d7]
+ *  15 CanRx        [15, can, id, len, d0..d7]
  * @returns {Int32Array}
  */
 export function drain_events() {

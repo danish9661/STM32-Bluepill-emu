@@ -180,6 +180,18 @@ export class STM32F1 {
         this.onAdcDone = null;
         /** TIM update (overflow) callback: onTimUpdate(tim) */
         this.onTimUpdate = null;
+        /** DAC output write callback: onDacWrite(chan, value) */
+        this.onDacWrite = null;
+        /** CRC result callback: onCrcResult(value) */
+        this.onCrcResult = null;
+        /** RTC alarm callback: onRtcAlarm(alarm) */
+        this.onRtcAlarm = null;
+        /** Watchdog reset callback: onWdogReset(which) (1=IWDG, 2=WWDG) */
+        this.onWdogReset = null;
+        /** CAN transmit callback: onCanTx(can, id, len, data[8]) */
+        this.onCanTx = null;
+        /** CAN receive callback: onCanRx(can, id, len, data[8]) */
+        this.onCanRx = null;
         this._pinUnsub = null;
         this._wire();
     }
@@ -232,6 +244,28 @@ export class STM32F1 {
             } else if (type === 9) { // TimUpdate [tim]
                 const tim = flat[i++];
                 if (this.onTimUpdate) this.onTimUpdate(tim);
+            } else if (type === 10) { // DacWrite [chan, value]
+                const chan = flat[i++]; const value = flat[i++];
+                if (this.onDacWrite) this.onDacWrite(chan, value);
+            } else if (type === 11) { // CrcResult [value]
+                const value = flat[i++];
+                if (this.onCrcResult) this.onCrcResult(value);
+            } else if (type === 12) { // RtcAlarm [alarm]
+                const alarm = flat[i++];
+                if (this.onRtcAlarm) this.onRtcAlarm(alarm);
+            } else if (type === 13) { // WdogReset [which]
+                const which = flat[i++];
+                if (this.onWdogReset) this.onWdogReset(which);
+            } else if (type === 14) { // CanTx [can, id, len, d0..d7]
+                const can = flat[i++]; const id = flat[i++]; const len = flat[i++];
+                const data = [];
+                for (let k = 0; k < 8; k++) data.push(flat[i++] & 0xFF);
+                if (this.onCanTx) this.onCanTx(can, id, len, data);
+            } else if (type === 15) { // CanRx [can, id, len, d0..d7]
+                const can = flat[i++]; const id = flat[i++]; const len = flat[i++];
+                const data = [];
+                for (let k = 0; k < 8; k++) data.push(flat[i++] & 0xFF);
+                if (this.onCanRx) this.onCanRx(can, id, len, data);
             } else {
                 break; // unknown discriminant: stop to avoid desync
             }

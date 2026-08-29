@@ -96,6 +96,12 @@ pub enum VmEvent {
     ExtiEdge { line: u8 },
     AdcDone { adc: u8, chan: u8 },
     TimUpdate { tim: u8 },
+    DacWrite { chan: u8, value: u32 },
+    CrcResult { value: u32 },
+    RtcAlarm { alarm: u32 },
+    WdogReset { which: u8 },
+    CanTx { can: u8, id: u32, len: u8, data: [u8; 8] },
+    CanRx { can: u8, id: u32, len: u8, data: [u8; 8] },
 }
 
 pub struct WasmSystem {

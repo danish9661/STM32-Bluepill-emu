@@ -71,19 +71,19 @@ impl Peripheral for Dac {
         }
     }
 
-    fn write(&mut self, _sys: &System, offset: u32, value: u32) {
+    fn write(&mut self, sys: &System, offset: u32, value: u32) {
         match offset {
             0x00 => self.cr = value & 0x3F3F_003F,
             0x04 => self.swtrigr = value & 0x03,
-            0x08 => { self.dhr12r1 = value & 0xFFF; self.dor1 = self.dhr12r1; }
-            0x0C => { self.dhr12l1 = value & 0xFFF0; self.dor1 = self.dhr12l1 >> 4; }
-            0x10 => { self.dhr8r1 = value & 0xFF; self.dor1 = (self.dhr8r1 << 4) as u32; }
-            0x14 => { self.dhr12r2 = value & 0xFFF; self.dor2 = self.dhr12r2; }
-            0x18 => { self.dhr12l2 = value & 0xFFF0; self.dor2 = self.dhr12l2 >> 4; }
-            0x1C => { self.dhr8r2 = value & 0xFF; self.dor2 = (self.dhr8r2 << 4) as u32; }
-            0x20 => { self.dhr12rd = value; self.dor1 = value & 0xFFF; self.dor2 = (value >> 16) & 0xFFF; }
-            0x24 => { self.dhr12ld = value; self.dor1 = (value & 0xFFF0) >> 4; self.dor2 = ((value >> 16) & 0xFFF0) >> 4; }
-            0x28 => { self.dhr8rd = value; self.dor1 = ((value & 0xFF) << 4) as u32; self.dor2 = (((value >> 8) & 0xFF) << 4) as u32; }
+            0x08 => { self.dhr12r1 = value & 0xFFF; self.dor1 = self.dhr12r1; sys.push_event(crate::system::VmEvent::DacWrite { chan: 1, value: self.dor1 }); }
+            0x0C => { self.dhr12l1 = value & 0xFFF0; self.dor1 = self.dhr12l1 >> 4; sys.push_event(crate::system::VmEvent::DacWrite { chan: 1, value: self.dor1 }); }
+            0x10 => { self.dhr8r1 = value & 0xFF; self.dor1 = (self.dhr8r1 << 4) as u32; sys.push_event(crate::system::VmEvent::DacWrite { chan: 1, value: self.dor1 }); }
+            0x14 => { self.dhr12r2 = value & 0xFFF; self.dor2 = self.dhr12r2; sys.push_event(crate::system::VmEvent::DacWrite { chan: 2, value: self.dor2 }); }
+            0x18 => { self.dhr12l2 = value & 0xFFF0; self.dor2 = self.dhr12l2 >> 4; sys.push_event(crate::system::VmEvent::DacWrite { chan: 2, value: self.dor2 }); }
+            0x1C => { self.dhr8r2 = value & 0xFF; self.dor2 = (self.dhr8r2 << 4) as u32; sys.push_event(crate::system::VmEvent::DacWrite { chan: 2, value: self.dor2 }); }
+            0x20 => { self.dhr12rd = value; self.dor1 = value & 0xFFF; self.dor2 = (value >> 16) & 0xFFF; sys.push_event(crate::system::VmEvent::DacWrite { chan: 1, value: self.dor1 }); sys.push_event(crate::system::VmEvent::DacWrite { chan: 2, value: self.dor2 }); }
+            0x24 => { self.dhr12ld = value; self.dor1 = (value & 0xFFF0) >> 4; self.dor2 = ((value >> 16) & 0xFFF0) >> 4; sys.push_event(crate::system::VmEvent::DacWrite { chan: 1, value: self.dor1 }); sys.push_event(crate::system::VmEvent::DacWrite { chan: 2, value: self.dor2 }); }
+            0x28 => { self.dhr8rd = value; self.dor1 = ((value & 0xFF) << 4) as u32; self.dor2 = (((value >> 8) & 0xFF) << 4) as u32; sys.push_event(crate::system::VmEvent::DacWrite { chan: 1, value: self.dor1 }); sys.push_event(crate::system::VmEvent::DacWrite { chan: 2, value: self.dor2 }); }
             0x34 => self.sr = value & 0x03,
             _ => {}
         }

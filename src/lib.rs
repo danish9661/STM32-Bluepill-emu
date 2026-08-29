@@ -393,6 +393,15 @@ pub fn gpio_take_pin_events() -> Vec<u32> {
 ///   4 I2cRead      [4, channel]
 ///   5 I2cStop      [5, channel]
 ///   6 UartTx       [6, usart, byte]
+///   7 ExtiEdge     [7, line]
+///   8 AdcDone      [8, adc, chan]
+///   9 TimUpdate    [9, tim]
+///  10 DacWrite     [10, chan, value]
+///  11 CrcResult    [11, value]
+///  12 RtcAlarm     [12, alarm]
+///  13 WdogReset    [13, which]   (1=IWDG, 2=WWDG)
+///  14 CanTx        [14, can, id, len, d0..d7]
+///  15 CanRx        [15, can, id, len, d0..d7]
 #[wasm_bindgen]
 pub fn drain_events() -> Vec<i32> {
     match try_sys() {
@@ -417,6 +426,18 @@ pub fn drain_events() -> Vec<i32> {
                     VmEvent::ExtiEdge { line } => { out.push(7); out.push(*line as i32); }
                     VmEvent::AdcDone { adc, chan } => { out.push(8); out.push(*adc as i32); out.push(*chan as i32); }
                     VmEvent::TimUpdate { tim } => { out.push(9); out.push(*tim as i32); }
+                    VmEvent::DacWrite { chan, value } => { out.push(10); out.push(*chan as i32); out.push(*value as i32); }
+                    VmEvent::CrcResult { value } => { out.push(11); out.push(*value as i32); }
+                    VmEvent::RtcAlarm { alarm } => { out.push(12); out.push(*alarm as i32); }
+                    VmEvent::WdogReset { which } => { out.push(13); out.push(*which as i32); }
+                    VmEvent::CanTx { can, id, len, data } => {
+                        out.push(14); out.push(*can as i32); out.push(*id as i32); out.push(*len as i32);
+                        for &b in data { out.push(b as i32); }
+                    }
+                    VmEvent::CanRx { can, id, len, data } => {
+                        out.push(15); out.push(*can as i32); out.push(*id as i32); out.push(*len as i32);
+                        for &b in data { out.push(b as i32); }
+                    }
                 }
             }
             out
