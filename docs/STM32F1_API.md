@@ -149,7 +149,28 @@ mcu.onCanRx      = (can, id, len, data) => ...; // CAN frame received into a FIF
   `can` is 1 (CAN1) or 2 (CAN2); `id` is the 11-bit STDID or 29-bit EXTID; `len`
   is the DLC and `data` is an 8-byte array. These mirror Wokwi's CAN bus model.
 
-All of the above are encoded as flat `drain_events()` discriminants 10–15.
+## Timer input capture and FSMC transactions
+
+```js
+mcu.onTimCapture = (tim, ch, value) => ...; // input-capture latch (value = captured CNT)
+mcu.onFsmcAccess = (bank, offset, write, size, value) => ...; // FSMC memory transaction
+```
+
+- `onTimCapture(tim, ch, value)` fires when a TIM channel configured for **input
+  capture** (CCMR `CCxS != 0`) sees an edge matching its polarity on the source
+  pin. `value` is the CNT latched into `CCRx`, `tim` is the timer number (1..14),
+  `ch` the channel (0..3). This is real input capture: the timer samples the
+  channel pin each batch and latches on the matching edge (see `tim.rs`
+  `sample_input_capture`). The default pin mapping per timer is used (no AFIO
+  remap), e.g. TIM2_CH1 = PA0.
+- `onFsmcAccess(bank, offset, write, size, value)` fires on every FSMC memory
+  access (`fsmc.rs`): `bank` is 1..7 (BANK1..7), `offset` the address within the
+  bank, `write` true for writes, `size` the access width in bytes, and `value`
+  the read result or written value. Useful for Wokwi-style memory-mapped
+  peripherals (displays, etc.).
+
+These are encoded as flat `drain_events()` discriminants 16 (`TimCapture`) and
+17 (`FsmcAccess`).
 
 ## Implementation notes
 

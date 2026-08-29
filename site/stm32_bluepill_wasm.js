@@ -272,6 +272,8 @@ export function dma_take_absorbed(offset, len) {
  *  13 WdogReset    [13, which]   (1=IWDG, 2=WWDG)
  *  14 CanTx        [14, can, id, len, d0..d7]
  *  15 CanRx        [15, can, id, len, d0..d7]
+ *  16 TimCapture    [16, tim, ch, value]   (input-capture latch)
+ *  17 FsmcAccess    [17, bank, offset, write, size, value]
  * @returns {Int32Array}
  */
 export function drain_events() {

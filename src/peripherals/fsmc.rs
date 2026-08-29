@@ -163,6 +163,8 @@ impl Peripheral for Fsmc {
                 for i in 0..(size as u32) {
                     v |= bank.read_data(sys, off + i) << (i * 8);
                 }
+                let bank_idx = region.index() as u8 + 1;
+                sys.push_event(crate::system::VmEvent::FsmcAccess { bank: bank_idx, offset: off, write: false, size, value: v });
                 v
             }
             Access::Reg(region, reg) => {
@@ -196,6 +198,8 @@ impl Peripheral for Fsmc {
                 for i in 0..(size as u32) {
                     bank.write_data(sys, off + i, (value >> (i * 8)) & 0xFF);
                 }
+                let bank_idx = region.index() as u8 + 1;
+                sys.push_event(crate::system::VmEvent::FsmcAccess { bank: bank_idx, offset: off, write: true, size, value });
             }
             Access::Reg(region, reg) => {
                 let bank = self.bank(region);

@@ -124,3 +124,7 @@ jobs:
         run: node tests/test_exti_events.mjs
       - name: DAC/CRC/RTC/CAN virtual-peripheral events (extended queue)
         run: node tests/test_more_events.mjs
+      - name: TIM input-capture event (extended queue)
+        run: node tests/test_tim_capture.mjs
+      - name: FSMC transaction event (extended queue)
+        run: node tests/test_fsmc_events.mjs

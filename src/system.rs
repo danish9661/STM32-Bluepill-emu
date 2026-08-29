@@ -102,6 +102,8 @@ pub enum VmEvent {
     WdogReset { which: u8 },
     CanTx { can: u8, id: u32, len: u8, data: [u8; 8] },
     CanRx { can: u8, id: u32, len: u8, data: [u8; 8] },
+    TimCapture { tim: u8, ch: u8, value: u32 },
+    FsmcAccess { bank: u8, offset: u32, write: bool, size: u8, value: u32 },
 }
 
 pub struct WasmSystem {

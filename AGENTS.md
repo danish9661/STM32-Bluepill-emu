@@ -210,7 +210,14 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - `VmEvent` gained `DacWrite{chan,value}` (disc 10, dac.rs DHR write), `CrcResult{value}` (disc 11, crc.rs DR read), `RtcAlarm{alarm}` (disc 12, rtc.rs tick when alarm crossed), `WdogReset{which}` (disc 13, iwdg.rs/wwdg.rs reset request — which: 1=IWDG,2=WWDG), `CanTx{can,id,len,data[8]}` (disc 14, can.rs TX mailbox submit), `CanRx{can,id,len,data[8]}` (disc 15, can.rs inject_message). Encoded in `src/lib.rs::drain_events` (id = 11-bit STDID or 29-bit EXTID, len = DLC, data = 8 bytes).
 - `STM32F1` gained top-level callbacks `onDacWrite/onCrcResult/onRtcAlarm/onWdogReset/onCanTx/onCanRx` (dispatched from `_drain_events`).
 - Tests: `tests/test_more_events.mjs` (DAC/CRC/RTC fire naturally in periph_test; CAN RX/TX driven deterministically by configuring a pass-all filter + inject / submitting a mailbox). Wired into CI. `docs/STM32F1_API.md` updated.
-- **Note**: F103 has no onboard comparator, and TIM input-capture isn't modeled (only PWM/output-compare), so "PWM-capture"/comparator events were skipped — the queue stays honest (no false events).
+- **Note**: F103 has no onboard comparator, and TIM input-capture wasn't modeled — now it is (see item 17).
+
+### 17. Implement TIM input capture + FSMC transaction events (`src/peripherals/{tim,fsmc}.rs`, `src/system.rs`, `src/lib.rs`, `pkg/stm32f1.js`) [implemented, NOT yet committed]
+- **Real TIM input capture** (`tim.rs`): added `last_cap`/`cap_count`/`cap_inited` per channel + `sample_input_capture()` (called once per batch in `tick()`). When a channel's `CCMR CCxS != 0` (input mode) and an edge matching `CCxP`/`CCXNP` polarity occurs on its source pin (default `tim_chan_pin` mapping, no AFIO remap; `CCxS=10` -> partner pin), CNT is latched into `CCRx`, `CCxIF` set, IRQ pending if `CCxIE`, and a `TimCapture{tim,ch,value}` event (disc 16) is emitted. The output-compare block in `tick_once` now skips input-capture channels. Also hardened a latent `ARR=0xFFFF_FFFF` divide-by-zero in `advance()` (`self.arr + 1` wrap) — guard `arr != u32::MAX`.
+- **FSMC transaction events** (`fsmc.rs`): `FsmcAccess{bank,offset,write,size,value}` (disc 17) pushed on every NOR/NAND/PC-Card data read/write in `read_sized`/`write_sized` (regardless of whether a backing ext_device image is attached).
+- `STM32F1` gained `onTimCapture(tim,ch,value)` + `onFsmcAccess(bank,offset,write,size,value)`, dispatched from `_drain_events` (types 16/17).
+- Tests: `tests/test_tim_capture.mjs` (deterministic: TIM2 CH1 input-capture on PA0, drive rising edge -> TimCapture{2,0}), `tests/test_fsmc_events.mjs` (deterministic: enable BANK1, read+write 0x60000000 -> FsmcAccess read+write). Both wired into CI. `docs/STM32F1_API.md` updated.
+- **Verified**: 236/236 unit (incl. new TIM/FSMC paths), tim_capture 4/4, fsmc 8/8.
 
 
 ## Next Phase — Long-term Optimizations

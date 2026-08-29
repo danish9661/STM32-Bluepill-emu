@@ -23,6 +23,31 @@ fn timer_base(name: &str) -> u32 {
     }
 }
 
+/// Default (no remap) channel -> GPIO pin mapping for STM32F103 timers.
+/// Returns (port, pin) where port: 0=A, 1=B, 2=C.
+fn tim_chan_pin(name: &str, ch: u8) -> Option<(u8, u8)> {
+    let map: &[(&str, &[(u8, u8)])] = &[
+        ("TIM1", &[(0, 8), (0, 9), (0, 10), (0, 11)]),
+        ("TIM2", &[(0, 0), (0, 1), (0, 2), (0, 3)]),
+        ("TIM3", &[(0, 6), (0, 7), (1, 0), (1, 1)]),
+        ("TIM4", &[(1, 6), (1, 7), (1, 8), (1, 9)]),
+        ("TIM5", &[(0, 0), (0, 1), (0, 2), (0, 3)]),
+        ("TIM8", &[(2, 6), (2, 7), (2, 8), (2, 9)]),
+        ("TIM9", &[(0, 2), (0, 3)]),
+        ("TIM10", &[(1, 8)]),
+        ("TIM11", &[(1, 9)]),
+        ("TIM12", &[(1, 14), (1, 15)]),
+        ("TIM13", &[(0, 6)]),
+        ("TIM14", &[(1, 1)]),
+    ];
+    for (n, pins) in map {
+        if *n == name {
+            return pins.get(ch as usize).copied();
+        }
+    }
+    None
+}
+
 pub struct Timer {
     cr1: u32,
     cr2: u32,
@@ -49,6 +74,10 @@ pub struct Timer {
     last_tick: u64,
     irq_num: i32,
     base: u32,
+    // Input-capture support: last sampled pin level + edge counter + init flag per ch.
+    last_cap: [bool; 4],
+    cap_count: [u32; 4],
+    cap_inited: [bool; 4],
     #[allow(dead_code)]
     name: String,
     #[allow(dead_code)]
@@ -63,10 +92,11 @@ impl Timer {
                 ccmr1: 0, ccmr2: 0, ccer: 0, cnt: 0, psc: 0,
                 arr: 0xFFFF_FFFF,
                 ccr: [0; 4], rcr: 0, dcr: 0, dmar: 0, or_: 0,
-                ccmr3: 0, ccr5: 0, ccr6: 0, pwm_duty: [0; 4],
-                last_tick: instruction_count(),
-                irq_num: irq,
-                base: timer_base(name),
+                 ccmr3: 0, ccr5: 0, ccr6: 0, pwm_duty: [0; 4],
+                 last_tick: instruction_count(),
+                 irq_num: irq,
+                 base: timer_base(name),
+                 last_cap: [false; 4], cap_count: [0; 4], cap_inited: [false; 4],
                 name: name.to_string(),
                 one_pulse_active: false,
             }) as Box<dyn Peripheral>
@@ -144,7 +174,7 @@ impl Timer {
 
         // Update PWM duty based on CCR/ARR
         for ch in 0..4 {
-            if self.ccer & (1 << (ch * 4)) != 0 && self.arr > 0 {
+            if self.ccer & (1 << (ch * 4)) != 0 && self.arr != u32::MAX {
                 self.pwm_duty[ch] = self.ccr[ch] * 100 / (self.arr + 1);
             }
         }
@@ -193,8 +223,12 @@ impl Timer {
             }
         }
 
-        // Output compare / PWM interrupts
+        // Output compare / PWM interrupts (skip input-capture channels)
         for ch in 0..4 {
+            let ccmr = if ch < 2 { self.ccmr1 } else { self.ccmr2 };
+            let off = if ch < 2 { ch } else { ch - 2 };
+            let ccs = (ccmr >> (off * 8)) & 3;
+            if ccs != 0 { continue; } // input capture mode
             if self.ccer & (1 << (ch * 4)) != 0 { // CCxE
                 let ccr_val = self.ccr[ch];
                 let new_cnt = self.cnt;
@@ -234,6 +268,48 @@ impl Timer {
             sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
         }
     }
+
+    /// Sample input-capture channel pins once per batch. When a channel is
+    /// configured for input capture (CCxS != 0) and an edge matching its
+    /// polarity occurs on the source pin, latch CNT into CCRx, set CCxIF, and
+    /// emit a TimCapture event.
+    fn sample_input_capture(&mut self, sys: &System) {
+        for ch in 0..4u8 {
+            let ccmr = if ch < 2 { self.ccmr1 } else { self.ccmr2 };
+            let off = if ch < 2 { ch } else { ch - 2 } as u32;
+            let ccs = (ccmr >> (off * 8)) & 3;
+            if ccs == 0 { continue; } // output compare mode
+            let src_ch = if ccs == 1 { ch } else { ch ^ 1 }; // CCxS=10 -> partner pin
+            let psc = ((ccmr >> (off * 8 + 2)) & 3) as u32; // ICxPSC prescaler
+            let (port, pin) = match tim_chan_pin(&self.name, src_ch) { Some(p) => p, None => continue };
+            let level = sys.p.gpio.borrow_mut().read_pin_effective(sys, port, pin);
+            if !self.cap_inited[ch as usize] {
+                self.cap_inited[ch as usize] = true;
+                self.last_cap[ch as usize] = level;
+                continue;
+            }
+            let prev = self.last_cap[ch as usize];
+            self.last_cap[ch as usize] = level;
+            if level == prev { continue; }
+            let ccer_bit = (ch as usize) * 4;
+            let cxp = (self.ccer >> (ccer_bit + 1)) & 1;
+            let cxnp = (self.ccer >> (ccer_bit + 3)) & 1;
+            // CCxP=0 & CCXNP=0 -> rising; CCxP=1 & CCXNP=1 -> both; else falling
+            let rising_ok = (cxp == 0 && cxnp == 0) || (cxp == 1 && cxnp == 1);
+            let falling_ok = cxp == 1;
+            let is_rising = level && !prev;
+            let is_falling = !level && prev;
+            if !((is_rising && rising_ok) || (is_falling && falling_ok)) { continue; }
+            self.cap_count[ch as usize] += 1;
+            if self.cap_count[ch as usize] % (psc + 1) != 0 { continue; }
+            self.ccr[ch as usize] = self.cnt;
+            self.sr |= 1 << (1 + ch as u32); // CCxIF
+            sys.push_event(crate::system::VmEvent::TimCapture { tim: self.tim_num(), ch, value: self.cnt });
+            if (self.dier >> (1 + ch as u32)) & 1 != 0 {
+                sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
+            }
+        }
+    }
 }
 
 impl Peripheral for Timer {
@@ -246,6 +322,7 @@ impl Peripheral for Timer {
     }
 
     fn tick(&mut self, sys: &System) {
+        self.sample_input_capture(sys);
         self.advance(sys);
     }
 

@@ -192,6 +192,10 @@ export class STM32F1 {
         this.onCanTx = null;
         /** CAN receive callback: onCanRx(can, id, len, data[8]) */
         this.onCanRx = null;
+        /** TIM input-capture callback: onTimCapture(tim, ch, value) */
+        this.onTimCapture = null;
+        /** FSMC memory transaction callback: onFsmcAccess(bank, offset, write, size, value) */
+        this.onFsmcAccess = null;
         this._pinUnsub = null;
         this._wire();
     }
@@ -266,6 +270,13 @@ export class STM32F1 {
                 const data = [];
                 for (let k = 0; k < 8; k++) data.push(flat[i++] & 0xFF);
                 if (this.onCanRx) this.onCanRx(can, id, len, data);
+            } else if (type === 16) { // TimCapture [tim, ch, value]
+                const tim = flat[i++]; const ch = flat[i++]; const value = flat[i++];
+                if (this.onTimCapture) this.onTimCapture(tim, ch, value);
+            } else if (type === 17) { // FsmcAccess [bank, offset, write, size, value]
+                const bank = flat[i++]; const offset = flat[i++]; const write = flat[i++] !== 0;
+                const size = flat[i++]; const value = flat[i++];
+                if (this.onFsmcAccess) this.onFsmcAccess(bank, offset, write, size, value);
             } else {
                 break; // unknown discriminant: stop to avoid desync
             }

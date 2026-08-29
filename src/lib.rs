@@ -402,6 +402,8 @@ pub fn gpio_take_pin_events() -> Vec<u32> {
 ///  13 WdogReset    [13, which]   (1=IWDG, 2=WWDG)
 ///  14 CanTx        [14, can, id, len, d0..d7]
 ///  15 CanRx        [15, can, id, len, d0..d7]
+///  16 TimCapture    [16, tim, ch, value]   (input-capture latch)
+///  17 FsmcAccess    [17, bank, offset, write, size, value]
 #[wasm_bindgen]
 pub fn drain_events() -> Vec<i32> {
     match try_sys() {
@@ -437,6 +439,10 @@ pub fn drain_events() -> Vec<i32> {
                     VmEvent::CanRx { can, id, len, data } => {
                         out.push(15); out.push(*can as i32); out.push(*id as i32); out.push(*len as i32);
                         for &b in data { out.push(b as i32); }
+                    }
+                    VmEvent::TimCapture { tim, ch, value } => { out.push(16); out.push(*tim as i32); out.push(*ch as i32); out.push(*value as i32); }
+                    VmEvent::FsmcAccess { bank, offset, write, size, value } => {
+                        out.push(17); out.push(*bank as i32); out.push(*offset as i32); out.push(if *write { 1 } else { 0 }); out.push(*size as i32); out.push(*value as i32);
                     }
                 }
             }
