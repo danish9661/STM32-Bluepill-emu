@@ -219,6 +219,23 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - Tests: `tests/test_tim_capture.mjs` (deterministic: TIM2 CH1 input-capture on PA0, drive rising edge -> TimCapture{2,0}), `tests/test_fsmc_events.mjs` (deterministic: enable BANK1, read+write 0x60000000 -> FsmcAccess read+write). Both wired into CI. `docs/STM32F1_API.md` updated.
 - **Verified**: 236/236 unit (incl. new TIM/FSMC paths), tim_capture 4/4, fsmc 8/8.
 
+### 18. Wokwi virtual peripheral end-to-end + TIM AFIO remap (`src/peripherals/{tim,afio}.rs`, `pkg/stm32f1.js`, tests) [implemented, NOT yet committed]
+- **AFIO remap in `tim_chan_pin`**: `sample_input_capture` now reads the AFIO MAPR
+  remap code via `sys.p.afio_remap_status(name)` and `tim_chan_pin(name, ch, remap)`
+  returns the remapped pins for TIM2/TIM3/TIM4 (TIM2_REMAP bits[9:8], TIM3_REMAP
+  bits[11:10], TIM4_REMAP bit12). Also fixed the buggy AFIO MAPR TIM bit shifts in
+  `afio.rs` (`remap_status` had TIM1>>4/TIM2>>24/TIM3>>9/TIM4>>10 — now correct
+  >>6/>>8/>>10/>>12; CAN>>22). `periph_remap()` is unused, so risk-free.
+- **End-to-end Wokwi virtual peripheral**: `tests/test_fsmc_display.mjs` drives an
+  FSMC-backed LCD model entirely through `onFsmcAccess` — the MCU writes LCD
+  command/data over FSMC BANK1 (RS decoded from the address line) and a JS
+  `FsmcLcd` class accumulates its command register + framebuffer. This is exactly
+  the path real firmware takes (MC11 register writes = what compiled C emits).
+- Tests: `tests/test_tim_remap.mjs` (TIM2_REMAP=01, CH2 -> PB3: a PA1 rising edge
+  must NOT capture, a PB3 rising edge MUST capture -> exactly one TimCapture{2,1}),
+  `tests/test_fsmc_display.mjs` (virtual LCD receives reset cmd + 3 pixels in order).
+  Both wired into CI. `docs/STM32F1_API.md` updated (remap note).
+
 
 ## Next Phase — Long-term Optimizations
 1. **Single WASM module — "Path A" (EXPERIMENT status, see docs/NEXT_PHASE.md §4)**: compile Rust peripherals + Unicorn C into one `emcc` output (`wasm32-unknown-emscripten` + `staticlib` + raw `#[no_mangle]` exports — wasm-bindgen does NOT support the emscripten target, so the ~70 exports need a shim; fetch unicorn C source, `third_party/unicorn/` is gitignored). Dual-wasm stays the default until the acceptance gate passes (224/224, 39/39 both paths, IPS within ~2× of 22M). Gain is architectural, not speed.

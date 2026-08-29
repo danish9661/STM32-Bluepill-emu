@@ -161,8 +161,9 @@ mcu.onFsmcAccess = (bank, offset, write, size, value) => ...; // FSMC memory tra
   pin. `value` is the CNT latched into `CCRx`, `tim` is the timer number (1..14),
   `ch` the channel (0..3). This is real input capture: the timer samples the
   channel pin each batch and latches on the matching edge (see `tim.rs`
-  `sample_input_capture`). The default pin mapping per timer is used (no AFIO
-  remap), e.g. TIM2_CH1 = PA0.
+  `sample_input_capture`). The pin mapping honors the AFIO MAPR remap for
+  TIM2/TIM3/TIM4 (e.g. TIM2_REMAP=01 moves CH2 from PA1 to PB3), default mapping
+  otherwise.
 - `onFsmcAccess(bank, offset, write, size, value)` fires on every FSMC memory
   access (`fsmc.rs`): `bank` is 1..7 (BANK1..7), `offset` the address within the
   bank, `write` true for writes, `size` the access width in bytes, and `value`

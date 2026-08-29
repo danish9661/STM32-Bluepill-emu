@@ -23,29 +23,39 @@ fn timer_base(name: &str) -> u32 {
     }
 }
 
-/// Default (no remap) channel -> GPIO pin mapping for STM32F103 timers.
-/// Returns (port, pin) where port: 0=A, 1=B, 2=C.
-fn tim_chan_pin(name: &str, ch: u8) -> Option<(u8, u8)> {
-    let map: &[(&str, &[(u8, u8)])] = &[
-        ("TIM1", &[(0, 8), (0, 9), (0, 10), (0, 11)]),
-        ("TIM2", &[(0, 0), (0, 1), (0, 2), (0, 3)]),
-        ("TIM3", &[(0, 6), (0, 7), (1, 0), (1, 1)]),
-        ("TIM4", &[(1, 6), (1, 7), (1, 8), (1, 9)]),
-        ("TIM5", &[(0, 0), (0, 1), (0, 2), (0, 3)]),
-        ("TIM8", &[(2, 6), (2, 7), (2, 8), (2, 9)]),
-        ("TIM9", &[(0, 2), (0, 3)]),
-        ("TIM10", &[(1, 8)]),
-        ("TIM11", &[(1, 9)]),
-        ("TIM12", &[(1, 14), (1, 15)]),
-        ("TIM13", &[(0, 6)]),
-        ("TIM14", &[(1, 1)]),
-    ];
-    for (n, pins) in map {
-        if *n == name {
-            return pins.get(ch as usize).copied();
-        }
-    }
-    None
+/// Default + AFIO-remapped channel -> GPIO pin mapping for STM32F103 timers.
+/// `remap` is the AFIO MAPR remap code for the timer (0 = default).
+/// Returns (port, pin) where port: 0=A, 1=B, 2=C, 3=D.
+fn tim_chan_pin(name: &str, ch: u8, remap: u32) -> Option<(u8, u8)> {
+    let pins: &[(u8, u8)] = match name {
+        "TIM1" => &[(0, 8), (0, 9), (0, 10), (0, 11)], // no remap on Bluepill F103C8
+        "TIM2" => match remap & 3 {
+            0 => &[(0, 0), (0, 1), (0, 2), (0, 3)],
+            1 => &[(0, 15), (1, 3), (1, 10), (1, 11)],
+            2 => &[(0, 0), (0, 1), (1, 10), (1, 11)],
+            _ => &[(0, 15), (1, 3), (0, 2), (0, 3)],
+        },
+        "TIM3" => match remap & 3 {
+            0 => &[(0, 6), (0, 7), (1, 0), (1, 1)],
+            1 => &[(1, 4), (1, 5), (1, 0), (1, 1)],
+            _ => &[(2, 6), (2, 7), (2, 8), (2, 9)], // full remap (PC6..PC9)
+        },
+        "TIM4" => if remap & 1 != 0 {
+            &[(3, 12), (3, 13), (3, 14), (3, 15)] // PD12..PD15
+        } else {
+            &[(1, 6), (1, 7), (1, 8), (1, 9)]      // PB6..PB9
+        },
+        "TIM5" => &[(0, 0), (0, 1), (0, 2), (0, 3)],
+        "TIM8" => &[(2, 6), (2, 7), (2, 8), (2, 9)],
+        "TIM9" => &[(0, 2), (0, 3)],
+        "TIM10" => &[(1, 8)],
+        "TIM11" => &[(1, 9)],
+        "TIM12" => &[(1, 14), (1, 15)],
+        "TIM13" => &[(0, 6)],
+        "TIM14" => &[(1, 1)],
+        _ => return None,
+    };
+    pins.get(ch as usize).copied()
 }
 
 pub struct Timer {
@@ -281,7 +291,8 @@ impl Timer {
             if ccs == 0 { continue; } // output compare mode
             let src_ch = if ccs == 1 { ch } else { ch ^ 1 }; // CCxS=10 -> partner pin
             let psc = ((ccmr >> (off * 8 + 2)) & 3) as u32; // ICxPSC prescaler
-            let (port, pin) = match tim_chan_pin(&self.name, src_ch) { Some(p) => p, None => continue };
+            let remap = sys.p.afio_remap_status(&self.name).unwrap_or(0);
+            let (port, pin) = match tim_chan_pin(&self.name, src_ch, remap) { Some(p) => p, None => continue };
             let level = sys.p.gpio.borrow_mut().read_pin_effective(sys, port, pin);
             if !self.cap_inited[ch as usize] {
                 self.cap_inited[ch as usize] = true;

@@ -128,3 +128,7 @@ jobs:
         run: node tests/test_tim_capture.mjs
       - name: FSMC transaction event (extended queue)
         run: node tests/test_fsmc_events.mjs
+      - name: TIM input-capture AFIO remap
+        run: node tests/test_tim_remap.mjs
+      - name: FSMC-backed virtual display (Wokwi-style peripheral)
+        run: node tests/test_fsmc_display.mjs

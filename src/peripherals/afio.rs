@@ -30,11 +30,11 @@ impl Peripheral for Afio {
             "I2C1" => (self.mapr >> 1) & 0x1,
             "USART1" => (self.mapr >> 2) & 0x1,
             "USART2" => (self.mapr >> 3) & 0x1,
-            "TIM1" => (self.mapr >> 4) & 0x3,
-            "TIM2" => (self.mapr >> 24) & 0x3,
-            "TIM3" => (self.mapr >> 9) & 0x1,
-            "TIM4" => (self.mapr >> 10) & 0x1,
-            "CAN" | "CAN1" => (self.mapr >> 11) & 0x1,
+            "TIM1" => (self.mapr >> 6) & 0x3,
+            "TIM2" => (self.mapr >> 8) & 0x3,
+            "TIM3" => (self.mapr >> 10) & 0x3,
+            "TIM4" => (self.mapr >> 12) & 0x1,
+            "CAN" | "CAN1" => (self.mapr >> 22) & 0x1,
             _ => return None,
         };
         Some(bits)
