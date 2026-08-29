@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicBool, AtomicI32, AtomicU8, Ordering};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::collections::HashMap;
 use std::sync::Mutex;
 use crate::peripherals::{Peripherals, gpio::GpioPorts};
 use crate::ext_devices::ExtDevices;
@@ -83,10 +84,27 @@ pub fn set_dma_intr_info(stream_idx: usize, irq: i32, flags: u8) {
     }
 }
 
+/// Virtual-peripheral transaction events drained by JS via `drain_events()`.
+#[derive(Debug, Clone)]
+pub enum VmEvent {
+    SpiTransfer { channel: u8, tx: Vec<u8>, rx: Vec<u8> },
+    I2cStart { channel: u8, addr: u8 },
+    I2cWrite { channel: u8, byte: u8 },
+    I2cRead { channel: u8 },
+    I2cStop { channel: u8 },
+    UartTx { usart: u8, byte: u8 },
+}
+
 pub struct WasmSystem {
     pub p: Rc<Peripherals>,
     pending_dma: RefCell<Vec<DmaTransfer>>,
     absorb_buf: RefCell<Vec<u8>>,
+    /// Virtual-peripheral transaction event queue (SPI/I2C/USART), drained by JS.
+    pub event_queue: RefCell<Vec<VmEvent>>,
+    /// Injected MISO bytes per SPI channel (virtual device -> MCU).
+    pub spi_miso: RefCell<HashMap<u8, Vec<u8>>>,
+    /// Injected RX bytes per I2C channel (virtual device -> MCU).
+    pub i2c_rx: RefCell<HashMap<u8, Vec<u8>>>,
     /// Interrupt-dispatch policy state (batch budget, SVC mirror) — shared by
     /// cli.mjs and emulator.js so both use one implementation.
     pub intr: RefCell<crate::interrupts::IntrDispatch>,
@@ -100,7 +118,9 @@ impl WasmSystem {
         drop(ext);
         Self::register_software_spis(&p);
         Self::register_touchscreen_gpios(&p);
-        WasmSystem { p, pending_dma: RefCell::new(Vec::new()), absorb_buf: RefCell::new(Vec::new()), intr: RefCell::new(crate::interrupts::IntrDispatch::default()) }
+        WasmSystem { p, pending_dma: RefCell::new(Vec::new()), absorb_buf: RefCell::new(Vec::new()),
+            event_queue: RefCell::new(Vec::new()), spi_miso: RefCell::new(HashMap::new()),
+            i2c_rx: RefCell::new(HashMap::new()), intr: RefCell::new(crate::interrupts::IntrDispatch::default()) }
     }
 
     pub fn new_svd(svd_xml: &str) -> Self {
@@ -110,7 +130,9 @@ impl WasmSystem {
         drop(ext);
         Self::register_software_spis(&p);
         Self::register_touchscreen_gpios(&p);
-        WasmSystem { p, pending_dma: RefCell::new(Vec::new()), absorb_buf: RefCell::new(Vec::new()), intr: RefCell::new(crate::interrupts::IntrDispatch::default()) }
+        WasmSystem { p, pending_dma: RefCell::new(Vec::new()), absorb_buf: RefCell::new(Vec::new()),
+            event_queue: RefCell::new(Vec::new()), spi_miso: RefCell::new(HashMap::new()),
+            i2c_rx: RefCell::new(HashMap::new()), intr: RefCell::new(crate::interrupts::IntrDispatch::default()) }
     }
 
     fn register_software_spis(p: &Peripherals) {
@@ -231,6 +253,38 @@ impl WasmSystem {
 
     pub fn dma_take_completions(&self) -> u32 {
         DMA_COMPLETION_BITS.swap(0, Ordering::Acquire)
+    }
+
+    /// Append a virtual-peripheral event to the drain queue.
+    pub fn push_event(&self, e: VmEvent) {
+        self.event_queue.borrow_mut().push(e);
+    }
+
+    /// Take (and clear) all buffered virtual-peripheral events.
+    pub fn take_events(&self) -> Vec<VmEvent> {
+        std::mem::take(&mut *self.event_queue.borrow_mut())
+    }
+
+    /// Queue injected MISO bytes for a SPI channel (virtual device -> MCU).
+    pub fn spi_inject_miso(&self, channel: u8, bytes: &[u8]) {
+        self.spi_miso.borrow_mut().entry(channel).or_default().extend_from_slice(bytes);
+    }
+
+    /// Pop the next injected MISO byte for a SPI channel, if any.
+    pub fn spi_take_miso(&self, channel: u8) -> Option<u8> {
+        let mut m = self.spi_miso.borrow_mut();
+        m.get_mut(&channel).and_then(|v| { if v.is_empty() { None } else { Some(v.remove(0)) } })
+    }
+
+    /// Queue injected RX bytes for an I2C channel (virtual device -> MCU).
+    pub fn i2c_inject_rx(&self, channel: u8, bytes: &[u8]) {
+        self.i2c_rx.borrow_mut().entry(channel).or_default().extend_from_slice(bytes);
+    }
+
+    /// Pop the next injected RX byte for an I2C channel, if any.
+    pub fn i2c_take_rx(&self, channel: u8) -> Option<u8> {
+        let mut m = self.i2c_rx.borrow_mut();
+        m.get_mut(&channel).and_then(|v| { if v.is_empty() { None } else { Some(v.remove(0)) } })
     }
 
     pub fn tick(&self) {

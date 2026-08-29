@@ -49,6 +49,10 @@ impl Spi {
     }
 
     pub fn is_16bits(&self) -> bool { self.cr1 & (1 << 11) != 0 }
+
+    fn spi_channel(&self) -> u8 {
+        self.name.trim_start_matches("SPI").parse::<u8>().unwrap_or(0)
+    }
     fn is_i2s(&self) -> bool { self.i2scfgr & 1 != 0 } // I2SMOD
 
     fn active_device(&self, sys: &System) -> Option<Rc<RefCell<dyn ExtDevice<(), u8>>>> {
@@ -141,24 +145,36 @@ impl Peripheral for Spi {
                     self.rx_buffer = self.generate_i2s_audio();
                 } else {
                     self.txe = false;
+                    let channel = self.spi_channel();
                     let device = self.active_device(sys);
                     if let Some(ref d) = device {
                         let mut d = d.borrow_mut();
                         if self.is_16bits() {
                             d.write(sys, (), (value >> 8) as u8);
-                            self.rx_buffer = (d.read(sys, ()) as u32) << 8;
+                            let rb_hi = sys.spi_take_miso(channel).unwrap_or_else(|| d.read(sys, ()) as u8);
+                            self.rx_buffer = (rb_hi as u32) << 8;
                             d.write(sys, (), value as u8);
-                            self.rx_buffer |= d.read(sys, ()) as u32;
+                            let rb_lo = sys.spi_take_miso(channel).unwrap_or_else(|| d.read(sys, ()) as u8);
+                            self.rx_buffer |= rb_lo as u32;
                         } else {
                             let v = value as u8;
                             d.write(sys, (), v);
-                            self.rx_buffer = d.read(sys, ()) as u32;
+                            let rb = sys.spi_take_miso(channel).unwrap_or_else(|| d.read(sys, ()) as u8);
+                            self.rx_buffer = rb as u32;
                         }
                     } else {
                         self.rx_buffer = 0xFF;
                     }
                     self.txe = true;
                     self.rxne = true;
+                    // Transaction-level event for virtual peripherals.
+                    let (tx_bytes, rx_bytes) = if self.is_16bits() {
+                        (vec![(value >> 8) as u8, value as u8],
+                         vec![(self.rx_buffer >> 8) as u8, self.rx_buffer as u8])
+                    } else {
+                        (vec![value as u8], vec![self.rx_buffer as u8])
+                    };
+                    sys.push_event(crate::system::VmEvent::SpiTransfer { channel, tx: tx_bytes, rx: rx_bytes });
                 }
             }
              0x0010 => self.crcpr = value,

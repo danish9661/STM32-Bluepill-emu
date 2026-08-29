@@ -152,6 +152,8 @@ Fully implemented: GPIO (A–D), USART1–3, SPI1–2, I2C1–2, TIM1–7 (PWM, 
 
 See `docs/NEXT_PHASE.md` for the roadmap (the historical "merge WASM modules for 5–10×"
 goal was retired — the JS bridge was never the bottleneck; ~22M IPS measured today).
+See `docs/STM32F1_API.md` for the ergonomic `STM32F1` wrapper and the Wokwi-style
+SPI/I2C/USART virtual-peripheral event API.
 
 ## Acknowledgements
 

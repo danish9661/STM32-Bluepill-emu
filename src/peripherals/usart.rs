@@ -116,10 +116,19 @@ impl Usart {
         self.update_interrupt(sys);
     }
 
+    fn usart_num(&self) -> u8 {
+        match self.name.as_str() {
+            "USART1" => 1, "USART2" => 2, "USART3" => 3, "UART4" => 4,
+            "UART5" => 5, "USART6" => 6, "UART7" => 7, "UART8" => 8,
+            _ => 0,
+        }
+    }
+
     fn write_dr(&mut self, value: u32, sys: &System) {
         let ch = (value & 0xFF) as u8;
         self.tx_data.push(ch);
         get_uart_output().lock().unwrap().push(ch as char);
+        sys.push_event(crate::system::VmEvent::UartTx { usart: self.usart_num(), byte: ch });
         self.sr |= 0x40; // TC stays set
         if self.is_loopback() {
             self.sr |= 0x80; // TXE: loopback echoes instantly

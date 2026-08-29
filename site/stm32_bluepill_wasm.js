@@ -255,6 +255,24 @@ export function dma_take_absorbed(offset, len) {
 }
 
 /**
+ * Drain virtual-peripheral transaction events as a flat i32 array.
+ * Encoding (discriminant first):
+ *   1 SpiTransfer  [1, channel, txLen, rxLen, tx bytes..., rx bytes...]
+ *   2 I2cStart     [2, channel, addr]
+ *   3 I2cWrite     [3, channel, byte]
+ *   4 I2cRead      [4, channel]
+ *   5 I2cStop      [5, channel]
+ *   6 UartTx       [6, usart, byte]
+ * @returns {Int32Array}
+ */
+export function drain_events() {
+    const ret = wasm.drain_events();
+    var v1 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
+}
+
+/**
  * Call after an ISR returns: pops the active priority stack, and for SysTick
  * (irq == -1) also drains any unconsumed 1ms debt ticks internally (re-pends
  * each), so JS needs no nvic_systick_take loop.
@@ -358,6 +376,17 @@ export function gpio_take_pin_events() {
 export function has_pending_interrupt() {
     const ret = wasm.has_pending_interrupt();
     return ret !== 0;
+}
+
+/**
+ * Queue injected RX bytes for an I2C channel (virtual device -> MCU).
+ * @param {number} channel
+ * @param {Uint8Array} bytes
+ */
+export function i2c_inject_rx(channel, bytes) {
+    const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    wasm.i2c_inject_rx(channel, ptr0, len0);
 }
 
 /**
@@ -596,6 +625,17 @@ export function set_intr_masks(primask, basepri) {
 }
 
 /**
+ * Queue injected MISO bytes for a SPI channel (virtual device -> MCU).
+ * @param {number} channel
+ * @param {Uint8Array} bytes
+ */
+export function spi_inject_miso(channel, bytes) {
+    const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    wasm.spi_inject_miso(channel, ptr0, len0);
+}
+
+/**
  * Combined per-instruction step: sets masks, ticks peripherals, checks conditions.
  * Returns: 0=continue, 1=watchdog reset, 2=DMA pending, 3=interrupt pending.
  * @param {number} primask
@@ -766,6 +806,11 @@ function addToExternrefTable0(obj) {
     return idx;
 }
 
+function getArrayI32FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getInt32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
+}
+
 function getArrayU32FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
@@ -782,6 +827,14 @@ function getDataViewMemory0() {
         cachedDataViewMemory0 = new DataView(wasm.memory.buffer);
     }
     return cachedDataViewMemory0;
+}
+
+let cachedInt32ArrayMemory0 = null;
+function getInt32ArrayMemory0() {
+    if (cachedInt32ArrayMemory0 === null || cachedInt32ArrayMemory0.byteLength === 0) {
+        cachedInt32ArrayMemory0 = new Int32Array(wasm.memory.buffer);
+    }
+    return cachedInt32ArrayMemory0;
 }
 
 function getStringFromWasm0(ptr, len) {
@@ -896,6 +949,7 @@ function __wbg_finalize_init(instance, module) {
     wasm = instance.exports;
     wasmModule = module;
     cachedDataViewMemory0 = null;
+    cachedInt32ArrayMemory0 = null;
     cachedUint32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();

@@ -114,3 +114,7 @@ jobs:
         run: node tests/test_emulator_js.mjs
       - name: WS2812 strip (SPI1 + DMA1 CH3) regression
         run: node tests/test_ws2812.mjs
+      - name: STM32F1 wrapper API (ergonomic class over emulator.js)
+        run: node tests/test_stm32f1_api.mjs
+      - name: I2C/SPI/USART virtual-peripheral event queue
+        run: node tests/test_i2c_events.mjs

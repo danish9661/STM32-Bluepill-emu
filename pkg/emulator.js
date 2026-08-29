@@ -264,7 +264,7 @@ export async function createEmulator(opts = {}) {
     gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt, finish_interrupt,
     can_inject_message, adc_set_sim_value, gpio_set_analog, adc_set_rc_tau,
     touchscreen_set_touch, pwm_duty, raise_fault,
-    i2c_oled_fb, lcd_fb, gpio_take_pin_events } = periph;
+     i2c_oled_fb, lcd_fb, gpio_take_pin_events, drain_events, spi_inject_miso, i2c_inject_rx } = periph;
 
     // Register external devices BEFORE init()
     reset_ext_devices();
@@ -784,6 +784,8 @@ export async function createEmulator(opts = {}) {
 
         /** Inject a byte into the UART RX (default: USART1 @ 0x40013800). */
         uartRx(byte) { return uart_rx_byte(uart_addr, byte); },
+        /** Inject a received byte into a specific USART (by base address). */
+        uartRxAddr(addr, byte) { return uart_rx_byte(addr, byte); },
         uartRxBytes(bytes) {
             let ok = false;
             for (const b of bytes) ok = uart_rx_byte(uart_addr, b) || ok;
@@ -839,6 +841,15 @@ export async function createEmulator(opts = {}) {
 
         /** Drain buffered pin-change events directly (flat [port, pin, level, ...]). */
         takePinEvents() { return gpio_take_pin_events(); },
+
+        /** Drain virtual-peripheral transaction events as a flat i32 array (see drain_events export). */
+        drainEvents() { return drain_events(); },
+
+        /** Queue injected MISO bytes for a SPI channel (virtual device -> MCU). */
+        spiInjectMiso(channel, bytes) { spi_inject_miso(channel, bytes); },
+
+        /** Queue injected RX bytes for an I2C channel (virtual device -> MCU). */
+        i2cInjectRx(channel, bytes) { i2c_inject_rx(channel, bytes); },
 
         /** Current I2C OLED framebuffer, page-major (page*width + col), 1 byte per column. */
         i2cOledFb(peripheral, address = 0x3C) {

@@ -7,7 +7,7 @@ mod interrupts;
 pub mod peripherals;
 pub mod ext_devices;
 
-use system::{DmaDir, WasmSystem};
+use system::{DmaDir, WasmSystem, VmEvent};
 
 /// Emit a `console.warn` from Rust without pulling in `web_sys` (zero extra
 /// wasm size). Works in both the browser and Node.js. Used for recoverable
@@ -383,6 +383,55 @@ pub fn gpio_read_input(port: u32, pin: u32) -> bool {
 #[wasm_bindgen]
 pub fn gpio_take_pin_events() -> Vec<u32> {
     peripherals::gpio::take_pin_events()
+}
+
+/// Drain virtual-peripheral transaction events as a flat i32 array.
+/// Encoding (discriminant first):
+///   1 SpiTransfer  [1, channel, txLen, rxLen, tx bytes..., rx bytes...]
+///   2 I2cStart     [2, channel, addr]
+///   3 I2cWrite     [3, channel, byte]
+///   4 I2cRead      [4, channel]
+///   5 I2cStop      [5, channel]
+///   6 UartTx       [6, usart, byte]
+#[wasm_bindgen]
+pub fn drain_events() -> Vec<i32> {
+    match try_sys() {
+        Some(sys) => {
+            let events = sys.take_events();
+            let mut out: Vec<i32> = Vec::with_capacity(events.len() * 4);
+            for e in &events {
+                match e {
+                    VmEvent::SpiTransfer { channel, tx, rx } => {
+                        out.push(1);
+                        out.push(*channel as i32);
+                        out.push(tx.len() as i32);
+                        out.push(rx.len() as i32);
+                        for &b in tx { out.push(b as i32); }
+                        for &b in rx { out.push(b as i32); }
+                    }
+                    VmEvent::I2cStart { channel, addr } => { out.push(2); out.push(*channel as i32); out.push(*addr as i32); }
+                    VmEvent::I2cWrite { channel, byte } => { out.push(3); out.push(*channel as i32); out.push(*byte as i32); }
+                    VmEvent::I2cRead { channel } => { out.push(4); out.push(*channel as i32); }
+                    VmEvent::I2cStop { channel } => { out.push(5); out.push(*channel as i32); }
+                    VmEvent::UartTx { usart, byte } => { out.push(6); out.push(*usart as i32); out.push(*byte as i32); }
+                }
+            }
+            out
+        }
+        None => Vec::new(),
+    }
+}
+
+/// Queue injected MISO bytes for a SPI channel (virtual device -> MCU).
+#[wasm_bindgen]
+pub fn spi_inject_miso(channel: u8, bytes: &[u8]) {
+    if let Some(sys) = try_sys() { sys.spi_inject_miso(channel, bytes); }
+}
+
+/// Queue injected RX bytes for an I2C channel (virtual device -> MCU).
+#[wasm_bindgen]
+pub fn i2c_inject_rx(channel: u8, bytes: &[u8]) {
+    if let Some(sys) = try_sys() { sys.i2c_inject_rx(channel, bytes); }
 }
 
 /// Set an analog wire voltage on a GPIO pin (12-bit, 0xFFFF clears it).

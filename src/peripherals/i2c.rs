@@ -55,6 +55,10 @@ impl I2c {
         Some(Box::new(Self { name: name.to_string(), devices, irq_ev, irq_er, ..Default::default() }))
     }
 
+    fn i2c_channel(&self) -> u8 {
+        self.name.trim_start_matches("I2C").parse::<u8>().unwrap_or(0)
+    }
+
     fn reset(&mut self) {
         self.sr1 = 0; self.sr2 = 0;
         self.active_device = None; self.state = I2cState::Idle;
@@ -95,19 +99,21 @@ impl Peripheral for I2c {
             0x0C => self.oar2,
             0x1C => self.ccr,
             0x20 => self.trise,
-            0x10 => {
-                let v = self.dr;
-                self.sr1 &= !(1 << 6); // Clear RXNE on DR read
-                if let Some(idx) = self.active_device {
-                    if matches!(self.state, I2cState::Active { is_read: true }) {
-                        let mut d = self.devices[idx].device.borrow_mut();
-                        self.dr = d.read(sys, ()) as u32;
-                        self.sr1 |= 1 << 6; // RXNE
+                0x10 => {
+                    let v = self.dr;
+                    self.sr1 &= !(1 << 6); // Clear RXNE on DR read
+                    if let Some(idx) = self.active_device {
+                        if matches!(self.state, I2cState::Active { is_read: true }) {
+                            let mut d = self.devices[idx].device.borrow_mut();
+                            let byte = sys.i2c_take_rx(self.i2c_channel()).unwrap_or_else(|| d.read(sys, ()) as u8);
+                            self.dr = byte as u32;
+                            self.sr1 |= 1 << 6; // RXNE
+                            sys.push_event(crate::system::VmEvent::I2cRead { channel: self.i2c_channel() });
+                        }
                     }
+                    self.fire_interrupts(sys);
+                    v
                 }
-                self.fire_interrupts(sys);
-                v
-            }
              0x14 => {
                 self.sr1_addr_flag = (self.sr1 & (1 << 1)) != 0;
                 self.sr1
@@ -173,6 +179,7 @@ impl Peripheral for I2c {
 
                 // STOP generation
                 if stop != 0 {
+                    sys.push_event(crate::system::VmEvent::I2cStop { channel: self.i2c_channel() });
                     if matches!(self.state, I2cState::Active { .. } | I2cState::AddrSent { .. }) {
                         let rxne_pending = self.sr1 & (1 << 6);
                         if matches!(self.state, I2cState::Active { is_read: true }) && rxne_pending != 0 {
@@ -210,6 +217,7 @@ impl Peripheral for I2c {
                     I2cState::StartSent => {
                         let addr = ((value >> 1) & 0x7F) as u8;
                         let is_read = (value & 1) != 0;
+                        sys.push_event(crate::system::VmEvent::I2cStart { channel: self.i2c_channel(), addr });
                         let found = self.devices.iter().position(|d| d.address == addr);
 
                         if let Some(idx) = found {
@@ -235,6 +243,7 @@ impl Peripheral for I2c {
                         if let Some(idx) = self.active_device {
                             let mut d = self.devices[idx].device.borrow_mut();
                             d.write(sys, (), value as u8);
+                            sys.push_event(crate::system::VmEvent::I2cWrite { channel: self.i2c_channel(), byte: value as u8 });
                         }
                         self.sr1 |= 1 << 7; // TXE
                         self.fire_interrupts(sys);
