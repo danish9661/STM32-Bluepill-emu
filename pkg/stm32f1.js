@@ -354,6 +354,11 @@ export class STM32F1 {
     setSymbols(symbolText) { return this._emu.setSymbols(parseSymbolMap(symbolText)); }
     /** Resolve a PC to a symbol name, or null. */
     resolveSymbol(pc) { return this._emu.resolveSymbol(pc); }
+
+    /** Write a byte directly into the FSMC backing image (no peripheral side effects). */
+    fsmcWriteByte(name, offset, value) { return this._emu.fsmcWriteByte(name, offset, value); }
+    /** Read a byte directly from the FSMC backing image.  Returns -1 on error. */
+    fsmcReadByte(name, offset) { return this._emu.fsmcReadByte(name, offset); }
 }
 
 export { parseElf, parseIntelHex, parseSymbolMap };

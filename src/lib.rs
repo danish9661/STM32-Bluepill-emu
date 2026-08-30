@@ -564,6 +564,44 @@ pub fn add_fsmc_bank(name: &str, data: &[u8]) {
     system::get_ext_devices().lock().unwrap().fsmc_nors.push(bank);
 }
 
+/// Write a byte directly into an FSMC backing image (bypasses the peripheral
+/// bus — no events, no side effects).  Returns true on success.
+/// Use this from JS virtual peripherals to feed read-back data to the MCU.
+#[wasm_bindgen]
+pub fn fsmc_write_byte(name: &str, offset: u32, value: u8) -> bool {
+    let ext = system::get_ext_devices().lock().unwrap();
+    for bank in &ext.fsmc_nors {
+        if bank.borrow().name() == name {
+            let mut b = bank.borrow_mut();
+            let i = offset as usize;
+            if i < b.data.len() {
+                b.data[i] = value;
+                return true;
+            }
+            return false;
+        }
+    }
+    false
+}
+
+/// Read a byte from an FSMC backing image (bypasses the peripheral bus).
+/// Returns the byte value (0..255) or -1 if the bank/offset is invalid.
+#[wasm_bindgen]
+pub fn fsmc_read_byte(name: &str, offset: u32) -> i32 {
+    let ext = system::get_ext_devices().lock().unwrap();
+    for bank in &ext.fsmc_nors {
+        if bank.borrow().name() == name {
+            let b = bank.borrow();
+            let i = offset as usize;
+            if i < b.data.len() {
+                return b.data[i] as i32;
+            }
+            return -1;
+        }
+    }
+    -1
+}
+
 #[wasm_bindgen]
 pub fn adc_set_sim_value(val: u16) {
     peripherals::adc::set_adc_value(val);

@@ -167,8 +167,12 @@ mcu.onFsmcAccess = (bank, offset, write, size, value) => ...; // FSMC memory tra
 - `onFsmcAccess(bank, offset, write, size, value)` fires on every FSMC memory
   access (`fsmc.rs`): `bank` is 1..7 (BANK1..7), `offset` the address within the
   bank, `write` true for writes, `size` the access width in bytes, and `value`
-  the read result or written value. Useful for Wokwi-style memory-mapped
-  peripherals (displays, etc.).
+  the read result or written value. Observation-only. To feed data **back** to the
+  MCU (so the MCU reads what the virtual device provides), use
+  `mcu.fsmcWriteByte(name, offset, byte)` / `mcu.fsmcReadByte(name, offset)`
+  to read/write the FSMC backing image directly (no bus side effects, no events).
+  The FSMC bank must be registered via `ext_devices.fsmc_bank` in the options
+  passed to `fromELF` / `fromHex` / `create`.
 
 These are encoded as flat `drain_events()` discriminants 16 (`TimCapture`) and
 17 (`FsmcAccess`).

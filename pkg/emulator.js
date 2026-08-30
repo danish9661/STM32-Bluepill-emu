@@ -259,6 +259,7 @@ export async function createEmulator(opts = {}) {
     intr_next, intr_svc_enter, intr_svc_leave, intr_svc_depth,
     dma_pump_all, dma_take_absorbed, dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested,
     add_spi_flash, add_i2c_eeprom, add_touchscreen, add_lcd, add_i2c_oled, add_software_spi, reset_ext_devices,
+    add_fsmc_bank, fsmc_write_byte, fsmc_read_byte,
     register_js_peripheral,
     init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
     gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt, finish_interrupt,
@@ -285,6 +286,9 @@ export async function createEmulator(opts = {}) {
     }
     for (const d of ext_devices.software_spi || []) {
         add_software_spi(d.name, d.cs ?? null, d.clk, d.miso, d.mosi);
+    }
+    for (const d of ext_devices.fsmc_bank || []) {
+        add_fsmc_bank(d.name, d.data);
     }
 
     const chipSvd = (typeof chip === 'string') ? (svd ?? null) : (chip.svd ?? null);
@@ -866,6 +870,11 @@ export async function createEmulator(opts = {}) {
         /** Low-level register access (width: 1, 2, or 4). */
         periphRead(addr, width = 4) { return periph_read(addr, width) >>> 0; },
         periphWrite(addr, width, value) { periph_write(addr, width, value); },
+
+        /** Write a byte directly into an FSMC backing image (no bus side effects). */
+        fsmcWriteByte(name, offset, value) { return fsmc_write_byte(name, offset, value); },
+        /** Read a byte directly from an FSMC backing image. Returns -1 on error. */
+        fsmcReadByte(name, offset) { return fsmc_read_byte(name, offset); },
 
         /**
          * Register an rp2040js-style custom peripheral on the bus.
