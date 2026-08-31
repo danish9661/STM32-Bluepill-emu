@@ -18,7 +18,16 @@
     "bluepill-emu": "./pkg/cli.mjs"
   },
   "files": [
-    "pkg/",
+    "pkg/emulator.js",
+    "pkg/cli.mjs",
+    "pkg/stm32f1.js",
+    "pkg/stm32_bluepill_wasm.js",
+    "pkg/stm32_bluepill_wasm_bg.wasm",
+    "pkg/stm32_bluepill_wasm.d.ts",
+    "pkg/stm32_bluepill_wasm_bg.wasm.d.ts",
+    "pkg/unicorn_arm.cjs",
+    "pkg/unicorn_arm.js",
+    "pkg/ws-server.mjs",
     "svd/",
     "README.md",
     "LICENSE"
