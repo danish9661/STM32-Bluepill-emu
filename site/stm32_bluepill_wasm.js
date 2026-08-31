@@ -294,6 +294,36 @@ export function finish_interrupt(irq) {
 }
 
 /**
+ * Read a byte from an FSMC backing image (bypasses the peripheral bus).
+ * Returns the byte value (0..255) or -1 if the bank/offset is invalid.
+ * @param {string} name
+ * @param {number} offset
+ * @returns {number}
+ */
+export function fsmc_read_byte(name, offset) {
+    const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.fsmc_read_byte(ptr0, len0, offset);
+    return ret;
+}
+
+/**
+ * Write a byte directly into an FSMC backing image (bypasses the peripheral
+ * bus — no events, no side effects).  Returns true on success.
+ * Use this from JS virtual peripherals to feed read-back data to the MCU.
+ * @param {string} name
+ * @param {number} offset
+ * @param {number} value
+ * @returns {boolean}
+ */
+export function fsmc_write_byte(name, offset, value) {
+    const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.fsmc_write_byte(ptr0, len0, offset, value);
+    return ret !== 0;
+}
+
+/**
  * @returns {number}
  */
 export function get_next_pending_interrupt() {
@@ -526,15 +556,6 @@ export function lcd_fb(peripheral) {
     var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v2;
-}
-
-/**
- * Re-pend SysTick if unconsumed 1ms ticks remain (fast millis/delay()).
- * @returns {boolean}
- */
-export function nvic_systick_take() {
-    const ret = wasm.nvic_systick_take();
-    return ret !== 0;
 }
 
 /**

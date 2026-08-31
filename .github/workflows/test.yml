@@ -132,3 +132,7 @@ jobs:
         run: node tests/test_tim_remap.mjs
       - name: FSMC-backed virtual display (Wokwi-style peripheral)
         run: node tests/test_fsmc_display.mjs
+      - name: I2C BUSY flag lifecycle (START/STOP/NACK)
+        run: node tests/test_i2c_busy.mjs
+      - name: DMA request register bits (DAC/TIM/SPI/USART)
+        run: node tests/test_dma_requests.mjs

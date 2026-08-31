@@ -1,2 +1,4 @@
 *
+!emulator.d.ts
+!stm32f1.d.ts
 !ws-server.mjs

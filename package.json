@@ -4,10 +4,14 @@
   "description": "Full-system WASM emulator for the STM32F1 family (STM32F103 Blue Pill, F105, etc.) - run Arduino/STM32 firmware in Node.js or the browser",
   "type": "module",
   "main": "./pkg/emulator.js",
-  "types": "./pkg/stm32_bluepill_wasm.d.ts",
+  "types": "./pkg/stm32f1.d.ts",
   "exports": {
     ".": {
-      "types": "./pkg/stm32_bluepill_wasm.d.ts",
+      "types": "./pkg/stm32f1.d.ts",
+      "import": "./pkg/stm32f1.js"
+    },
+    "./emulator": {
+      "types": "./pkg/emulator.d.ts",
       "import": "./pkg/emulator.js"
     },
     "./cli": "./pkg/cli.mjs",
@@ -19,8 +23,10 @@
   },
   "files": [
     "pkg/emulator.js",
+    "pkg/emulator.d.ts",
     "pkg/cli.mjs",
     "pkg/stm32f1.js",
+    "pkg/stm32f1.d.ts",
     "pkg/stm32_bluepill_wasm.js",
     "pkg/stm32_bluepill_wasm_bg.wasm",
     "pkg/stm32_bluepill_wasm.d.ts",

@@ -192,6 +192,9 @@ impl Peripheral for I2c {
                         } else {
                             self.reset();
                         }
+                    } else {
+                        // STOP in any other state (e.g. StartSent) — clear BUSY/MSL
+                        self.reset();
                     }
                     self.cr1 &= !(1 << 9); // Clear STOP
                 }
@@ -232,9 +235,13 @@ impl Peripheral for I2c {
                             self.state = I2cState::AddrSent { is_read };
                         } else {
                             // NACK: set AF (Acknowledge Failure, bit 10)
+                            // Real HW generates STOP automatically on NACK, clearing BUSY/MSL
                             self.sr1 = 1 << 10;
-                            self.sr2 = (1 << 0) | (1 << 1);
+                            self.sr2 = 0; // BUSY=0, MSL=0 (STOP generated)
                             self.state = I2cState::Idle;
+                            self.active_device = None;
+                            self.sr1_addr_flag = false;
+                            sys.push_event(crate::system::VmEvent::I2cStop { channel: self.i2c_channel() });
                         }
                         self.fire_interrupts(sys);
                     }
