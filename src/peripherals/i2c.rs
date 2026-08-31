@@ -34,6 +34,12 @@ pub struct I2c {
     sr1_addr_flag: bool,
     irq_ev: i32,
     irq_er: i32,
+    /// DMA channel: I2C1 TX=ch4/ch6 (remap), RX=ch5/ch7 (remap); I2C2=none
+    dma_channel_tx: u8,
+    dma_channel_rx: u8,
+    /// Clock stretching: instruction count until SCL is released by the slave.
+    /// If non-zero, interrupts are deferred until the stretch period expires.
+    stretch_until: u64,
 }
 
 impl Default for I2c {
@@ -43,6 +49,8 @@ impl Default for I2c {
             cr1: 0, cr2: 0, oar1: 0, oar2: 0, sr1: 0, sr2: 0, ccr: 0, trise: 0, dr: 0,
             state: I2cState::Idle, sr1_addr_flag: false,
             irq_ev: 0, irq_er: 0,
+            dma_channel_tx: 0, dma_channel_rx: 0,
+            stretch_until: 0,
         }
     }
 }
@@ -52,7 +60,15 @@ impl I2c {
         if !name.starts_with("I2C") { return None; }
         let (irq_ev, irq_er) = i2c_irqs(name)?;
         let devices = ext_devices.find_i2c_devices(name);
-        Some(Box::new(Self { name: name.to_string(), devices, irq_ev, irq_er, ..Default::default() }))
+        let (dma_tx, dma_rx) = match name {
+            "I2C1" => (4, 5),  // default: DMA1 ch4(TX)/ch5(RX); AFIO remap shifts to ch6/ch7
+            _ => (0, 0),
+        };
+        Some(Box::new(Self {
+            name: name.to_string(), devices, irq_ev, irq_er,
+            dma_channel_tx: dma_tx, dma_channel_rx: dma_rx,
+            ..Default::default()
+        }))
     }
 
     fn i2c_channel(&self) -> u8 {
@@ -66,6 +82,17 @@ impl I2c {
     }
 
     fn fire_interrupts(&mut self, sys: &System) {
+        // Clock stretching: defer interrupts while SCL is held low by a slave device.
+        // The stretch_until is set when a byte/address transfer completes; this
+        // method defers interrupt delivery until the stretch period expires.
+        if self.stretch_until != 0 {
+            let ic = crate::system::instruction_count();
+            if ic < self.stretch_until {
+                return; // defer until SCL released
+            }
+            self.stretch_until = 0; // stretch period expired
+        }
+
         let itevten = (self.cr2 >> 9) & 1;  // bit 9 = ITEVTEN
         let iterren = (self.cr2 >> 8) & 1;  // bit 8 = ITERREN
         let itbufen = (self.cr2 >> 10) & 1; // bit 10 = ITBUFEN
@@ -109,6 +136,9 @@ impl Peripheral for I2c {
                             self.dr = byte as u32;
                             self.sr1 |= 1 << 6; // RXNE
                             sys.push_event(crate::system::VmEvent::I2cRead { channel: self.i2c_channel() });
+                            if self.cr2 & (1 << 11) != 0 && self.dma_channel_rx != 0 {
+                                sys.p.dma_request(sys, self.dma_channel_rx as u32);
+                            }
                         }
                     }
                     self.fire_interrupts(sys);
@@ -133,9 +163,15 @@ impl Peripheral for I2c {
                     if is_read {
                         self.sr1 |= 1 << 6; // RXNE
                         self.sr2 &= !(1 << 2); // TRA=0 (receiver)
+                        if self.cr2 & (1 << 11) != 0 && self.dma_channel_rx != 0 {
+                            sys.p.dma_request(sys, self.dma_channel_rx as u32);
+                        }
                     } else {
                         self.sr1 |= 1 << 7; // TXE
                         self.sr2 |= 1 << 2; // TRA=1 (transmitter)
+                        if self.cr2 & (1 << 11) != 0 && self.dma_channel_tx != 0 {
+                            sys.p.dma_request(sys, self.dma_channel_tx as u32);
+                        }
                     }
                     self.fire_interrupts(sys);
                 }
@@ -251,8 +287,13 @@ impl Peripheral for I2c {
                             let mut d = self.devices[idx].device.borrow_mut();
                             d.write(sys, (), value as u8);
                             sys.push_event(crate::system::VmEvent::I2cWrite { channel: self.i2c_channel(), byte: value as u8 });
+                            // Clock stretching: slave holds SCL low during write cycle
+                            self.stretch_until = crate::system::instruction_count() + 200;
                         }
                         self.sr1 |= 1 << 7; // TXE
+                        if self.cr2 & (1 << 11) != 0 && self.dma_channel_tx != 0 {
+                            sys.p.dma_request(sys, self.dma_channel_tx as u32);
+                        }
                         self.fire_interrupts(sys);
                     }
                     _ => {}

@@ -29,11 +29,19 @@ pub struct Usart {
     rx_buf: Vec<u8>,
     irq_num: i32,
     txe_clear_until: u64,
+    /// DMA channel: 0=none, 4/5=USART1_TX/RX, 6/7=USART2_TX/RX
+    dma_channel_tx: u8,
+    dma_channel_rx: u8,
 }
 
 impl Usart {
     pub fn new(name: &str, _ext: &ExtDevices) -> Option<Box<dyn Peripheral>> {
         usart_irq(name).map(|irq| {
+            let (tx_ch, rx_ch) = match name {
+                "USART1" => (4, 5),
+                "USART2" => (6, 7),
+                _ => (0, 0),
+            };
             Box::new(Self {
                 name: name.to_string(),
                 sr: 0x00C0,
@@ -42,6 +50,8 @@ impl Usart {
                 rx_buf: Vec::new(),
                 irq_num: irq,
                 txe_clear_until: 0,
+                dma_channel_tx: tx_ch,
+                dma_channel_rx: rx_ch,
             }) as Box<dyn Peripheral>
         })
     }
@@ -114,6 +124,10 @@ impl Usart {
         }
         self.sr |= 0x40; // TC stays set
         self.update_interrupt(sys);
+        // DMA request when DMAR (CR3 bit 6) is set
+        if self.cr3 & (1 << 6) != 0 && self.dma_channel_rx != 0 {
+            sys.p.dma_request(sys, self.dma_channel_rx as u32);
+        }
     }
 
     fn usart_num(&self) -> u8 {
@@ -143,6 +157,10 @@ impl Usart {
             self.sr |= 0x80;
             self.txe_clear_until = instruction_count() + self.byte_time();
             self.update_interrupt(sys);
+        }
+        // DMA request when DMAT (CR3 bit 7) is set
+        if self.cr3 & (1 << 7) != 0 && self.dma_channel_tx != 0 {
+            sys.p.dma_request(sys, self.dma_channel_tx as u32);
         }
     }
 }

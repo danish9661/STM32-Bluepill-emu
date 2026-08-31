@@ -23,6 +23,36 @@ fn timer_base(name: &str) -> u32 {
     }
 }
 
+/// ITR slave-mode connections: maps (slave_name, itr_index) → (master_base, master_mms).
+/// TS[2:0] selects ITR0-ITR3; the actual trigger comes from the master's MMS output.
+/// Table derived from RM0008 (STM32F103) inter-timer connectivity.
+fn itr_master(slave: &str, itr: u32) -> Option<(u32, u8)> {
+    match (slave, itr) {
+        // TIM2: ITR1 = TIM1_TRGO (AFIO remap bit 8 controls connection)
+        ("TIM2", 1) => Some((0x4001_2C00, 4)), // TIM1 base, MMS=TRGO(ch4)
+        // TIM3: ITR0 = TIM2_TRGO (direct connection)
+        ("TIM3", 0) => Some((0x4000_0000, 4)), // TIM2 base, TRGO
+        // TIM3: ITR1 = TIM1_TRGO (via AFIO remap)
+        ("TIM3", 1) => Some((0x4001_2C00, 4)), // TIM1 base, TRGO
+        // TIM4: ITR1 = TIM3_TRGO (direct connection)
+        ("TIM4", 1) => Some((0x4000_0400, 4)), // TIM3 base, TRGO
+        _ => None,
+    }
+}
+
+/// Read the trigger output level from the master timer at `master_base`.
+/// Returns true if the trigger is active. For MMS=010 (update event output),
+/// TRGO pulses on each update event; we approximate by checking if the master
+/// timer is currently enabled (CEN=1 in CR1).
+fn read_master_trigger(sys: &System, master_base: u32, _ch: u8) -> bool {
+    if let Some(slot) = sys.p.bus.borrow().get(master_base) {
+        if let Ok(t) = slot.peripheral.try_borrow() {
+            return t.is_enabled();
+        }
+    }
+    false
+}
+
 /// Default + AFIO-remapped channel -> GPIO pin mapping for STM32F103 timers.
 /// `remap` is the AFIO MAPR remap code for the timer (0 = default).
 /// Returns (port, pin) where port: 0=A, 1=B, 2=C, 3=D.
@@ -92,11 +122,22 @@ pub struct Timer {
     name: String,
     #[allow(dead_code)]
     one_pulse_active: bool,
+    /// DMA channel for update events (UDE). 0 = none.
+    dma_update_ch: u8,
+    /// DMA channel for CCx events (CC1DE-CC4DE). 0 = none.
+    dma_cc_ch: [u8; 4],
 }
 
 impl Timer {
     pub fn new(name: &str) -> Option<Box<dyn Peripheral>> {
         tim_irq(name).map(|irq| {
+            let (dma_upd, dma_cc) = match name {
+                "TIM1" => (2, [2, 4, 6, 4]),
+                "TIM2" => (2, [5, 5, 2, 3]),
+                "TIM3" => (3, [6, 4, 1, 3]),
+                "TIM4" => (7, [1, 4, 5, 7]),
+                _ => (0, [0; 4]),
+            };
             Box::new(Self {
                 cr1: 0, cr2: 0, smcr: 0, dier: 0, sr: 0, egr: 0,
                 ccmr1: 0, ccmr2: 0, ccer: 0, cnt: 0, psc: 0,
@@ -109,6 +150,8 @@ impl Timer {
                  last_cap: [false; 4], cap_count: [0; 4], cap_inited: [false; 4],
                 name: name.to_string(),
                 one_pulse_active: false,
+                dma_update_ch: dma_upd,
+                dma_cc_ch: dma_cc,
             }) as Box<dyn Peripheral>
         })
     }
@@ -130,6 +173,40 @@ impl Timer {
 
         let enabled = self.cr1 & 1;
         if enabled == 0 { return; }
+
+        // Slave mode handling
+        let sms = self.smcr & 7;
+        if sms != 0 {
+            let ts = (self.smcr >> 4) & 7;
+            let trigger_active = if let Some((master_base, ch)) = itr_master(&self.name, ts) {
+                read_master_trigger(sys, master_base, ch)
+            } else {
+                false
+            };
+            match sms {
+                5 => { // Gated mode (SMS=101): counter runs only when trigger is high
+                    if !trigger_active { return; }
+                }
+                6 => { // Trigger mode (SMS=110): counter starts on trigger rising edge
+                    if !trigger_active { return; }
+                }
+                4 => { // Reset mode (SMS=100): counter resets on trigger rising edge
+                    // Edge detection handled via prev_itr tracking (not implemented yet);
+                    // for now, advance normally — reset on every trigger high.
+                    if trigger_active {
+                        self.cnt = 0;
+                    }
+                }
+                7 => { // External clock mode (SMS=111): count on trigger edges
+                    if !trigger_active { return; }
+                }
+                1 | 2 | 3 => { // Encoder modes: count via TI1/TI2 edges
+                    self.encoder_tick(sys);
+                    return;
+                }
+                _ => {}
+            }
+        }
 
         let cms = (self.cr1 >> 5) & 0x3;
         let down = cms == 0 && (self.cr1 >> 4) & 1 == 1;
@@ -192,6 +269,69 @@ impl Timer {
         self.update_interrupt(sys);
     }
 
+    /// Encoder mode: read TI1/TI2 pins and count edges per SMS[1:0] mode.
+    /// SMS=001: count on TI1 only; SMS=010: count on TI2 only;
+    /// SMS=011: count on both TI1 and TI2 edges (3x resolution).
+    fn encoder_tick(&mut self, sys: &System) {
+        let sms = self.smcr & 3; // SMS[1:0]
+        let remap = sys.p.afio_remap_status(&self.name).unwrap_or(0);
+        let ti1 = if let Some((p, i)) = tim_chan_pin(&self.name, 0, remap) {
+            sys.p.gpio.borrow_mut().read_pin_effective(sys, p, i)
+        } else { return };
+        let ti2 = if let Some((p, i)) = tim_chan_pin(&self.name, 1, remap) {
+            sys.p.gpio.borrow_mut().read_pin_effective(sys, p, i)
+        } else { return };
+
+        let dir = (self.cr1 >> 4) & 1; // DIR bit
+
+        // Detect edges and update counter
+        match sms {
+            1 => { // Count on TI1 edges
+                if ti1 != self.last_cap[0] {
+                    self.last_cap[0] = ti1;
+                    if (ti1 && dir == 0) || (!ti1 && dir == 1) {
+                        self.cnt = self.cnt.wrapping_add(1);
+                    } else {
+                        self.cnt = self.cnt.wrapping_sub(1);
+                    }
+                }
+            }
+            2 => { // Count on TI2 edges
+                if ti2 != self.last_cap[1] {
+                    self.last_cap[1] = ti2;
+                    if (ti2 && dir == 0) || (!ti2 && dir == 1) {
+                        self.cnt = self.cnt.wrapping_add(1);
+                    } else {
+                        self.cnt = self.cnt.wrapping_sub(1);
+                    }
+                }
+            }
+            3 => { // Count on both TI1 and TI2 edges
+                let old1 = self.last_cap[0];
+                let old2 = self.last_cap[1];
+                self.last_cap[0] = ti1;
+                self.last_cap[1] = ti2;
+                if ti1 != old1 {
+                    // TI1 edge: count based on TI2 level
+                    if (ti1 && !ti2) || (!ti1 && ti2) {
+                        self.cnt = self.cnt.wrapping_add(1);
+                    } else {
+                        self.cnt = self.cnt.wrapping_sub(1);
+                    }
+                }
+                if ti2 != old2 {
+                    // TI2 edge: count based on TI1 level
+                    if (ti2 && ti1) || (!ti2 && !ti1) {
+                        self.cnt = self.cnt.wrapping_add(1);
+                    } else {
+                        self.cnt = self.cnt.wrapping_sub(1);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// The original per-tick loop body, executed only at event ticks.
     fn tim_num(&self) -> u8 {
         self.name.trim_start_matches("TIM").parse::<u8>().unwrap_or(0)
@@ -214,8 +354,8 @@ impl Timer {
                 if self.dier & 1 != 0 { // UIE
                     sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
                 }
-                if self.dier & (1 << 8) != 0 { //UDE - DMA request
-                    // would trigger DMA
+                if self.dier & (1 << 8) != 0 && self.dma_update_ch != 0 { // UDE
+                    sys.p.dma_request(sys, self.dma_update_ch as u32);
                 }
             }
         } else if cnt < arr {
@@ -228,8 +368,8 @@ impl Timer {
             if self.dier & 1 != 0 { // UIE
                 sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
             }
-            if self.dier & (1 << 8) != 0 { //UDE - DMA request
-                // would trigger DMA
+            if self.dier & (1 << 8) != 0 && self.dma_update_ch != 0 { // UDE
+                sys.p.dma_request(sys, self.dma_update_ch as u32);
             }
         }
 
@@ -249,6 +389,10 @@ impl Timer {
                     self.sr |= 1 << (1 + ch); // CC1IF-CC4IF
                     // ADC external trigger on channel compare events
                     sys.p.adc_timer_trigger(sys, self.base, ch as u8);
+                    // DMA request when CCxDE enabled (DIER bit 9+ch)
+                    if self.dier & (1 << (9 + ch)) != 0 && self.dma_cc_ch[ch] != 0 {
+                        sys.p.dma_request(sys, self.dma_cc_ch[ch] as u32);
+                    }
                     let cc_irq_enable = (self.dier >> (1 + ch)) & 1;
                     if cc_irq_enable != 0 {
                         sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
@@ -326,6 +470,10 @@ impl Timer {
 impl Peripheral for Timer {
     fn periph_remap(&self, sys: &System) -> Option<u32> {
         sys.p.afio_remap_status(&self.name)
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.cr1 & 1 != 0 // CEN
     }
 
     fn pwm_duty(&self, channel: u32) -> Option<u32> {

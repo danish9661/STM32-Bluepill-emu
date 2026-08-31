@@ -75,6 +75,8 @@ pub trait Peripheral {
     /// Instruction-delta peripherals must advance their delta base here without
     /// processing state, so they don't catch up when the CPU wakes.
     fn tick_frozen(&mut self, _sys: &System) {}
+    /// Whether the peripheral is currently enabled/running (e.g. TIM CEN bit).
+    fn is_enabled(&self) -> bool { false }
     /// Raise a fault (kind: 0=fetch, 1=read, 2=write, 3=undef instruction), setting
     /// SCB fault status registers and pending the fault exception with escalation.
     fn raise_fault(&mut self, _sys: &System, _kind: u32, _addr: u32) {}

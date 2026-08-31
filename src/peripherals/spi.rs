@@ -20,6 +20,9 @@ pub struct Spi {
     pub i2spr: u32,
     wave_counter: u16,
     devices: Vec<SpiDeviceEntry>,
+    /// DMA channel: 0=none, 2/3=SPI1_RX/TX, 4/5=SPI2_RX/TX
+    dma_channel_tx: u8,
+    dma_channel_rx: u8,
 }
 
 impl Spi {
@@ -44,7 +47,14 @@ impl Spi {
                     });
                 }
             }
-            Some(Box::new(Self { name: name.to_string(), devices, txe: true, ..Default::default() }))
+            Some(Box::new(Self {
+                name: name.to_string(),
+                devices,
+                txe: true,
+                dma_channel_tx: match name { "SPI1" => 3, "SPI2" => 5, _ => 0 },
+                dma_channel_rx: match name { "SPI1" => 2, "SPI2" => 4, _ => 0 },
+                ..Default::default()
+            }))
         } else { None }
     }
 
@@ -167,6 +177,13 @@ impl Peripheral for Spi {
                     }
                     self.txe = true;
                     self.rxne = true;
+                    // Fire DMA requests when TXDMAEN/RXDMAEN are set
+                    if self.cr2 & (1 << 1) != 0 && self.dma_channel_tx != 0 {
+                        sys.p.dma_request(sys, self.dma_channel_tx as u32);
+                    }
+                    if self.cr2 & 1 != 0 && self.dma_channel_rx != 0 {
+                        sys.p.dma_request(sys, self.dma_channel_rx as u32);
+                    }
                     // Transaction-level event for virtual peripherals.
                     let (tx_bytes, rx_bytes) = if self.is_16bits() {
                         (vec![(value >> 8) as u8, value as u8],

@@ -7,12 +7,15 @@ pub struct Dma {
     isr: u32,
     ifcr: u32,
     channels: [Channel; 7],
+    /// DMA channel numbers that have pending requests from peripherals.
+    /// Processed in tick(); keeps peripheral dma_request() free of borrow issues.
+    pending_requests: Vec<u32>,
 }
 
 impl Dma {
     pub fn new(name: &str) -> Option<Box<dyn Peripheral>> {
         if name.starts_with("DMA") {
-            Some(Box::new(Self { name: name.to_string(), ..Self::default() }))
+            Some(Box::new(Self { name: name.to_string(), pending_requests: Vec::new(), ..Self::default() }))
         } else {
             None
         }
@@ -65,16 +68,25 @@ impl Channel {
 }
 
 impl Peripheral for Dma {
-    /// Peripheral request (ADC end-of-conversion etc.): if the channel is enabled
-    /// and configured, move one transfer (real HW: the request line pulses).
-    fn dma_request(&mut self, sys: &System, channel: u32) {
-        let ch = channel as usize;
-        if ch < 7 && self.channels[ch].cr & 1 != 0 {
-            self.channels[ch].do_xfer(&self.name, sys, ch);
+    /// Peripheral request (ADC end-of-conversion, DAC trigger, SPI TXE/RXNE, etc.):
+    /// queue the request for processing in tick() — avoids borrow conflicts since
+    /// the calling peripheral holds a &mut borrow on Peripherals.
+    fn dma_request(&mut self, _sys: &System, channel: u32) {
+        if (channel as usize) < 7 && !self.pending_requests.contains(&channel) {
+            self.pending_requests.push(channel);
         }
     }
 
     fn tick(&mut self, sys: &System) {
+        // Process peripheral-initiated DMA requests (DAC trigger, SPI TXE/RXNE, etc.)
+        let pending: Vec<u32> = self.pending_requests.drain(..).collect();
+        for &ch in &pending {
+            let ch_idx = ch as usize;
+            if ch_idx < 7 && self.channels[ch_idx].cr & 1 != 0 && self.channels[ch_idx].ndtr > 0 {
+                self.channels[ch_idx].do_xfer(&self.name, sys, ch_idx);
+            }
+        }
+
         let bits = sys.dma_take_completions();
         if bits != 0 {
             for ch in 0..7 {
