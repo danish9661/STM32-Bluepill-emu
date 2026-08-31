@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STM32F1 WebSocket Viewer</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:13px/1.5 'SF Mono',Monaco,Consolas,monospace;background:#0d1117;color:#c9d1d9;padding:16px}
+h1{font-size:16px;color:#58a6ff;margin-bottom:8px}
+.hdr{display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.hdr .dot{width:10px;height:10px;border-radius:50%;background:#f85149;display:inline-block}
+.hdr .dot.on{background:#3fb950}
+.badge{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:2px 8px;font-size:11px}
+#terminal{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px;height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;margin-bottom:12px}
+#terminal .t{color:#8b949e}.#terminal .tx{color:#3fb950}.#terminal .rx{color:#58a6ff}
+.pins{display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:4px;margin-bottom:12px}
+.pin{background:#161b22;border:1px solid #30363d;border-radius:4px;padding:2px 4px;text-align:center;font-size:10px;cursor:pointer;user-select:none;transition:all .15s}
+.pin .led{width:8px;height:8px;border-radius:50%;background:#30363d;margin:0 auto 2px}
+.pin.high .led{background:#fbbf24;box-shadow:0 0 6px #fbbf24}
+.pin.high{border-color:#fbbf24}
+.io{display:flex;gap:8px;flex-wrap:wrap}
+.io input{background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;padding:4px 8px;font-family:inherit;font-size:12px;width:200px}
+.io button{background:#21262d;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;padding:4px 12px;cursor:pointer;font-family:inherit;font-size:12px}
+.io button:hover{background:#30363d}
+.stats{font-size:11px;color:#8b949e}
+#evtLog{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px;height:180px;overflow-y:auto;white-space:pre-wrap;font-size:11px;color:#8b949e}
+</style>
+</head>
+<body>
+<h1>STM32F1 WebSocket Viewer</h1>
+<div class="hdr">
+  <span class="dot" id="dot"></span>
+  <span id="status">Disconnected</span>
+  <span class="badge" id="fpsBadge">0 fps</span>
+  <span class="badge" id="instBadge">0 instr</span>
+  <input id="serverUrl" value="ws://localhost:8080" style="background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;padding:2px 8px;font-family:inherit;font-size:12px;width:220px">
+  <button onclick="connect()">Connect</button>
+</div>
+
+<div id="terminal"></div>
+
+<h2 style="font-size:13px;color:#8b949e;margin-bottom:6px">GPIO Pins</h2>
+<div class="pins" id="pinGrid"></div>
+
+<div class="io" style="margin-bottom:12px">
+  <input id="uartInput" placeholder="Type to send UART bytes..." onkeydown="if(event.key==='Enter')sendUart(this)">
+  <button onclick="document.getElementById('uartInput').value='';document.getElementById('uartInput').focus()">UART1 TX</button>
+</div>
+
+<h2 style="font-size:13px;color:#8b949e;margin-bottom:6px">Event Log</h2>
+<div id="evtLog"></div>
+
+<script>
+const PORT_NAMES = ['A','B','C','D','E','F'];
+const PINS_PER_PORT = 16;
+let ws = null, terminalEl = document.getElementById('terminal'), evtLogEl = document.getElementById('evtLog');
+
+// Build pin grid
+const pinGrid = document.getElementById('pinGrid');
+for (let p = 0; p < 3; p++) {
+  for (let n = 0; n < PINS_PER_PORT; n++) {
+    const d = document.createElement('div');
+    d.className = 'pin'; d.id = `pin${p}${n}`;
+    d.innerHTML = `<div class="led"></div>${PORT_NAMES[p]}${n}`;
+    d.onclick = () => togglePin(p, n);
+    pinGrid.appendChild(d);
+  }
+}
+
+function togglePin(port, pin) {
+  const el = document.getElementById(`pin${port}${pin}`);
+  const high = !el.classList.contains('high');
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'gpio_set', port, pin, high }));
+  }
+}
+
+function sendUart(input) {
+  const text = input.value;
+  if (!text || !ws || ws.readyState !== 1) return;
+  for (let i = 0; i < text.length; i++) {
+    ws.send(JSON.stringify({ type: 'uart_rx', addr: 0x40013800, byte: text.charCodeAt(i) }));
+  }
+  appendTerminal('tx', text);
+  input.value = '';
+}
+
+function appendTerminal(cls, text) {
+  const span = document.createElement('span');
+  span.className = cls;
+  span.textContent = text;
+  terminalEl.appendChild(span);
+  terminalEl.scrollTop = terminalEl.scrollHeight;
+}
+
+function logEvent(text) {
+  evtLogEl.textContent += text + '\n';
+  if (evtLogEl.textContent.length > 8000) evtLogEl.textContent = evtLogEl.textContent.slice(-4000);
+  evtLogEl.scrollTop = evtLogEl.scrollHeight;
+}
+
+// Event type names for the log
+const EVT_NAMES = ['','SpiTransfer','I2cStart','I2cWrite','I2cRead','I2cStop','UartTx',
+  'ExtiEdge','AdcDone','TimUpdate','DacWrite','CrcResult','RtcAlarm','WdogReset',
+  'CanTx','CanRx','TimCapture','FsmcAccess'];
+
+function decodeEvents(arr) {
+  let i = 0;
+  while (i < arr.length) {
+    const t = arr[i++]; if (t === 0) break;
+    switch (t) {
+      case 6: { const usart = arr[i++], byte = arr[i++]; if (usart === 1) appendTerminal('rx', String.fromCharCode(byte)); break; }
+      case 1: { const ch = arr[i++], txLen = arr[i++], rxLen = arr[i++]; i += txLen + rxLen; logEvent(`SPI${ch} xfer ${txLen}B`); break; }
+      case 2: { const ch = arr[i++], addr = arr[i++]; logEvent(`I2C${ch} start 0x${addr.toString(16)}`); break; }
+      case 3: { const ch = arr[i++]; i++; break; }
+      case 4: { i++; break; }
+      case 5: { i++; logEvent(`I2C${arr[i-1]} stop`); break; }
+      case 7: { const line = arr[i++]; logEvent(`EXTI line ${line} edge`); break; }
+      case 8: { const adc = arr[i++], chan = arr[i++]; logEvent(`ADC${adc} ch${chan} done`); break; }
+      case 9: { const tim = arr[i++]; logEvent(`TIM${tim} update`); break; }
+      case 10: { const chan = arr[i++], val = arr[i++]; logEvent(`DAC ch${chan} = ${val}`); break; }
+      case 11: { const val = arr[i++]; logEvent(`CRC = 0x${(val>>>0).toString(16)}`); break; }
+      case 12: { const alarm = arr[i++]; logEvent(`RTC alarm ${alarm}`); break; }
+      case 13: { const which = arr[i++]; logEvent(`WDG reset ${which===1?'IWDG':'WWDG'}`); break; }
+      case 14: case 15: {
+        const can = arr[i++], id = arr[i++], len = arr[i++];
+        const d = []; for (let k=0;k<8;k++) d.push(arr[i++] & 0xFF);
+        logEvent(`${t===14?'CAN TX':'CAN RX'} id=0x${(id>>>0).toString(16)} len=${len} [${d.map(b=>b.toString(16).padStart(2,'0')).join(' ')}]`);
+        break; }
+      case 16: { const tim = arr[i++], ch = arr[i++], val = arr[i++]; logEvent(`TIM${tim} ch${ch} capture ${val}`); break; }
+      case 17: { const bank = arr[i++], off = arr[i++], wr = arr[i++], sz = arr[i++], val = arr[i++]; logEvent(`FSMC bank${bank} ${wr?'W':'R'} off=0x${off.toString(16)} sz=${sz} val=0x${(val>>>0).toString(16)}`); break; }
+      default: return;
+    }
+  }
+}
+
+function updatePins(arr) {
+  for (let i = 0; i < arr.length; i += 3) {
+    const port = arr[i], pin = arr[i+1], level = arr[i+2];
+    const el = document.getElementById(`pin${port}${pin}`);
+    if (el) { if (level) el.classList.add('high'); else el.classList.remove('high'); }
+  }
+}
+
+function connect() {
+  if (ws) ws.close();
+  const url = document.getElementById('serverUrl').value;
+  ws = new WebSocket(url);
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => {
+    document.getElementById('dot').classList.add('on');
+    document.getElementById('status').textContent = 'Connected';
+  };
+  ws.onclose = () => {
+    document.getElementById('dot').classList.remove('on');
+    document.getElementById('status').textContent = 'Disconnected';
+    setTimeout(connect, 2000);
+  };
+  ws.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(typeof e.data === 'string' ? e.data : new TextDecoder().decode(e.data));
+      if (msg.e) decodeEvents(msg.e);
+      if (msg.p) updatePins(msg.p);
+      if (msg.fps !== undefined) document.getElementById('fpsBadge').textContent = `${msg.fps} fps`;
+      if (msg.t !== undefined) document.getElementById('instBadge').textContent = `${(msg.t/1e6).toFixed(1)}M instr`;
+    } catch {}
+  };
+}
+
+connect();
+</script>
+</body>
+</html>
