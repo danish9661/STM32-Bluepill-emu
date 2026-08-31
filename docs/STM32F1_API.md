@@ -190,3 +190,58 @@ These are encoded as flat `drain_events()` discriminants 16 (`TimCapture`) and
 - Rebuild after Rust changes with the pinned toolchain and re-sync `pkg/` →
   `site/` (CI byte-exact guard):
   `PATH=binaryen-version_132/bin:$PATH RUSTFLAGS="--remap-path-prefix=$HOME=/build" wasm-pack build --target web`
+
+## WebSocket bridge (headless Node + browser viewer)
+
+For scenarios where you want to run the emulator headlessly (no browser) and
+observe events remotely — or build a custom viewer — `pkg/ws-server.mjs`
+provides a lightweight WebSocket bridge:
+
+```
+Node (server)                         Browser (client)
+┌─────────────────────┐               ┌─────────────────────┐
+│ createEmulator()    │  JSON over WS  │ ws-viewer.html      │
+│ emu.step(20000)     │ ────────────→  │ decode 17 event     │
+│ drainEvents()       │                │ types               │
+│ takePinEvents()     │ ←──────────── │ uart_rx / gpio_set  │
+│                     │                │ / can_inject        │
+└─────────────────────┘                └─────────────────────┘
+```
+
+### Server
+
+```bash
+npm install ws                        # runtime dependency
+node pkg/ws-server.mjs firmware.elf   # --port=8080 --max=200000000
+```
+
+The server loads firmware via `createEmulator()`, runs `emu.step(20000)` at
+~60fps (`setInterval(…, 16)`), drains `drainEvents()` + `takePinEvents()`
+(Array.from for correct JSON serialization), and broadcasts as JSON to all
+connected clients. It receives `uart_rx`, `gpio_set`, and `can_inject`
+commands from clients. Idle when no clients are connected.
+
+### Client
+
+Open `http://localhost:8080/ws-viewer.html` in any browser. The viewer
+auto-connects to `ws://localhost:8080`, decodes all 17 event types, and
+renders: UART terminal, GPIO pin grid (click to toggle input), event log,
+FPS/instruction counter. Reconnects on disconnect.
+
+### Integration
+
+Any WebSocket client can connect and exchange JSON messages. The server
+broadcasts objects like:
+```json
+{ "e": [1, 0, 12, 16, 4, ...], "p": [], "fps": 60, "t": 2000000 }
+```
+where `e` is the flat event array (same discriminants as `drain_events()`),
+`p` is pin-change events, `fps` is instructions/sec, and `t` is total
+instructions executed.
+
+Clients can send commands:
+```json
+{ "type": "uart_rx", "byte": 65 }
+{ "type": "gpio_set", "port": 1, "pin": 13, "value": 1 }
+{ "type": "can_inject", "id": 0x123, "data": [0xDE, 0xAD] }
+```

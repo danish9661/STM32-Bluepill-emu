@@ -194,32 +194,32 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - **WS2812 demo** (`tests/arduino_ws2812/` + page preset): 800kHz strip over SPI1 at 2.25MHz (div32) + DMA1 CH3 fire-and-forget; each ws bit = 3 SPI bits (0b110=1, 0b100=0), GRB, 8 LEDs = 72 bytes/frame; rainbow `hue=(frame*9 + i*45)%360`; UART `WS2812=ok` + `frames=N` every 2s. Page: preset option + LED-strip card (`wsCard`, 8 `.ws-led` divs) decoded live via `onPeriphWrite(wsWatch)` — 24 ws-bits per LED, GRB, frame counter. **8-bit DMA transfers**: the first build used PSIZE_0|MSIZE_0 (16-bit) — real HW clocks 8 bits (DS=8) per 16-bit DR write, but the emulator's `data_size = max(psize,msize)*ndtr` pushed 144 bytes/frame (misaligned decode). Dropped to 8-bit (PSIZE/MSIZE=00) → 72 bytes exact.
  - **Verified**: 236/236; canary 39/39; cli 200M 39/39; emulator.js 200M 39/39; WS2812 Node smoke (5 runs): frame0 LED0 exact red, all 40 LED-color checks across first 5 frames exact, 84 frames decoded, UART count tracks; headless CDP page smoke: preset loads, 16-34 frames decoded live, rainbow colors on the DOM strip, ALL PASS.
 
-### 14. Ergonomic `STM32F1` wrapper + Wokwi-style virtual-peripheral event queue (`pkg/stm32f1.js`, `src/system.rs`, `src/peripherals/{usart,spi,i2c}.rs`, `src/lib.rs`, `docs/STM32F1_API.md`) [implemented, NOT yet committed]
+### 14. Ergonomic `STM32F1` wrapper + Wokwi-style virtual-peripheral event queue (`pkg/stm32f1.js`, `src/system.rs`, `src/peripherals/{usart,spi,i2c}.rs`, `src/lib.rs`, `docs/STM32F1_API.md`) [committed]
 - **Wokwi-style event queue**: `WasmSystem` now holds a `RefCell<Vec<VmEvent>>` (enum `VmEvent`: `SpiTransfer{channel,tx,rx}`, `I2cStart{channel,addr}`, `I2cWrite{channel,byte}`, `I2cRead{channel}`, `I2cStop{channel}`, `UartTx{usart,byte}`). Pushed in `usart.rs::write_dr` (UartTx), `spi.rs` DR write (SpiTransfer + optional MISO inject consume), `i2c.rs` (Start/Write/Read/Stop + optional RX inject). `drain_events()` (`src/lib.rs`) flattens to an `i32[]`; `emulator.js` exposes `drainEvents()` / `spiInjectMiso(ch,bytes)` / `i2cInjectRx(ch,bytes)` / `uartRxAddr(addr,byte)`.
 - **Why**: `getUartOutput()` is USART1-only and USART DR writes do NOT fire `onPeriphWrite`, so per-USART TX (e.g. USART2) could not be observed. The event queue is the transaction-level model Wokwi virtual peripherals expect and captures ALL buses.
 - **`pkg/stm32f1.js`**: `STM32F1` class + `GPIO`/`GPIOPin`/`USART`/`SPI`/`I2C` wrappers. `execute()`/`step()` auto-drain events and dispatch to `gpio.pin().on('change')`, `usartN.onData`, `spiN.onTransfer(ch,tx,rx)`, `i2cN.onStart/onWrite/onRead/onStop`; `usartN.send()`, `spiN.injectMiso()`, `i2cN.injectRx()` for host→MCU injection. Thin layer, no hot-path overhead.
 - **Tests**: `tests/test_stm32f1_api.mjs` (7: USART1 TX + SPI1 transfers via ws2812 elf), `tests/test_i2c_events.mjs` (3: I2C1 Start/Write/Stop via periph_test + empty-data div-by-zero guard on spi_flash requires non-empty image). Both wired into `.github/workflows/test.yml`. `docs/STM32F1_API.md` written.
 - **Rebuild note**: wasm rebuilt with pinned binaryen `version_132` (downloaded to `/tmp/binaryen-version_132` locally) + `RUSTFLAGS="--remap-path-prefix=$HOME=/build"`; `pkg/` and `site/` re-synced (CI byte-exact guard).
 
-### 15. Extend virtual-peripheral event queue to EXTI / ADC / TIM (`src/system.rs`, `src/peripherals/{exti,adc,tim}.rs`, `src/lib.rs`, `pkg/stm32f1.js`) [implemented, NOT yet committed]
+### 15. Extend virtual-peripheral event queue to EXTI / ADC / TIM (`src/system.rs`, `src/peripherals/{exti,adc,tim}.rs`, `src/lib.rs`, `pkg/stm32f1.js`) [committed]
 - `VmEvent` gained `ExtiEdge{line}`, `AdcDone{adc,chan}`, `TimUpdate{tim}` (flat discriminants 7/8/9). Pushed in `exti.rs::gpio_pin_changed` (hardware edge), `adc.rs::advance_regular/advance_injected` (EOC/JEOC), `tim.rs::tick_once` + `generate_update` (UIF). Encoded in `src/lib.rs::drain_events`.
 - `STM32F1` gained top-level callbacks `onExtiEdge(line)`, `onAdcDone(adc,chan)`, `onTimUpdate(tim)` (dispatched from `_drain_events`).
 - Tests: `tests/test_extra_events.mjs` (TIM + ADC via periph_test; periph_test headless does NOT self-trigger EXTI edges, so EXTI is logged, not asserted there), `tests/test_exti_events.mjs` (deterministic: configure EXTI0/1 via the bus, drive PA0/PA1 high via `gpioSetInput` -> ExtiEdge{0,1}). Both wired into CI. `docs/STM32F1_API.md` updated.
 
-### 16. More virtual-peripheral events: DAC/CRC/RTC/Watchdog/CAN (`src/system.rs`, `src/peripherals/{dac,crc,rtc,iwdg,wwdg,can}.rs`, `src/lib.rs`, `pkg/stm32f1.js`) [implemented, NOT yet committed]
+### 16. More virtual-peripheral events: DAC/CRC/RTC/Watchdog/CAN (`src/system.rs`, `src/peripherals/{dac,crc,rtc,iwdg,wwdg,can}.rs`, `src/lib.rs`, `pkg/stm32f1.js`) [committed]
 - `VmEvent` gained `DacWrite{chan,value}` (disc 10, dac.rs DHR write), `CrcResult{value}` (disc 11, crc.rs DR read), `RtcAlarm{alarm}` (disc 12, rtc.rs tick when alarm crossed), `WdogReset{which}` (disc 13, iwdg.rs/wwdg.rs reset request — which: 1=IWDG,2=WWDG), `CanTx{can,id,len,data[8]}` (disc 14, can.rs TX mailbox submit), `CanRx{can,id,len,data[8]}` (disc 15, can.rs inject_message). Encoded in `src/lib.rs::drain_events` (id = 11-bit STDID or 29-bit EXTID, len = DLC, data = 8 bytes).
 - `STM32F1` gained top-level callbacks `onDacWrite/onCrcResult/onRtcAlarm/onWdogReset/onCanTx/onCanRx` (dispatched from `_drain_events`).
 - Tests: `tests/test_more_events.mjs` (DAC/CRC/RTC fire naturally in periph_test; CAN RX/TX driven deterministically by configuring a pass-all filter + inject / submitting a mailbox). Wired into CI. `docs/STM32F1_API.md` updated.
 - **Note**: F103 has no onboard comparator, and TIM input-capture wasn't modeled — now it is (see item 17).
 
-### 17. Implement TIM input capture + FSMC transaction events (`src/peripherals/{tim,fsmc}.rs`, `src/system.rs`, `src/lib.rs`, `pkg/stm32f1.js`) [implemented, NOT yet committed]
+### 17. Implement TIM input capture + FSMC transaction events (`src/peripherals/{tim,fsmc}.rs`, `src/system.rs`, `src/lib.rs`, `pkg/stm32f1.js`) [committed]
 - **Real TIM input capture** (`tim.rs`): added `last_cap`/`cap_count`/`cap_inited` per channel + `sample_input_capture()` (called once per batch in `tick()`). When a channel's `CCMR CCxS != 0` (input mode) and an edge matching `CCxP`/`CCXNP` polarity occurs on its source pin (default `tim_chan_pin` mapping, no AFIO remap; `CCxS=10` -> partner pin), CNT is latched into `CCRx`, `CCxIF` set, IRQ pending if `CCxIE`, and a `TimCapture{tim,ch,value}` event (disc 16) is emitted. The output-compare block in `tick_once` now skips input-capture channels. Also hardened a latent `ARR=0xFFFF_FFFF` divide-by-zero in `advance()` (`self.arr + 1` wrap) — guard `arr != u32::MAX`.
 - **FSMC transaction events** (`fsmc.rs`): `FsmcAccess{bank,offset,write,size,value}` (disc 17) pushed on every NOR/NAND/PC-Card data read/write in `read_sized`/`write_sized` (regardless of whether a backing ext_device image is attached).
 - `STM32F1` gained `onTimCapture(tim,ch,value)` + `onFsmcAccess(bank,offset,write,size,value)`, dispatched from `_drain_events` (types 16/17).
 - Tests: `tests/test_tim_capture.mjs` (deterministic: TIM2 CH1 input-capture on PA0, drive rising edge -> TimCapture{2,0}), `tests/test_fsmc_events.mjs` (deterministic: enable BANK1, read+write 0x60000000 -> FsmcAccess read+write). Both wired into CI. `docs/STM32F1_API.md` updated.
 - **Verified**: 236/236 unit (incl. new TIM/FSMC paths), tim_capture 4/4, fsmc 8/8.
 
-### 18. Wokwi virtual peripheral end-to-end + TIM AFIO remap (`src/peripherals/{tim,afio}.rs`, `pkg/stm32f1.js`, tests) [implemented, NOT yet committed]
+### 18. Wokwi virtual peripheral end-to-end + TIM AFIO remap (`src/peripherals/{tim,afio}.rs`, `pkg/stm32f1.js`, tests) [committed]
 - **AFIO remap in `tim_chan_pin`**: `sample_input_capture` now reads the AFIO MAPR
   remap code via `sys.p.afio_remap_status(name)` and `tim_chan_pin(name, ch, remap)`
   returns the remapped pins for TIM2/TIM3/TIM4 (TIM2_REMAP bits[9:8], TIM3_REMAP
@@ -235,6 +235,21 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
   must NOT capture, a PB3 rising edge MUST capture -> exactly one TimCapture{2,1}),
   `tests/test_fsmc_display.mjs` (virtual LCD receives reset cmd + 3 pixels in order).
   Both wired into CI. `docs/STM32F1_API.md` updated (remap note).
+
+### 19. WebSocket bridge: headless Node emulator + browser viewer (`pkg/ws-server.mjs`, `site/ws-viewer.html`) [committed]
+- **`pkg/ws-server.mjs`**: Node HTTP static file server (`site/`) + WebSocket at
+  `/ws`. Loads firmware via `createEmulator()`, runs `emu.step(20000)` at ~60fps
+  (`setInterval`), drains `drainEvents()` + `takePinEvents()` (Array.from for
+  correct JSON serialization), broadcasts as JSON to all connected clients. Receives
+  `uart_rx`/`gpio_set`/`can_inject` commands from clients. Flags: `--port`, `--max`.
+  Idle when no clients connected. Rebuild requires `npm install ws` (runtime dep).
+- **`site/ws-viewer.html`**: Standalone browser page that auto-connects to the WS
+  server. Decodes all 17 event types (SPI/I2C/USART/EXTI/ADC/TIM/DAC/CRC/RTC/
+  WDG/CAN/FSMC). Renders: UART terminal, GPIO pin grid (click to toggle input),
+  event log, FPS/instruction counter. Reconnects on disconnect.
+- **Usage**: `node pkg/ws-server.mjs <firmware.elf> [--port=8080]`, then open
+  `http://localhost:8080/ws-viewer.html` in a browser.
+- **Committed** as `224a65a`. `pkg/.gitignore` updated with `!ws-server.mjs`.
 
 
 ## Next Phase — Long-term Optimizations
@@ -256,3 +271,5 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - `tests/arduino_periph_test/` — the 24-peripheral firmware (39 checks incl. SVC/PendSV) + config
 - `tests/arduino_hw_showcase/` — 7-device live demo firmware (OLED 0x3C, SPI LCD CS PA8, 7-seg 74HC595 via SPI1+PA4, RGB TIM2 PWM PA0-2, buzzer PB14, button PB13 EXTI13) — build `tests/arduino_hw_showcase/build/arduino_hw_showcase.ino.elf`; ship `site/arduino_hw_showcase.elf` (force-add)
 - `site/index.html` — `showcase` preset (`newString`/`oldString`); 7-seg is a JS-side shift-register decode: `onPeriphWrite` watches SPI1 DR (0x4001300C) while PA4 CS is low (GPIOA ODR/BSRR/BRR tracking), latch 4 bytes → `segDigits`; OLED/LCD render from `emu.i2cOledFb('I2C1',0x3C)` / `emu.lcdFb('SPI1')`; button widget calls `emu.gpioSetInput(1,13,true/false)`
+- `pkg/ws-server.mjs` — WebSocket bridge server (HTTP static + WS streaming + emulation loop)
+- `site/ws-viewer.html` — browser WebSocket viewer (event decoder, UART terminal, GPIO grid)
