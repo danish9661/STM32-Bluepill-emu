@@ -126,16 +126,31 @@ pub struct Timer {
     dma_update_ch: u8,
     /// DMA channel for CCx events (CC1DE-CC4DE). 0 = none.
     dma_cc_ch: [u8; 4],
+    /// Previous trigger level for edge detection in slave modes (SMS=4 reset, SMS=6 trigger).
+    prev_itr: bool,
+    /// PWM input capture: period (ticks between consecutive rising edges) per channel.
+    ic_period: [u32; 4],
+    /// PWM input capture: pulse width (ticks between rising and falling edge) per channel.
+    ic_pulse: [u32; 4],
+    /// Timestamp of last rising edge per channel (for PWM input capture).
+    ic_rising_ts: [u32; 4],
+    /// Whether a rising edge has been captured in PWM input mode per channel.
+    ic_rising_captured: [bool; 4],
 }
 
 impl Timer {
     pub fn new(name: &str) -> Option<Box<dyn Peripheral>> {
         tim_irq(name).map(|irq| {
+            // DMA channels: 1-7 = DMA1, 8-12 = DMA2 (offset by 8)
             let (dma_upd, dma_cc) = match name {
                 "TIM1" => (2, [2, 4, 6, 4]),
                 "TIM2" => (2, [5, 5, 2, 3]),
                 "TIM3" => (3, [6, 4, 1, 3]),
                 "TIM4" => (7, [1, 4, 5, 7]),
+                // DMA2 channels (offset +8): TIM5 ch4/ch5, TIM6 ch11, TIM7 ch12
+                "TIM5" => (12, [13, 13, 12, 12]),  // DMA2 ch4=12, ch5=13
+                "TIM6" => (11, [0; 4]),              // DMA2 ch3=11 (update only)
+                "TIM7" => (12, [0; 4]),              // DMA2 ch4=12 (update only)
                 _ => (0, [0; 4]),
             };
             Box::new(Self {
@@ -152,6 +167,9 @@ impl Timer {
                 one_pulse_active: false,
                 dma_update_ch: dma_upd,
                 dma_cc_ch: dma_cc,
+                prev_itr: false,
+                ic_period: [0; 4], ic_pulse: [0; 4],
+                ic_rising_ts: [0; 4], ic_rising_captured: [false; 4],
             }) as Box<dyn Peripheral>
         })
     }
@@ -188,17 +206,21 @@ impl Timer {
                     if !trigger_active { return; }
                 }
                 6 => { // Trigger mode (SMS=110): counter starts on trigger rising edge
-                    if !trigger_active { return; }
+                    let rising = trigger_active && !self.prev_itr;
+                    self.prev_itr = trigger_active;
+                    if !rising { return; }
                 }
                 4 => { // Reset mode (SMS=100): counter resets on trigger rising edge
-                    // Edge detection handled via prev_itr tracking (not implemented yet);
-                    // for now, advance normally — reset on every trigger high.
-                    if trigger_active {
+                    let rising = trigger_active && !self.prev_itr;
+                    self.prev_itr = trigger_active;
+                    if rising {
                         self.cnt = 0;
                     }
                 }
                 7 => { // External clock mode (SMS=111): count on trigger edges
-                    if !trigger_active { return; }
+                    let rising = trigger_active && !self.prev_itr;
+                    self.prev_itr = trigger_active;
+                    if !rising { return; }
                 }
                 1 | 2 | 3 => { // Encoder modes: count via TI1/TI2 edges
                     self.encoder_tick(sys);
@@ -206,6 +228,8 @@ impl Timer {
                 }
                 _ => {}
             }
+        } else {
+            self.prev_itr = false;
         }
 
         let cms = (self.cr1 >> 5) & 0x3;
@@ -457,11 +481,37 @@ impl Timer {
             if !((is_rising && rising_ok) || (is_falling && falling_ok)) { continue; }
             self.cap_count[ch as usize] += 1;
             if self.cap_count[ch as usize] % (psc + 1) != 0 { continue; }
-            self.ccr[ch as usize] = self.cnt;
-            self.sr |= 1 << (1 + ch as u32); // CCxIF
-            sys.push_event(crate::system::VmEvent::TimCapture { tim: self.tim_num(), ch, value: self.cnt });
-            if (self.dier >> (1 + ch as u32)) & 1 != 0 {
-                sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
+
+            // PWM input capture: when both edges are configured (CCxP=1 & CCXNP=1),
+            // capture period on rising and pulse width on falling.
+            if cxp == 1 && cxnp == 1 {
+                let cnt = self.cnt;
+                let ch_usize = ch as usize;
+                if is_rising {
+                    if self.ic_rising_captured[ch_usize] {
+                        let prev_ts = self.ic_rising_ts[ch_usize];
+                        self.ic_period[ch_usize] = cnt.wrapping_sub(prev_ts);
+                    }
+                    self.ic_rising_ts[ch_usize] = cnt;
+                    self.ic_rising_captured[ch_usize] = true;
+                } else if self.ic_rising_captured[ch_usize] {
+                    self.ic_pulse[ch_usize] = cnt.wrapping_sub(self.ic_rising_ts[ch_usize]);
+                }
+                // Also write CCR for backward compatibility
+                self.ccr[ch_usize] = cnt;
+                self.sr |= 1 << (1 + ch as u32); // CCxIF
+                sys.push_event(crate::system::VmEvent::TimCapture { tim: self.tim_num(), ch, value: cnt });
+                if (self.dier >> (1 + ch as u32)) & 1 != 0 {
+                    sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
+                }
+            } else {
+                // Standard input capture
+                self.ccr[ch as usize] = self.cnt;
+                self.sr |= 1 << (1 + ch as u32); // CCxIF
+                sys.push_event(crate::system::VmEvent::TimCapture { tim: self.tim_num(), ch, value: self.cnt });
+                if (self.dier >> (1 + ch as u32)) & 1 != 0 {
+                    sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
+                }
             }
         }
     }
@@ -521,6 +571,13 @@ impl Peripheral for Timer {
             0x54 => self.ccmr3,
             0x58 => self.ccr5,
             0x5C => self.ccr6,
+            // PWM input capture: OR1 space (0x60-0x6C) returns period/pulse
+            // on channels 1-4. These sit in unused register space on F103 but
+            // give firmware a way to read captured values via the emulator API.
+            0x60 => self.ic_period[0],
+            0x64 => self.ic_pulse[0],
+            0x68 => self.ic_period[1],
+            0x6C => self.ic_pulse[1],
             _ => 0,
         }
     }

@@ -51,8 +51,17 @@ impl Spi {
                 name: name.to_string(),
                 devices,
                 txe: true,
-                dma_channel_tx: match name { "SPI1" => 3, "SPI2" => 5, _ => 0 },
-                dma_channel_rx: match name { "SPI1" => 2, "SPI2" => 4, _ => 0 },
+                // DMA channels: 1-7 = DMA1, 8-12 = DMA2 (offset by 8)
+                dma_channel_tx: match name {
+                    "SPI1" => 3, "SPI2" => 5,
+                    "SPI3" => 10, // DMA2 ch2
+                    _ => 0
+                },
+                dma_channel_rx: match name {
+                    "SPI1" => 2, "SPI2" => 4,
+                    "SPI3" => 11, // DMA2 ch3
+                    _ => 0
+                },
                 ..Default::default()
             }))
         } else { None }

@@ -37,9 +37,13 @@ pub struct Usart {
 impl Usart {
     pub fn new(name: &str, _ext: &ExtDevices) -> Option<Box<dyn Peripheral>> {
         usart_irq(name).map(|irq| {
+            // DMA channels: 1-7 = DMA1, 8-12 = DMA2 (offset by 8)
             let (tx_ch, rx_ch) = match name {
                 "USART1" => (4, 5),
                 "USART2" => (6, 7),
+                "USART3" => (2, 3),  // DMA1 ch2=TX, ch3=RX
+                "UART4" => (11, 12), // DMA2 ch3=TX(11), ch4=RX(12)
+                "UART5" => (12, 13), // DMA2 ch4=TX(12), ch5=RX(13)
                 _ => (0, 0),
             };
             Box::new(Self {

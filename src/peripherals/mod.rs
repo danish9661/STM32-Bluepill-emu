@@ -554,9 +554,16 @@ impl Peripherals {
     }
 
     /// Peripheral DMA request: fires the enabled DMA channel if configured.
+    /// Channels 1-7 go to DMA1; channels 8-12 go to DMA2 (ch = channel - 8).
     pub fn dma_request(&self, sys: &System, channel: u32) {
-        if let Some(p) = self.bus.borrow().get(0x4002_0000) {
-            p.peripheral.borrow_mut().dma_request(sys, channel);
+        if channel <= 7 {
+            if let Some(p) = self.bus.borrow().get(0x4002_0000) {
+                p.peripheral.borrow_mut().dma_request(sys, channel);
+            }
+        } else if channel <= 12 {
+            if let Some(p) = self.bus.borrow().get(0x4002_0400) {
+                p.peripheral.borrow_mut().dma_request(sys, channel - 8);
+            }
         }
     }
 

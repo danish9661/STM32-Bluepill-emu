@@ -81,6 +81,18 @@ impl I2c {
         self.sr1_addr_flag = false;
     }
 
+    /// Resolves the DMA channel to use, accounting for AFIO remap.
+    /// I2C1 default: TX=ch4, RX=ch5. AFIO remap (MAPR bit 1): TX=ch6, RX=ch7.
+    fn resolve_dma_channel(&self, sys: &System, tx: bool) -> u8 {
+        if self.name != "I2C1" { return 0; }
+        let remap = sys.p.afio_remap_status("I2C1").unwrap_or(0);
+        if remap & 1 != 0 {
+            if tx { 6 } else { 7 }
+        } else {
+            if tx { self.dma_channel_tx } else { self.dma_channel_rx }
+        }
+    }
+
     fn fire_interrupts(&mut self, sys: &System) {
         // Clock stretching: defer interrupts while SCL is held low by a slave device.
         // The stretch_until is set when a byte/address transfer completes; this
@@ -136,8 +148,9 @@ impl Peripheral for I2c {
                             self.dr = byte as u32;
                             self.sr1 |= 1 << 6; // RXNE
                             sys.push_event(crate::system::VmEvent::I2cRead { channel: self.i2c_channel() });
-                            if self.cr2 & (1 << 11) != 0 && self.dma_channel_rx != 0 {
-                                sys.p.dma_request(sys, self.dma_channel_rx as u32);
+                            if self.cr2 & (1 << 11) != 0 {
+                                let ch = self.resolve_dma_channel(sys, false);
+                                if ch != 0 { sys.p.dma_request(sys, ch as u32); }
                             }
                         }
                     }
@@ -163,14 +176,16 @@ impl Peripheral for I2c {
                     if is_read {
                         self.sr1 |= 1 << 6; // RXNE
                         self.sr2 &= !(1 << 2); // TRA=0 (receiver)
-                        if self.cr2 & (1 << 11) != 0 && self.dma_channel_rx != 0 {
-                            sys.p.dma_request(sys, self.dma_channel_rx as u32);
+                        if self.cr2 & (1 << 11) != 0 {
+                            let ch = self.resolve_dma_channel(sys, false);
+                            if ch != 0 { sys.p.dma_request(sys, ch as u32); }
                         }
                     } else {
                         self.sr1 |= 1 << 7; // TXE
                         self.sr2 |= 1 << 2; // TRA=1 (transmitter)
-                        if self.cr2 & (1 << 11) != 0 && self.dma_channel_tx != 0 {
-                            sys.p.dma_request(sys, self.dma_channel_tx as u32);
+                        if self.cr2 & (1 << 11) != 0 {
+                            let ch = self.resolve_dma_channel(sys, true);
+                            if ch != 0 { sys.p.dma_request(sys, ch as u32); }
                         }
                     }
                     self.fire_interrupts(sys);
@@ -237,7 +252,7 @@ impl Peripheral for I2c {
             }
             0x04 => {
                 let prev_buf = self.cr2 & (1 << 10);
-                self.cr2 = value & 0x07FF;
+                self.cr2 = value & 0x1FFF;
                 if prev_buf != 0 && value & (1 << 10) == 0 {
                     if matches!(self.state, I2cState::Active { .. }) {
                         self.sr1 |= 1 << 2; // BTF
@@ -291,8 +306,9 @@ impl Peripheral for I2c {
                             self.stretch_until = crate::system::instruction_count() + 200;
                         }
                         self.sr1 |= 1 << 7; // TXE
-                        if self.cr2 & (1 << 11) != 0 && self.dma_channel_tx != 0 {
-                            sys.p.dma_request(sys, self.dma_channel_tx as u32);
+                        if self.cr2 & (1 << 11) != 0 {
+                            let ch = self.resolve_dma_channel(sys, true);
+                            if ch != 0 { sys.p.dma_request(sys, ch as u32); }
                         }
                         self.fire_interrupts(sys);
                     }

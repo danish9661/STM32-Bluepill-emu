@@ -138,3 +138,5 @@ jobs:
         run: node tests/test_dma_requests.mjs
       - name: DMA signal generation + TIM slave mode + I2C clock stretching
         run: node tests/test_dma_signals.mjs
+      - name: TIM edge-triggered slave mode, DMA2, I2C CR2 DMAEN
+        run: node tests/test_slave_pwm_dma2.mjs

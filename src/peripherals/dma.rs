@@ -1,32 +1,63 @@
 use crate::system::{System, DmaTransfer, DmaDir, set_dma_intr_info};
 use super::Peripheral;
 
-#[derive(Default)]
 pub struct Dma {
     name: String,
     isr: u32,
     ifcr: u32,
-    channels: [Channel; 7],
+    channels: Vec<Channel>,
+    num_channels: usize,
     /// DMA channel numbers that have pending requests from peripherals.
     /// Processed in tick(); keeps peripheral dma_request() free of borrow issues.
     pending_requests: Vec<u32>,
 }
 
+impl Default for Dma {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            isr: 0, ifcr: 0,
+            channels: Vec::new(),
+            num_channels: 7,
+            pending_requests: Vec::new(),
+        }
+    }
+}
+
 impl Dma {
     pub fn new(name: &str) -> Option<Box<dyn Peripheral>> {
-        if name.starts_with("DMA") {
-            Some(Box::new(Self { name: name.to_string(), pending_requests: Vec::new(), ..Self::default() }))
+        if name == "DMA1" {
+            Some(Box::new(Self {
+                name: name.to_string(),
+                channels: vec![Channel::default(); 7],
+                num_channels: 7,
+                pending_requests: Vec::new(),
+                ..Default::default()
+            }))
+        } else if name == "DMA2" {
+            Some(Box::new(Self {
+                name: name.to_string(),
+                channels: vec![Channel::default(); 5],
+                num_channels: 5,
+                pending_requests: Vec::new(),
+                ..Default::default()
+            }))
         } else {
             None
         }
     }
 
     fn channel_irq(&self, ch: usize) -> i32 {
-        11 + ch as i32
+        // DMA1: IRQ 11-17 (channels 1-7). DMA2: IRQ 56-60 (channels 1-5).
+        if self.name == "DMA2" {
+            56 + ch as i32
+        } else {
+            11 + ch as i32
+        }
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Channel {
     cr: u32,
     ndtr: u32,
@@ -46,13 +77,10 @@ impl Channel {
         let m2m = self.cr & (1 << 14) != 0;
         let dir = self.dir();
         let (src, dst, direction, peripheral) = if m2m {
-            // RM0008: M2M always transfers CPAR -> CMAR (DIR ignored).
             (self.par, self.mar, DmaDir::MemCopy, false)
         } else if dir == 1 {
-            // DIR=1: read from memory (CMAR), write to peripheral (CPAR).
             (self.mar, self.par, DmaDir::Write, true)
         } else {
-            // DIR=0: read from peripheral (CPAR), write to memory (CMAR).
             (self.par, self.mar, DmaDir::Read, true)
         };
         let size = self.data_size();
@@ -68,36 +96,28 @@ impl Channel {
 }
 
 impl Peripheral for Dma {
-    /// Peripheral request (ADC end-of-conversion, DAC trigger, SPI TXE/RXNE, etc.):
-    /// queue the request for processing in tick() — avoids borrow conflicts since
-    /// the calling peripheral holds a &mut borrow on Peripherals.
     fn dma_request(&mut self, _sys: &System, channel: u32) {
-        if (channel as usize) < 7 && !self.pending_requests.contains(&channel) {
+        if (channel as usize) < self.num_channels && !self.pending_requests.contains(&channel) {
             self.pending_requests.push(channel);
         }
     }
 
     fn tick(&mut self, sys: &System) {
-        // Process peripheral-initiated DMA requests (DAC trigger, SPI TXE/RXNE, etc.)
+        let nc = self.num_channels;
         let pending: Vec<u32> = self.pending_requests.drain(..).collect();
         for &ch in &pending {
             let ch_idx = ch as usize;
-            if ch_idx < 7 && self.channels[ch_idx].cr & 1 != 0 && self.channels[ch_idx].ndtr > 0 {
+            if ch_idx < nc && self.channels[ch_idx].cr & 1 != 0 && self.channels[ch_idx].ndtr > 0 {
                 self.channels[ch_idx].do_xfer(&self.name, sys, ch_idx);
             }
         }
 
         let bits = sys.dma_take_completions();
         if bits != 0 {
-            for ch in 0..7 {
+            for ch in 0..nc {
                 if bits & (1 << ch) != 0 {
-                    // Real HW layout: channel N flags sit at bits (N-1)*4..(N-1)*4+3,
-                    // GIF=(N-1)*4, TCIF=(N-1)*4+1. For 0-based ch: TCIF = ch*4+1.
-                    // (Was: bit (ch+1)*4 — off by one channel, silently wrong; the
-                    // periph39 DMA tests only passed because both transfers completed
-                    // into one shared ISR read.)
                     self.isr |= 1 << (ch * 4 + 1); // TCIF
-                    self.channels[ch].cr &= !1;    // clear EN
+                    self.channels[ch].cr &= !1;
                     self.channels[ch].ndtr = 0;
                 }
             }
@@ -109,10 +129,11 @@ impl Peripheral for Dma {
             0x00 => self.isr,
             0x04 => self.ifcr,
             _ => {
-                if offset >= 0x08 && offset < 0x98 {
+                let nc = self.num_channels;
+                if offset >= 0x08 && offset < 0x08 + (nc as u32) * 0x14 {
                     let ch = ((offset - 0x08) / 0x14) as usize;
                     let reg = (offset - 0x08) % 0x14;
-                    if ch < 7 {
+                    if ch < nc {
                         return match reg {
                             0x00 => self.channels[ch].cr,
                             0x04 => self.channels[ch].ndtr,
@@ -128,10 +149,11 @@ impl Peripheral for Dma {
     }
 
     fn write(&mut self, sys: &System, offset: u32, value: u32) {
+        let nc = self.num_channels;
         match offset {
             0x00 => {}
             0x04 => {
-                for ch in 0..7 {
+                for ch in 0..nc {
                     let mask = value >> (ch * 4);
                     if mask & 0x0F != 0 {
                         self.isr &= !(mask << (ch * 4));
@@ -139,10 +161,10 @@ impl Peripheral for Dma {
                 }
             }
             _ => {
-                if offset >= 0x08 && offset < 0x98 {
+                if offset >= 0x08 && offset < 0x08 + (nc as u32) * 0x14 {
                     let ch = ((offset - 0x08) / 0x14) as usize;
                     let reg = (offset - 0x08) % 0x14;
-                    if ch < 7 {
+                    if ch < nc {
                         match reg {
                             0x00 => {
                                 self.channels[ch].cr = value & 0x7FFF;

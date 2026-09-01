@@ -118,8 +118,14 @@ pub struct Adc {
 impl Adc {
     pub fn new(name: &str) -> Option<Box<dyn Peripheral>> {
         if name.starts_with("ADC") {
-            // ADC1 -> DMA1 ch1, ADC2 -> DMA1 ch2 (F103 request mapping)
-            let ch = if name == "ADC2" { 2 } else { 1 };
+            // DMA channels: 1-7 = DMA1, 8-12 = DMA2 (offset by 8)
+            // ADC1 -> DMA1 ch1, ADC2 -> DMA1 ch2, ADC3 -> DMA2 ch5=13
+            let ch = match name {
+                "ADC1" => 1,
+                "ADC2" => 2,
+                "ADC3" => 13, // DMA2 ch5
+                _ => 1,
+            };
             Some(Box::new(Adc { dma_channel: ch, ..Self::default() }))
         } else {
             None
