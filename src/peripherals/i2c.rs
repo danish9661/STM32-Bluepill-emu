@@ -302,8 +302,6 @@ impl Peripheral for I2c {
                             let mut d = self.devices[idx].device.borrow_mut();
                             d.write(sys, (), value as u8);
                             sys.push_event(crate::system::VmEvent::I2cWrite { channel: self.i2c_channel(), byte: value as u8 });
-                            // Clock stretching: slave holds SCL low during write cycle
-                            self.stretch_until = crate::system::instruction_count() + 200;
                         }
                         self.sr1 |= 1 << 7; // TXE
                         if self.cr2 & (1 << 11) != 0 {
