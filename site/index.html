@@ -30,95 +30,194 @@
 <title>STM32 Bluepill Emulator — Live Demo | Run Arduino Firmware in Browser</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
-header { background: #1e293b; border-bottom: 1px solid #334155; padding: 14px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-header h1 { font-size: 17px; color: #38bdf8; font-weight: 600; letter-spacing: 0.3px; }
-header .sub { font-size: 12px; color: #94a3b8; }
+body { font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; line-height: 1.5; }
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+header {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+  border-bottom: 1px solid #1e3a5f;
+  padding: 12px 24px;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  position: sticky; top: 0; z-index: 100;
+  backdrop-filter: blur(10px);
+}
+header h1 {
+  font-size: 17px; color: #38bdf8; font-weight: 700; letter-spacing: 0.3px;
+  background: linear-gradient(90deg, #38bdf8, #818cf8);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+header .sub { font-size: 12px; color: #64748b; font-weight: 400; }
 header .spacer { flex: 1; }
-header a.nav { font-size: 12px; color: #7dd3fc; text-decoration: none; border: 1px solid #0ea5e9; padding: 3px 10px; border-radius: 999px; }
-header a.nav:hover { background: #1d4ed8; color: #fff; }
-.badge { font-size: 11px; background: #0ea5e9; color: #082f49; padding: 3px 10px; border-radius: 999px; font-weight: 600; }
-.badge.off { background: #475569; color: #cbd5e1; }
-.wrap { display: grid; grid-template-columns: 380px 1fr; gap: 20px; padding: 20px 24px 0; max-width: 1400px; margin: 0 auto; }
+header a.nav {
+  font-size: 11.5px; color: #94a3b8; text-decoration: none;
+  border: 1px solid #334155; padding: 4px 12px; border-radius: 999px;
+  transition: all 0.15s ease;
+}
+header a.nav:hover { background: #1e40af; color: #fff; border-color: #3b82f6; }
+
+/* ── Badge ───────────────────────────────────────────────────────────────── */
+.badge {
+  font-size: 11px; background: #0ea5e9; color: #082f49;
+  padding: 3px 12px; border-radius: 999px; font-weight: 700;
+  letter-spacing: 0.3px; transition: all 0.2s ease;
+}
+.badge.off { background: #334155; color: #94a3b8; }
+.badge.running { background: #22c55e; color: #052e16; animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+
+/* ── Layout ──────────────────────────────────────────────────────────────── */
+.wrap {
+  display: grid; grid-template-columns: 380px 1fr;
+  gap: 18px; padding: 18px 24px 0; max-width: 1400px; margin: 0 auto;
+}
 @media (max-width: 960px) { .wrap { grid-template-columns: 1fr; } }
-.fullrow { max-width: 1400px; margin: 0 auto; padding: 0 24px; margin-top: 16px; }
-.term-section { margin-top: 14px; }
+.fullrow { max-width: 1400px; margin: 0 auto; padding: 0 24px; margin-top: 14px; }
+.term-section { margin-top: 12px; }
 .term-section h2 { margin-bottom: 8px; }
-.hint { font-size: 11.5px; color: #94a3b8; margin: 0 0 12px; line-height: 1.5; }
-.hint code { background: #0f172a; border: 1px solid #334155; border-radius: 4px; padding: 1px 5px; color: #7dd3fc; font-family: Consolas, monospace; }
-.gpio-placeholder { color: #64748b; font-size: 13px; padding: 8px 0; font-style: italic; }
-footer { text-align: center; font-size: 11.5px; color: #64748b; padding: 18px 24px 28px; border-top: 1px solid #334155; margin-top: 24px; }
-footer a { color: #7dd3fc; text-decoration: none; }
-footer a:hover { text-decoration: underline; }
-.card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 16px; }
-.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #7dd3fc; margin-bottom: 12px; }
+.hint { font-size: 11.5px; color: #64748b; margin: 0 0 12px; line-height: 1.6; }
+.hint code {
+  background: #0f172a; border: 1px solid #1e293b; border-radius: 4px;
+  padding: 1px 5px; color: #7dd3fc; font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+}
+.gpio-placeholder { color: #475569; font-size: 13px; padding: 8px 0; font-style: italic; }
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+footer {
+  text-align: center; font-size: 11.5px; color: #475569;
+  padding: 18px 24px 28px; border-top: 1px solid #1e293b; margin-top: 28px;
+}
+footer a { color: #64748b; text-decoration: none; transition: color 0.15s; }
+footer a:hover { color: #7dd3fc; text-decoration: underline; }
+
+/* ── Cards ───────────────────────────────────────────────────────────────── */
+.card {
+  background: linear-gradient(145deg, #1e293b, #172033);
+  border: 1px solid #2d3f56; border-radius: 12px; padding: 18px;
+  transition: border-color 0.2s ease;
+}
+.card:hover { border-color: #334155; }
+.card h2 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px;
+  color: #64748b; margin-bottom: 14px; font-weight: 600;
+}
+
+/* ── Toolbar & Buttons ──────────────────────────────────────────────────── */
 .toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
-button { background: #0f172a; color: #38bdf8; border: 1px solid #0ea5e9; padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
-button:hover:not(:disabled) { background: #1d4ed8; color: #fff; }
-button:disabled { opacity: 0.35; cursor: not-allowed; }
-button.primary { background: #0ea5e9; color: #082f49; }
-button.danger { border-color: #ef4444; color: #f87171; }
-button.danger:hover:not(:disabled) { background: #dc2626; color: #fff; }
-label.file-btn { background: #0f172a; color: #38bdf8; border: 1px dashed #0ea5e9; padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; display: inline-block; }
-label.file-btn:hover { background: #1d4ed8; color: #fff; }
+button {
+  background: #0f172a; color: #94a3b8; border: 1px solid #334155;
+  padding: 6px 13px; border-radius: 6px; cursor: pointer;
+  font-size: 12px; font-weight: 600; transition: all 0.15s ease;
+}
+button:hover:not(:disabled) { background: #1e40af; color: #fff; border-color: #3b82f6; }
+button:disabled { opacity: 0.3; cursor: not-allowed; }
+button.primary { background: #0ea5e9; color: #082f49; border-color: #0ea5e9; }
+button.primary:hover:not(:disabled) { background: #38bdf8; color: #082f49; box-shadow: 0 0 12px rgba(14,165,233,0.3); }
+button.danger { border-color: #7f1d1d; color: #fca5a5; }
+button.danger:hover:not(:disabled) { background: #991b1b; color: #fff; border-color: #ef4444; }
+label.file-btn {
+  background: #0f172a; color: #94a3b8; border: 1px dashed #334155;
+  padding: 6px 13px; border-radius: 6px; cursor: pointer;
+  font-size: 12px; font-weight: 600; display: inline-block; transition: all 0.15s ease;
+}
+label.file-btn:hover { background: #1e40af; color: #fff; border-color: #3b82f6; border-style: solid; }
 input[type="file"] { display: none; }
-select { background: #0f172a; color: #38bdf8; border: 1px solid #0ea5e9; padding: 7px 10px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
-select:hover { background: #1e293b; }
-select:focus { outline: none; border-color: #7dd3fc; }
-.stats { display: flex; gap: 18px; margin-bottom: 12px; font-size: 12px; color: #94a3b8; overflow-x: auto; }
+select {
+  background: #0f172a; color: #94a3b8; border: 1px solid #334155;
+  padding: 6px 10px; border-radius: 6px; font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: all 0.15s ease;
+}
+select:hover { background: #1e293b; border-color: #475569; }
+select:focus { outline: none; border-color: #0ea5e9; }
+
+/* ── Stats ───────────────────────────────────────────────────────────────── */
+.stats {
+  display: flex; gap: 16px; margin-bottom: 12px; font-size: 11.5px;
+  color: #64748b; overflow-x: auto;
+}
 .stats > span { white-space: nowrap; }
-.stats b { color: #38bdf8; font-size: 14px; font-family: 'Cascadia Mono', Consolas, monospace; }
+.stats b {
+  color: #38bdf8; font-size: 13px;
+  font-family: 'Cascadia Mono', 'JetBrains Mono', Consolas, monospace;
+}
 .stats .stat-pc { flex: 0 0 280px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.terminal { background: #020617; border: 1px solid #334155; border-radius: 8px; height: 240px; overflow-y: auto; padding: 10px 12px; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12.5px; line-height: 1.55; }
+
+/* ── Terminal ────────────────────────────────────────────────────────────── */
+.terminal {
+  background: #020617; border: 1px solid #1e293b; border-radius: 8px;
+  height: 240px; overflow-y: auto; padding: 10px 12px;
+  font-family: 'Cascadia Mono', 'JetBrains Mono', Consolas, monospace;
+  font-size: 12px; line-height: 1.6;
+  scrollbar-width: thin; scrollbar-color: #334155 #020617;
+}
+.terminal::-webkit-scrollbar { width: 6px; }
+.terminal::-webkit-scrollbar-track { background: #020617; }
+.terminal::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
 .terminal .t-in { color: #a5b4fc; }
 .terminal .t-out { color: #4ade80; }
 .terminal .t-err { color: #f87171; }
-.terminal .t-ok { color: #4ade80; font-weight: bold; }
+.terminal .t-ok { color: #4ade80; font-weight: 700; }
 .tx-row { display: flex; gap: 8px; margin-top: 10px; }
-.tx-row input { flex: 1; background: #0f172a; border: 1px solid #334155; color: #e2e8f0; border-radius: 6px; padding: 7px 10px; font-family: Consolas, monospace; font-size: 13px; }
+.tx-row input {
+  flex: 1; background: #0f172a; border: 1px solid #1e293b;
+  color: #e2e8f0; border-radius: 6px; padding: 7px 10px;
+  font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12px;
+  transition: border-color 0.15s;
+}
 .tx-row input:focus { outline: none; border-color: #0ea5e9; }
-/* Board */
+
+/* ── Board ───────────────────────────────────────────────────────────────── */
 .board-wrap { display: flex; justify-content: center; padding: 8px 0; }
-.board { filter: drop-shadow(0 6px 18px rgba(0,0,0,0.5)); }
-.board text { font-family: Consolas, monospace; }
-.led-label { font-size: 10px; fill: #94a3b8; }
-.gpio-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; font-size: 10.5px; font-family: Consolas, monospace; }
-.gpio-port { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 6px; }
-.gpio-port h3 { font-size: 10px; color: #7dd3fc; margin-bottom: 4px; letter-spacing: 1px; }
-.gpio-pin { display: flex; justify-content: space-between; padding: 1.5px 4px; border-radius: 3px; color: #94a3b8; }
-.gpio-pin.high { background: rgba(34,197,94,0.18); color: #4ade80; }
-.gpio-pin.low { color: #64748b; }
+.board { filter: drop-shadow(0 4px 12px rgba(0,0,0,0.4)); }
+.board text { font-family: 'Cascadia Mono', Consolas, monospace; }
+.led-label { font-size: 10px; fill: #64748b; }
+
+/* ── GPIO Grid ───────────────────────────────────────────────────────────── */
+.gpio-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; font-size: 10.5px; font-family: 'Cascadia Mono', Consolas, monospace; }
+.gpio-port { background: #0f172a; border: 1px solid #1e293b; border-radius: 6px; padding: 6px; }
+.gpio-port h3 { font-size: 10px; color: #475569; margin-bottom: 4px; letter-spacing: 1px; font-weight: 700; }
+.gpio-pin { display: flex; justify-content: space-between; padding: 1.5px 4px; border-radius: 3px; color: #475569; transition: all 0.15s; }
+.gpio-pin.high { background: rgba(34,197,94,0.15); color: #4ade80; }
+.gpio-pin.low { color: #475569; }
 .gpio-pin.in { color: #fbbf24; }
-.gpio-pin.pwm { color: #052e16; font-weight: bold; }
+.gpio-pin.pwm { color: #166534; font-weight: bold; }
 .gpio-pin b { font-weight: 600; }
-.legend { font-size: 10.5px; color: #94a3b8; margin-top: 10px; display: flex; gap: 14px; flex-wrap: wrap; }
+.legend { font-size: 10.5px; color: #64748b; margin-top: 10px; display: flex; gap: 14px; flex-wrap: wrap; }
 .legend span { display: inline-flex; align-items: center; gap: 5px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.dot.hi { background: #4ade80; } .dot.lo { background: #64748b; } .dot.in { background: #fbbf24; }
-/* Showcase peripherals */
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.dot.hi { background: #4ade80; box-shadow: 0 0 4px rgba(74,222,128,0.5); }
+.dot.lo { background: #475569; }
+.dot.in { background: #fbbf24; }
+
+/* ── Showcase peripherals ────────────────────────────────────────────────── */
 .periph-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.periph-dev { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 8px; }
-.periph-dev h4 { font-size: 10px; color: #7dd3fc; letter-spacing: 1px; margin-bottom: 6px; text-transform: uppercase; }
+.periph-dev { background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 10px; }
+.periph-dev h4 { font-size: 10px; color: #475569; letter-spacing: 1px; margin-bottom: 6px; text-transform: uppercase; font-weight: 700; }
 .periph-dev canvas { display: block; background: #000; image-rendering: pixelated; width: 100%; border-radius: 4px; }
 .displays { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 #seg-svg { width: 100%; }
 #seg-svg .seg { fill: #1e293b; stroke: #334155; stroke-width: 1.5; }
-#seg-svg .seg.on { fill: #ef4444; stroke: #dc2626; }
-#rgb-bar { height: 14px; border-radius: 4px; border: 1px solid #334155; transition: background 150ms; }
-.ws-strip { display: flex; gap: 6px; margin: 8px 0; align-items: center; }
-.ws-led { width: 22px; height: 22px; border-radius: 50%; background: #1e293b; border: 1px solid #334155; transition: background 80ms; }
-.ws-count { font-size: 12px; color: #94a3b8; }
-#buzz-ind { display: inline-block; width: 34px; height: 34px; border-radius: 50%; border: 2px solid #334155; color: #94a3b8; text-align: center; line-height: 32px; font-size: 16px; transition: all 120ms; }
-#buzz-ind.on { border-color: #f59e0b; color: #f59e0b; box-shadow: 0 0 14px rgba(245,158,11,0.7); }
-#btn-widget { width: 100%; padding: 9px; font-size: 13px; }
-#btn-widget:active { background: #d97706; }
+#seg-svg .seg.on { fill: #ef4444; stroke: #dc2626; filter: drop-shadow(0 0 3px rgba(239,68,68,0.6)); }
+#rgb-bar { height: 14px; border-radius: 4px; border: 1px solid #1e293b; transition: background 120ms ease; }
+.ws-strip { display: flex; gap: 8px; margin: 8px 0; align-items: center; }
+.ws-led { width: 24px; height: 24px; border-radius: 50%; background: #1e293b; border: 1px solid #334155; transition: background 60ms ease, box-shadow 100ms ease; }
+.ws-count { font-size: 12px; color: #64748b; }
+#buzz-ind {
+  display: inline-block; width: 36px; height: 36px; border-radius: 50%;
+  border: 2px solid #1e293b; color: #64748b; text-align: center;
+  line-height: 32px; font-size: 16px; transition: all 0.12s ease;
+}
+#buzz-ind.on { border-color: #f59e0b; color: #f59e0b; box-shadow: 0 0 16px rgba(245,158,11,0.6); }
+#btn-widget { width: 100%; padding: 9px; font-size: 13px; font-weight: 600; }
+#btn-widget:active { background: #92400e; }
 </style>
 </head>
 <body>
 <script src="unicorn_arm.js"></script>
 <header>
-    <h1>STM32 Bluepill Emulator</h1>
-    <span class="sub">STM32F103C8 · full-system WASM emulation in your browser</span>
+    <h1>&#x25C8; STM32 Bluepill Emulator</h1>
+    <span class="sub">STM32F103C8 &middot; full-system WASM emulation in your browser</span>
     <span class="spacer"></span>
     <a class="nav" href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">GitHub</a>
     <a class="nav" href="about.html">About</a>
@@ -281,6 +380,7 @@ function log(msg, cls = 't-out') {
 function setState(state) {
     stateBadge.textContent = state;
     stateBadge.classList.toggle('off', state === 'Idle' || state === 'Stopped');
+    stateBadge.classList.toggle('running', state === 'Running');
 }
 
 function boardSvg(ledOn) {
@@ -903,8 +1003,8 @@ renderBoard(false);
 log('Pick a preset firmware, or load a .bin/.hex/.elf firmware and a .map for symbol names. Upload .map after the firmware for PC → symbol resolution.');
 </script>
 <footer>
-    STM32 Bluepill Emulator · full-system emulation via WebAssembly + Unicorn ARM Cortex-M3 ·
-    <a href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">Source</a> ·
+    STM32 Bluepill Emulator &middot; full-system emulation via WebAssembly + Unicorn ARM Cortex-M3 &middot;
+    <a href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">Source</a> &middot;
     <a href="about.html">About</a>
 </footer>
 </body>

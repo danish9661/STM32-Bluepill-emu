@@ -61,6 +61,21 @@ Instance methods: `execute(cycles) -> {instCount, stopped}`, `step(cycles)`,
 - `pin.on('change', cb)` → unsubscribe fn; fires on **chip-driven output** level changes (same source as `onPinChange`).
 - `pin.read()` → driven output level `0`/`1`; `pin.readInput()` → input level; `pin.setInput(high)` drives an external input; `pin.setAnalog(0..4095)`.
 
+```js
+// Subscribe to PC13 output changes (LED blink)
+const unsub = mcu.gpio.pin('C', 13).on('change', (high) => {
+  console.log('LED:', high ? 'ON' : 'OFF');
+});
+
+// Simulate a button press on PB13 (EXTI13)
+mcu.gpio.pin('B', 13).setInput(true);   // press
+mcu.gpio.pin('B', 13).setInput(false);  // release
+
+// Read current state
+const pa5Level = mcu.gpio.pin('A', 5).read();        // output level
+const pa0Input = mcu.gpio.pin('A', 0).readInput();   // input level
+```
+
 ## USART
 
 - `mcu.usart1` / `usart2` / `usart3` (also `mcu.usart[1..3]`).
@@ -68,6 +83,19 @@ Instance methods: `execute(cycles) -> {instCount, stopped}`, `step(cycles)`,
 - `usart.send(data)` injects bytes into that USART's **RX** (host → MCU).
 - `usart.output` is the accumulated TX string for that USART (the core's
   `getUartOutput()` is USART1-only; this per-USART buffer is the ergonomic fix).
+
+```js
+// Echo every byte the MCU sends on USART1
+mcu.usart1.onData = (b) => {
+  process.stdout.write(String.fromCharCode(b));
+};
+
+// Send a command to USART2 (e.g. AT firmware)
+mcu.usart2.send('AT+RST\r\n');
+
+// Read all USART1 output accumulated so far
+console.log(mcu.usart1.output);
+```
 
 ## Virtual-peripheral events (Wokwi-style)
 
@@ -80,6 +108,7 @@ transactions and injects bytes back.
 ### SPI — `mcu.spi1` … `mcu.spi6` (also `mcu.spi[1..6]`)
 
 ```js
+// Observe SPI1 transfers (fires on every DR write)
 mcu.spi1.onTransfer = (channel, tx, rx) => {
   // tx / rx are number[] of the bytes written / read on this DR access
   console.log('SPI', channel, 'tx', tx, 'rx', rx);
@@ -92,6 +121,7 @@ mcu.spi1.injectMiso([0xAA, 0xBB]);
 ### I2C — `mcu.i2c1` … `mcu.i2c3` (also `mcu.i2c[1..3]`)
 
 ```js
+// Observe I2C1 transaction edges
 mcu.i2c1.onStart = (addr) => console.log('START', addr);  // 7-bit address
 mcu.i2c1.onWrite = (byte) => console.log('WRITE', byte);
 mcu.i2c1.onRead  = () => console.log('READ');
@@ -177,21 +207,171 @@ mcu.onFsmcAccess = (bank, offset, write, size, value) => ...; // FSMC memory tra
 These are encoded as flat `drain_events()` discriminants 16 (`TimCapture`) and
 17 (`FsmcAccess`).
 
-## Implementation notes
+## Complete worked examples
 
-- The event queue lives on `WasmSystem` (`src/system.rs`, `VmEvent` enum). The
-  core pushes `SpiTransfer` (in `spi.rs` DR write), `I2cStart/Write/Read/Stop`
-  (in `i2c.rs`), and `UartTx` (in `usart.rs` `write_dr`). `drain_events()`
-  (`src/lib.rs`) flattens them to an `i32[]` consumed by `STM32F1._drain_events()`.
-- Injection buffers (`spi_inject_miso`, `i2c_inject_rx`) are consumed in the
-  peripheral read paths, overriding the attached device for that byte.
-- `emulator.js` exposes `drainEvents()`, `spiInjectMiso(ch, bytes)`,
-  `i2cInjectRx(ch, bytes)`, `uartRxAddr(addr, byte)`; the wrapper builds on these.
-- Rebuild after Rust changes with the pinned toolchain and re-sync `pkg/` →
-  `site/` (CI byte-exact guard):
-  `PATH=binaryen-version_132/bin:$PATH RUSTFLAGS="--remap-path-prefix=$HOME=/build" wasm-pack build --target web`
+### Virtual I2C EEPROM (write-back store)
 
-## WebSocket bridge (headless Node + browser viewer)
+Build a virtual I2C EEPROM from scratch — the MCU firmware writes bytes and
+reads them back, all driven by the event queue:
+
+```js
+import { STM32F1 } from './stm32f1.js';
+import { readFileSync } from 'fs';
+
+const mcu = await STM32F1.fromELF(readFileSync('./firmware.elf'));
+const store = new Uint8Array(256); // 256-byte EEPROM image
+
+let addrBytes = 0, memAddr = 0;
+
+mcu.i2c1.onStart = (addr) => {
+  addrBytes = 0;
+  console.log(`I2C START → 0x${addr.toString(16)}`);
+};
+mcu.i2c1.onWrite = (byte) => {
+  if (addrBytes < 2) {
+    memAddr = (memAddr << 8) | byte;  // 2-byte address
+    addrBytes++;
+  } else {
+    store[memAddr++] = byte;          // data byte → write to store
+    console.log(`EEPROM write [0x${(memAddr - 1).toString(16)}] = 0x${byte.toString(16)}`);
+  }
+};
+mcu.i2c1.onRead = () => {
+  const val = store[memAddr++];
+  mcu.i2c1.injectRx([val]);           // push next byte for MCU to read
+  console.log(`EEPROM read [0x${(memAddr - 1).toString(16)}] = 0x${val.toString(16)}`);
+};
+mcu.i2c1.onStop = () => console.log('I2C STOP');
+
+await mcu.execute(2_000_000);
+```
+
+### Virtual SPI SD card
+
+Intercept SPI transactions to implement a minimal SD card protocol:
+
+```js
+const mcu = await STM32F1.fromELF(readFileSync('./firmware.elf'));
+let csHigh = true;
+let cmdBuf = [];
+
+mcu.gpio.pin('A', 4).on('change', (high) => {
+  csHigh = high;
+  if (high) { cmdBuf = []; }  // CS deasserted → reset command buffer
+});
+
+mcu.spi1.onTransfer = (ch, tx, rx) => {
+  if (csHigh) return;  // chip not selected
+  for (const b of tx) {
+    cmdBuf.push(b);
+    if (cmdBuf.length >= 6) {
+      const cmd = cmdBuf[1] & 0x3F;
+      console.log(`SD CMD${cmd} args=${cmdBuf.slice(2, 6).map(x => x.toString(16).padStart(2, '0')).join('')}`);
+      // Respond with R1 (0x00 = idle, 0x01 = not idle)
+      mcu.spi1.injectRx([cmd === 0 ? 0x01 : 0x00]);
+      cmdBuf = [];
+    }
+  }
+};
+
+await mcu.execute(5_000_000);
+```
+
+### Timer input capture (frequency counter)
+
+Measure an external signal frequency using TIM2 input capture:
+
+```js
+const mcu = await STM32F1.fromELF(readFileSync('./firmware.elf'));
+const periods = [];
+
+mcu.onTimCapture = (tim, ch, value) => {
+  if (tim === 2 && ch === 0) {
+    periods.push(value);
+    if (periods.length >= 2) {
+      const delta = periods[periods.length - 1] - periods[periods.length - 2];
+      const freq = 72_000_000 / delta;  // assuming 72 MHz timer clock
+      console.log(`TIM2 CH1 capture: CNT=${value}, period=${delta} ticks, freq=${freq.toFixed(0)} Hz`);
+    }
+  }
+};
+
+// Simulate a 1 kHz square wave on PA0 (TIM2_CH1)
+let t = 0;
+const simulate = () => {
+  mcu.gpio.pin('A', 0).setInput(true);
+  setTimeout(() => mcu.gpio.pin('A', 0).setInput(false), 500);
+  t += 1000;
+  if (t < 10_000) setTimeout(simulate, 1000);  // 10 cycles
+};
+simulate();
+await mcu.execute(1_000_000);
+```
+
+### CAN bus bridge (forward CAN1 → CAN2)
+
+Monitor CAN1 traffic and re-inject it on CAN2:
+
+```js
+const mcu = await STM32F1.fromELF(readFileSync('./can_bridge.elf'));
+
+mcu.onCanRx = (can, id, len, data) => {
+  console.log(`CAN${can} RX: id=0x${id.toString(16)} len=${len} data=`,
+    data.slice(0, len).map(b => b.toString(16).padStart(2, '0')).join(' '));
+};
+
+mcu.onCanTx = (can, id, len, data) => {
+  console.log(`CAN${can} TX: id=0x${id.toString(16)} len=${len}`);
+};
+
+await mcu.execute(10_000_000);
+```
+
+### ADC + DAC loopback
+
+Read ADC1 channel 0 (PA0) and output on DAC1 (PA4), monitoring both:
+
+```js
+const mcu = await STM32F1.fromELF(readFileSync('./adc_dac.elf'));
+
+mcu.onAdcDone = (adc, ch) => {
+  console.log(`ADC${adc} ch${ch} conversion complete`);
+};
+
+mcu.onDacWrite = (chan, value) => {
+  console.log(`DAC${chan} output: ${value} (${(value * 3.3 / 4095).toFixed(2)}V)`);
+};
+
+// Drive PA0 with an analog value (simulates a sensor)
+mcu.gpio.pin('A', 0).setAnalog(2048);  // ~1.65V (half VDDA)
+
+await mcu.execute(1_000_000);
+```
+
+### FSMC-backed LCD display
+
+Drive an FSMC-connected LCD and observe the frame buffer:
+
+```js
+const mcu = await STM32F1.fromELF(readFileSync('./lcd_demo.elf'), {
+  ext_devices: {
+    fsmc_bank: [{ name: 'FSMC.BANK1', size: 256 * 1024 }],
+  },
+});
+
+mcu.onFsmcAccess = (bank, offset, write, size, value) => {
+  if (bank === 1) {
+    const rs = (offset >> 16) & 1;  // A16 = RS pin
+    if (write) {
+      console.log(`LCD ${rs ? 'DATA' : 'CMD'}: 0x${value.toString(16).padStart(2, '0')}`);
+    }
+  }
+};
+
+await mcu.execute(2_000_000);
+```
+
+### WebSocket bridge (headless Node + browser viewer)
 
 `pkg/ws-server.mjs` runs the emulator headlessly and streams all 17 event
 types to connected browser clients over WebSocket. `site/ws-viewer.html`
@@ -211,3 +391,49 @@ instructions.
 
 Full protocol reference, event-type field layout, and custom-client examples:
 **[docs/WEBSOCKET_BRIDGE.md](WEBSOCKET_BRIDGE.md)**
+
+## Event-type reference table
+
+| Disc | Event | Fields | Source |
+|------|-------|--------|--------|
+| 1 | `SpiTransfer` | `[channel, txLen, rxLen, tx..., rx...]` | `spi.rs` DR write |
+| 2 | `I2cStart` | `[channel, addr]` | `i2c.rs` DR write (StartSent) |
+| 3 | `I2cWrite` | `[channel, byte]` | `i2c.rs` DR write (Active TX) |
+| 4 | `I2cRead` | `[channel]` | `i2c.rs` DR read (Active RX) |
+| 5 | `I2cStop` | `[channel]` | `i2c.rs` CR1 STOP generation |
+| 6 | `UartTx` | `[usart, byte]` | `usart.rs` DR write |
+| 7 | `ExtiEdge` | `[line]` | `exti.rs` `gpio_pin_changed` |
+| 8 | `AdcDone` | `[adc, chan]` | `adc.rs` EOC/JEOC |
+| 9 | `TimUpdate` | `[tim]` | `tim.rs` UIF / overflow |
+| 10 | `DacWrite` | `[chan, value]` | `dac.rs` DHR write |
+| 11 | `CrcResult` | `[value]` | `crc.rs` DR read |
+| 12 | `RtcAlarm` | `[alarm]` | `rtc.rs` alarm crossed |
+| 13 | `WdogReset` | `[which]` | `iwdg.rs` / `wwdg.rs` reset request |
+| 14 | `CanTx` | `[can, id, len, d0..d7]` | `can.rs` mailbox submit |
+| 15 | `CanRx` | `[can, id, len, d0..d7]` | `can.rs` inject_message |
+| 16 | `TimCapture` | `[tim, ch, value]` | `tim.rs` `sample_input_capture` |
+| 17 | `FsmcAccess` | `[bank, offset, write, size, value]` | `fsmc.rs` read_sized/write_sized |
+
+## Implementation notes
+
+- The event queue lives on `WasmSystem` (`src/system.rs`, `VmEvent` enum). The
+  core pushes `SpiTransfer` (in `spi.rs` DR write), `I2cStart/Write/Read/Stop`
+  (in `i2c.rs`), and `UartTx` (in `usart.rs` `write_dr`). `drain_events()`
+  (`src/lib.rs`) flattens them to an `i32[]` consumed by `STM32F1._drain_events()`.
+- Injection buffers (`spi_inject_miso`, `i2c_inject_rx`) are consumed in the
+  peripheral read paths, overriding the attached device for that byte.
+- `emulator.js` exposes `drainEvents()`, `spiInjectMiso(ch, bytes)`,
+  `i2cInjectRx(ch, bytes)`, `uartRxAddr(addr, byte)`; the wrapper builds on these.
+- Rebuild after Rust changes with the pinned toolchain and re-sync `pkg/` →
+  `site/` (CI byte-exact guard):
+  `PATH=binaryen-version_132/bin:$PATH RUSTFLAGS="--remap-path-prefix=$HOME=/build" wasm-pack build --target web`
+
+## I2C clock stretching note
+
+Clock stretching (`stretch_until` in `i2c.rs`) defers `fire_interrupts()` for a
+configurable number of instructions after a byte transfer, simulating the slave
+device holding SCL low during internal write cycles. This is only applied by the
+slave device's callback, **not** unconditionally on every DR write — the latter
+would deadlock the ISR-driven `HAL_I2C_Master_Transmit_IT` path (the TXE
+interrupt that drives subsequent byte writes would be deferred, stalling the
+transfer after the first byte).

@@ -71,5 +71,8 @@
   "dependencies": {
     "js-yaml": "^4.1.0",
     "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
   }
 }

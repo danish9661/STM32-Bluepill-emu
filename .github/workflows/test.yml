@@ -140,3 +140,7 @@ jobs:
         run: node tests/test_dma_signals.mjs
       - name: TIM edge-triggered slave mode, DMA2, I2C CR2 DMAEN
         run: node tests/test_slave_pwm_dma2.mjs
+      - name: Browser firmware tests (Playwright + Chromium)
+        run: |
+          npx playwright install chromium --with-deps
+          npx playwright test tests/test_browser.mjs --reporter=list --timeout=300000
