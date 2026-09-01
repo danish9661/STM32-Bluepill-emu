@@ -4,8 +4,6 @@
 <meta charset="UTF-8">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="google-site-verification" content="yH2SxaqtVuBYjoe79B_58FLHgpKmMXsgBzzNdM7ACTk" />
-<meta name="google-site-verification" content="15oUGn7tDY5qFKh0oX7q0zWcuUJ_nFIIjjZk6ixculo" />
 <meta name="description" content="About the STM32F103C8 Blue Pill emulator — a full-system microcontroller emulator that runs real Arduino firmware in the browser and Node.js, powered by WebAssembly (WASM) and the Unicorn ARM CPU emulator.">
 <meta name="keywords" content="STM32 emulator, Bluepill emulator, STM32F103C8 emulator, ARM Cortex-M3, Arduino firmware emulation, run Arduino in browser, embedded emulator, WASM emulator">
 <meta property="og:title" content="About — STM32 Bluepill Emulator">
@@ -31,55 +29,189 @@
 <title>About — STM32 Bluepill Emulator (STM32F103C8 in WASM)</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.65; }
-header { background: #1e293b; border-bottom: 1px solid #334155; padding: 14px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-header h1 { font-size: 17px; color: #38bdf8; font-weight: 600; }
-header .sub { font-size: 12px; color: #94a3b8; }
+body { font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.65; }
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+header {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+  border-bottom: 1px solid #1e3a5f;
+  padding: 12px 24px;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  position: sticky; top: 0; z-index: 100;
+  backdrop-filter: blur(10px);
+}
+header h1 {
+  font-size: 17px; font-weight: 700; letter-spacing: 0.3px;
+  background: linear-gradient(90deg, #38bdf8, #818cf8);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+header .sub { font-size: 12px; color: #64748b; font-weight: 400; }
 header .spacer { flex: 1; }
-header a { font-size: 12px; color: #7dd3fc; text-decoration: none; border: 1px solid #0ea5e9; padding: 3px 10px; border-radius: 999px; }
-header a:hover { background: #1d4ed8; color: #fff; }
+header a.nav {
+  font-size: 11.5px; color: #94a3b8; text-decoration: none;
+  border: 1px solid #334155; padding: 4px 12px; border-radius: 999px;
+  transition: all 0.15s ease;
+}
+header a.nav:hover { background: #1e40af; color: #fff; border-color: #3b82f6; }
+
+/* ── Layout ──────────────────────────────────────────────────────────────── */
 main { max-width: 880px; margin: 0 auto; padding: 28px 24px 60px; }
-h2 { font-size: 15px; color: #7dd3fc; margin: 28px 0 10px; text-transform: uppercase; letter-spacing: 1px; }
-h3 { font-size: 14px; color: #94a3b8; margin: 18px 0 6px; }
+@media (max-width: 640px) { main { padding: 20px 16px 40px; } }
+
+/* ── Headings ────────────────────────────────────────────────────────────── */
+h2 {
+  font-size: 11px; color: #64748b; margin: 32px 0 14px;
+  text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600;
+}
+h2:first-child { margin-top: 0; }
+h3 { font-size: 14px; color: #94a3b8; margin: 20px 0 8px; font-weight: 600; }
+
+/* ── Text ────────────────────────────────────────────────────────────────── */
 p, li { font-size: 14px; color: #cbd5e1; }
 ul, ol { padding-left: 22px; }
 li { margin: 5px 0; }
-code { background: #1e293b; border: 1px solid #334155; border-radius: 4px; padding: 1px 6px; font-size: 13px; color: #7dd3fc; }
-a { color: #38bdf8; }
-a:hover { text-decoration: underline; }
-.badge-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0; }
-.badge { font-size: 12px; background: #0ea5e9; color: #082f49; padding: 4px 12px; border-radius: 999px; font-weight: 600; }
-.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 14px 0; }
-.stat { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 14px; }
-.stat b { display: block; font-size: 20px; color: #38bdf8; font-family: Consolas, monospace; }
-.stat span { font-size: 12px; color: #94a3b8; }
-pre { background: #020617; border: 1px solid #334155; border-radius: 8px; padding: 14px 16px; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 13px; line-height: 1.55; overflow-x: auto; color: #e2e8f0; margin: 10px 0 14px; }
-pre .c { color: #64748b; }
-pre .k { color: #c084fc; }
-pre .s { color: #4ade80; }
-pre .n { color: #38bdf8; }
-pre .g { color: #fbbf24; }
-.ptable { width: 100%; border-collapse: collapse; font-size: 13px; margin: 10px 0 14px; }
-.ptable th { text-align: left; color: #7dd3fc; text-transform: uppercase; font-size: 11px; letter-spacing: 0.8px; border-bottom: 2px solid #334155; padding: 6px 10px; }
-.ptable td { padding: 6px 10px; border-bottom: 1px solid #1e293b; }
-.ptable td.n { color: #38bdf8; font-family: Consolas, monospace; font-weight: 600; }
-.tag { display: inline-block; font-size: 11px; background: #064e3b; color: #6ee7b7; padding: 1px 8px; border-radius: 999px; font-weight: 600; }
-.fq { color: #38bdf8; font-weight: 600; margin-top: 14px; font-size: 14px; }
-.fa { margin: 4px 0 6px 0; font-size: 14px; color: #cbd5e1; }
-footer { border-top: 1px solid #334155; padding: 18px 24px; text-align: center; font-size: 12px; color: #64748b; }
-footer a { color: #7dd3fc; text-decoration: none; }
-footer a:hover { text-decoration: underline; }
+strong { color: #e2e8f0; }
+a { color: #38bdf8; text-decoration: none; transition: color 0.15s; }
+a:hover { color: #7dd3fc; text-decoration: underline; }
+code {
+  background: #0f172a; border: 1px solid #1e293b; border-radius: 4px;
+  padding: 1px 6px; font-size: 12px; color: #7dd3fc;
+  font-family: 'Cascadia Mono', 'JetBrains Mono', Consolas, monospace;
+}
+
+/* ── Cards ───────────────────────────────────────────────────────────────── */
+.card {
+  background: linear-gradient(145deg, #1e293b, #172033);
+  border: 1px solid #2d3f56; border-radius: 12px; padding: 20px;
+  margin: 14px 0; transition: border-color 0.2s;
+}
+.card:hover { border-color: #334155; }
+.card p { color: #94a3b8; font-size: 13.5px; }
+.card p + p { margin-top: 8px; }
+.card ul { margin-top: 8px; }
+
+/* ── Badges ──────────────────────────────────────────────────────────────── */
+.badge-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
+.badge {
+  font-size: 11px; background: #0f172a; color: #64748b;
+  border: 1px solid #1e293b; padding: 4px 12px; border-radius: 999px;
+  font-weight: 600; letter-spacing: 0.2px; transition: all 0.15s;
+}
+.badge:hover { border-color: #334155; color: #94a3b8; }
+.badge.accent { background: #0ea5e9; color: #082f49; border-color: #0ea5e9; }
+
+/* ── Stat grid ───────────────────────────────────────────────────────────── */
+.stat-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px; margin: 16px 0;
+}
+.stat {
+  background: #0f172a; border: 1px solid #1e293b; border-radius: 10px;
+  padding: 14px 16px; transition: border-color 0.2s;
+}
+.stat:hover { border-color: #334155; }
+.stat b {
+  display: block; font-size: 22px; font-weight: 700;
+  font-family: 'Cascadia Mono', 'JetBrains Mono', Consolas, monospace;
+  background: linear-gradient(135deg, #38bdf8, #818cf8);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.stat span { font-size: 11.5px; color: #64748b; }
+
+/* ── Code blocks ─────────────────────────────────────────────────────────── */
+pre {
+  background: #020617; border: 1px solid #1e293b; border-radius: 8px;
+  padding: 14px 16px; font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 12.5px; line-height: 1.6; overflow-x: auto; color: #e2e8f0;
+  margin: 10px 0 14px;
+  scrollbar-width: thin; scrollbar-color: #334155 #020617;
+}
+pre::-webkit-scrollbar { height: 4px; }
+pre::-webkit-scrollbar-track { background: #020617; }
+pre::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+pre .c { color: #475569; }  /* comment */
+pre .k { color: #c084fc; }  /* keyword */
+pre .s { color: #4ade80; }  /* string */
+pre .n { color: #38bdf8; }  /* name */
+pre .g { color: #fbbf24; }  /* number */
+
+/* ── Tables ──────────────────────────────────────────────────────────────── */
+.ptable {
+  width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 10px 0 14px;
+}
+.ptable th {
+  text-align: left; color: #475569; text-transform: uppercase;
+  font-size: 10px; letter-spacing: 1px; border-bottom: 1px solid #1e293b;
+  padding: 8px 10px; font-weight: 700;
+}
+.ptable td {
+  padding: 8px 10px; border-bottom: 1px solid #0f172a;
+  color: #94a3b8; vertical-align: top;
+}
+.ptable tr:hover td { background: rgba(30,41,59,0.4); }
+.ptable td.n {
+  color: #38bdf8; font-family: 'Cascadia Mono', Consolas, monospace;
+  font-weight: 600; font-size: 12px;
+}
+.tag {
+  display: inline-block; font-size: 10px; background: #064e3b; color: #6ee7b7;
+  padding: 2px 8px; border-radius: 999px; font-weight: 700; letter-spacing: 0.3px;
+}
+.tag.stub { background: #1e293b; color: #64748b; }
+
+/* ── FAQ (collapsible) ───────────────────────────────────────────────────── */
+details {
+  background: #0f172a; border: 1px solid #1e293b; border-radius: 8px;
+  margin: 8px 0; transition: border-color 0.2s;
+}
+details:hover { border-color: #334155; }
+details[open] { border-color: #2d3f56; }
+details summary {
+  padding: 10px 14px; cursor: pointer; font-size: 13.5px; font-weight: 600;
+  color: #e2e8f0; list-style: none; display: flex; align-items: center; gap: 8px;
+}
+details summary::-webkit-details-marker { display: none; }
+details summary::before {
+  content: '+'; font-size: 14px; color: #38bdf8; font-weight: 700;
+  transition: transform 0.15s; display: inline-block; width: 14px;
+}
+details[open] summary::before { content: '−'; }
+details .faq-body { padding: 0 14px 12px; font-size: 13.5px; color: #94a3b8; }
+
+/* ── Ordered lists (numbered steps) ──────────────────────────────────────── */
+ol { counter-reset: step; list-style: none; padding-left: 0; }
+ol li { counter-increment: step; padding-left: 28px; position: relative; }
+ol li::before {
+  content: counter(step); position: absolute; left: 0; top: 1px;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: #0f172a; border: 1px solid #1e293b;
+  font-size: 10px; font-weight: 700; color: #38bdf8;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+footer {
+  border-top: 1px solid #1e293b; padding: 18px 24px; text-align: center;
+  font-size: 11.5px; color: #475569;
+}
+footer a { color: #64748b; text-decoration: none; transition: color 0.15s; }
+footer a:hover { color: #7dd3fc; text-decoration: underline; }
 </style>
 </head>
 <body>
 <header>
-    <h1>STM32 Bluepill Emulator</h1>
+    <h1>&#x25C8; STM32 Bluepill Emulator</h1>
     <span class="sub">About this project</span>
     <span class="spacer"></span>
-    <a href="index.html">&larr; Live Demo</a>
+    <a class="nav" href="index.html">&#8592; Live Demo</a>
+    <a class="nav" href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">GitHub</a>
 </header>
 <main>
+
 <h2>What is this?</h2>
+<div class="card">
 <p>The <strong>STM32 Bluepill Emulator</strong> is a full-system emulator for the
 <strong>STM32F103C8 &ldquo;Blue Pill&rdquo;</strong> microcontroller. It executes <strong>real,
 unmodified firmware</strong> &mdash; compiled Arduino sketches (STM32duino), libopencm3 and
@@ -90,16 +222,19 @@ STM32Cube HAL programs &mdash; in your browser or in Node.js, without any hardwa
 WebAssembly), and a <strong>Rust peripheral emulator</strong> that implements the chip&rsquo;s
 registers &mdash; GPIO, USART, SPI, I2C, TIM, ADC, DAC, DMA, CAN, RTC, CRC, NVIC, EXTI, FSMC
 and more &mdash; with realistic timing, interrupts and electrical behaviour.</p>
+</div>
 
 <div class="badge-row">
-    <span class="badge">WASM / WebAssembly</span>
-    <span class="badge">ARM Cortex-M3</span>
-    <span class="badge">Rust + JavaScript</span>
+    <span class="badge accent">WASM / WebAssembly</span>
+    <span class="badge accent">ARM Cortex-M3</span>
+    <span class="badge accent">Rust + JavaScript</span>
     <span class="badge">Browser + Node.js</span>
     <span class="badge">MIT License</span>
     <span class="badge">npm: stm32f1-emu</span>
 </div>
+
 <h2>Why build an STM32 emulator?</h2>
+<div class="card">
 <ul>
     <li><strong>Test firmware without hardware</strong> &mdash; blink, UART, SPI Flash, I2C EEPROM, OLED, touchscreen, CAN and DMA sketches run in a browser tab or from the command line.</li>
     <li><strong>CI &amp; automated testing</strong> &mdash; run firmware headlessly with assertions; the 39-check integration test completes in ~9 seconds.</li>
@@ -107,6 +242,8 @@ and more &mdash; with realistic timing, interrupts and electrical behaviour.</p>
     <li><strong>Learn embedded systems</strong> &mdash; see exactly how timers, DMA and interrupts interact, instruction by instruction, with no black boxes.</li>
     <li><strong>No driver headaches</strong> &mdash; no ST-Link, no serial adapters, no USB driver issues. Just open a URL.</li>
 </ul>
+</div>
+
 <h2>At a glance</h2>
 <div class="stat-grid">
     <div class="stat"><b>~24M IPS</b><span>headless throughput (CLI)</span></div>
@@ -116,18 +253,18 @@ and more &mdash; with realistic timing, interrupts and electrical behaviour.</p>
     <div class="stat"><b>30+</b><span>emulated peripherals</span></div>
     <div class="stat"><b>10</b><span>demo presets</span></div>
 </div>
+
 <h2>How it works</h2>
+<div class="card">
 <p>The emulator uses a <strong>dual-engine architecture</strong>:</p>
 <ol>
-    <li><strong>Unicorn ARM</strong> &mdash; a QEMU-based TCG JIT compiler executes Cortex-M3
-    Thumb/Thumb-2 instructions in batches of 20,000. This gives native-like CPU speed without
-    writing a custom decoder.</li>
-    <li><strong>Rust Peripheral WASM</strong> &mdash; a WebAssembly module models every chip
-    register with cycle-accurate timing, electrical behaviour (GPIO pull-ups, open-drain, slew),
-    interrupt priorities and DMA transfers.</li>
+    <li><strong>Unicorn ARM</strong> &mdash; a QEMU-based TCG JIT compiler executes Cortex-M3 Thumb/Thumb-2 instructions in batches of 20,000. This gives native-like CPU speed without writing a custom decoder.</li>
+    <li><strong>Rust Peripheral WASM</strong> &mdash; a WebAssembly module models every chip register with cycle-accurate timing, electrical behaviour (GPIO pull-ups, open-drain, slew), interrupt priorities and DMA transfers.</li>
 </ol>
+</div>
 
 <h3>Batch loop</h3>
+<div class="card">
 <p>Each emulation step follows this cycle:</p>
 <ol>
     <li>Pump stdin &mdash; UART RX bytes from the host</li>
@@ -137,8 +274,10 @@ and more &mdash; with realistic timing, interrupts and electrical behaviour.</p>
     <li>Deliver pending interrupts (up to 64 per batch)</li>
     <li>Check watchdog reset flags</li>
 </ol>
+</div>
 
 <h3>Performance techniques</h3>
+<div class="card">
 <ul>
     <li><strong>Hookless instruction counting</strong> &mdash; Unicorn&rsquo;s built-in
     <code>emu_start(begin, 0, 0, maxBatch)</code> stops exactly at the batch limit, removing
@@ -153,9 +292,12 @@ and more &mdash; with realistic timing, interrupts and electrical behaviour.</p>
     <li><strong>Rust-side DMA pump</strong> &mdash; DMA transfers are resolved entirely in Rust
     (absorb, push, memcpy) and returned as a flat op-plan for JS to execute on Unicorn RAM.</li>
 </ul>
+</div>
+
 <h2>Emulated peripherals</h2>
-<p>The table below lists every peripheral implemented in the Rust WASM module. &ldquo;Full&rdquo;
-means register-accurate with timing, interrupts and DMA support where applicable.</p>
+<p style="font-size:13px; color:#64748b; margin-bottom:12px;">
+&ldquo;Full&rdquo; means register-accurate with timing, interrupts and DMA support where applicable.
+</p>
 
 <table class="ptable">
 <thead>
@@ -163,119 +305,108 @@ means register-accurate with timing, interrupts and DMA support where applicable
 </thead>
 <tbody>
 <tr><td class="n">GPIO</td><td>A &ndash; D</td>
-    <td>Electrical model: pull-up/down, floating, open-drain, push-pull output, slew
-    transitions. BSRR/BRR atomics. EXTI edge generation.</td>
+    <td>Electrical model: pull-up/down, floating, open-drain, push-pull output, slew transitions. BSRR/BRR atomics. EXTI edge generation.</td>
     <td><span class="tag">Full</span></td></tr>
 <tr><td class="n">USART</td><td>1 &ndash; 3</td>
-    <td>TXE/TC/RXNE flags, baud-rate byte-time pacing, overrun, TX/RX DMA. External probe
-    for bidirectional data.</td>
+    <td>TXE/TC/RXNE flags, baud-rate byte-time pacing, overrun, TX/RX DMA. External probe for bidirectional data.</td>
     <td><span class="tag">Full</span></td></tr>
 <tr><td class="n">SPI</td><td>1, 2</td>
-    <td>Master mode, 8/16-bit, CPOL/CPHA, NSS software control. External device bus (flash,
-    touchscreen, LCD).</td>
+    <td>Master mode, 8/16-bit, CPOL/CPHA, NSS software control. External device bus (flash, touchscreen, LCD).</td>
     <td><span class="tag">Full</span></td></tr>
 <tr><td class="n">I2C</td><td>1, 2</td>
-    <td>Full state machine: START, address ACK, DR read/write, STOP. 7/10-bit addressing,
-    stretching. Bus recovery.</td>
+    <td>Full state machine: START, address ACK, DR read/write, STOP. 7/10-bit addressing, stretching. Bus recovery.</td>
     <td><span class="tag">Full</span></td></tr>
 <tr><td class="n">TIM</td><td>1, 2 &ndash; 14</td>
-    <td>Up/down/center-aligned counting, PWM output, input capture, output compare, TRGO
-    triggers (ADC, DMA), ARR/CCR registers, prescaler.</td>
+    <td>Up/down/center-aligned counting, PWM output, input capture, output compare, TRGO triggers (ADC, DMA), ARR/CCR registers, prescaler.</td>
     <td><span class="tag">Full</span></td></tr>
 <tr><td class="n">ADC</td><td>1, 2</td>
-    <td>Real conversion state machine (Tconv = SMP + 12.5 cycles), per-sequence channels
-    (SQ1-16), EOC/EOCS, AWD, CONT, SWSTART. External triggers from TIM/EXTI. DAC
-    loopback.</td>
+    <td>Real conversion state machine (Tconv = SMP + 12.5 cycles), per-sequence channels (SQ1-16), EOC/EOCS, AWD, CONT, SWSTART. External triggers from TIM/EXTI. DAC loopback.</td>
     <td><span class="tag">Full</span></td></tr>
 <tr><td class="n">DAC</td><td>1, 2</td>
-    <td>12-bit right-aligned output, DOR register. Analog wire to ADC (DAC1&rarr;PA4/ch4,
-    DAC2&rarr;PA5/ch5). Software triggers.</td>
+    <td>12-bit right-aligned output, DOR register. Analog wire to ADC (DAC1&rarr;PA4/ch4, DAC2&rarr;PA5/ch5). Software triggers.</td>
     <td><span class="tag">Full</span></td></tr>
-<tr><td class="n">DMA</td><td>1 (7 channels)</td>
-    <td>MEM2MEM, periph&rarr;mem, mem&rarr;periph. TC/HT/error flags, IRQ requests,
-    configurable priority. Linked to USART/SPI/I2C/ADC/TIM.</td>
+<tr><td class="n">DMA</td><td>1 (7 ch), 2 (5 ch)</td>
+    <td>MEM2MEM, periph&rarr;mem, mem&rarr;periph. TC/HT/error flags, IRQ requests, configurable priority. Linked to USART/SPI/I2C/ADC/TIM.</td>
     <td><span class="tag">Full</span></td></tr>
-<tr><td class="n">CAN</td><td>1</td>
-    <td>TX/RX mailboxes, acceptance filters (list/bank modes), RX injection for testing.
-    Extended 29-bit IDs.</td>
+<tr><td class="n">CAN</td><td>1, 2</td>
+    <td>TX/RX mailboxes, acceptance filters (list/bank modes), RX injection for testing. Extended 29-bit IDs.</td>
     <td><span class="tag">Full</span></td></tr>
 <tr><td class="n">RTC</td><td>1</td>
     <td>Second counter, alarm IRQ, prescaler.</td>
     <td><span class="tag">Full</span></td></tr>
 <tr><td class="n">NVIC</td><td>&mdash;</td>
-    <td>Priority-based dispatch (4 bits), set/clear pending, enable/disable. Up to 64 IRQs
-    per batch. SysTick debt drain.</td>
+    <td>Priority-based dispatch (4 bits), set/clear pending, enable/disable. Up to 64 IRQs per batch. SysTick debt drain.</td>
     <td><span class="tag">Full</span></td></tr>
 <tr><td class="n">SysTick</td><td>&mdash;</td>
-    <td>24-bit decrementing counter, TICKINT, clock source. Drives <code>millis()</code> /
-    <code>micros()</code> via debt accounting.</td>
+    <td>24-bit decrementing counter, TICKINT, clock source. Drives <code>millis()</code> / <code>micros()</code> via debt accounting.</td>
     <td><span class="tag">Full</span></td></tr>
 <tr><td class="n">SCB</td><td>&mdash;</td>
-    <td>CPUID, ICSR (PendSV/SysTick pending), AIRCR (reset), SHPR1-3 (fault priorities),
-    SHCSR, CFSR, HFSR, BFAR. SLEEPDEEP control.</td>
+    <td>CPUID, ICSR (PendSV/SysTick pending), AIRCR (reset), SHPR1-3 (fault priorities), SHCSR, CFSR, HFSR, BFAR. SLEEPDEEP control.</td>
     <td><span class="tag">Full</span></td></tr>
 <tr><td class="n">EXTI</td><td>0 &ndash; 18</td>
-    <td>Rising/falling edge config, software trigger, IMR mask. Maps to NVIC IRQ 6&ndash;40.
-    EXTI 11/15 trigger ADC external conversion.</td>
+    <td>Rising/falling edge config, software trigger, IMR mask. Maps to NVIC IRQ 6&ndash;40. EXTI 11/15 trigger ADC external conversion.</td>
     <td><span class="tag">Full</span></td></tr>
 <tr><td class="n">AFIO</td><td>&mdash;</td>
     <td>Pin remapping (SWJCFG, SPI1, I2C1, USART, TIM, CAN).</td>
     <td><span class="tag">Full</span></td></tr>
 <tr><td class="n">FSMC</td><td>&mdash;</td>
-    <td>7 memory banks: NE1-4 NOR, NAND2/3, PC-Card. BCR/BTR/BWTR registers. External NOR
-    backing via JS Uint8Array image.</td>
+    <td>7 memory banks: NE1-4 NOR, NAND2/3, PC-Card. BCR/BTR/BWTR registers. External NOR backing via JS Uint8Array image.</td>
     <td><span class="tag">Full</span></td></tr>
 <tr><td class="n">SPI Flash</td><td>ext</td>
-    <td>External device: JEDEC ID, read (0x03), fast read (0x0B), page program (0x02),
-    sector erase, WREN/WRSR. Up to 2 buses.</td>
+    <td>External device: JEDEC ID, read (0x03), fast read (0x0B), page program (0x02), sector erase, WREN/WRSR. Up to 2 buses.</td>
     <td><span class="tag">Full</span></td></tr>
-<tr><td class="n">I2C EEPROM</td><td>ext</td><td>External device: byte read/write, sequential. Up to 2 buses.</td>
+<tr><td class="n">I2C EEPROM</td><td>ext</td>
+    <td>External device: byte read/write, sequential. Up to 2 buses.</td>
     <td><span class="tag">Full</span></td></tr>
-<tr><td class="n">I2C OLED</td><td>ext</td><td>External device: SSD1306 framebuffer, I2C commands/data.</td>
+<tr><td class="n">I2C OLED</td><td>ext</td>
+    <td>External device: SSD1306 framebuffer, I2C commands/data.</td>
     <td><span class="tag">Full</span></td></tr>
-<tr><td class="n">Touchscreen</td><td>ext</td><td>External device: SPI XPT2046, deferred-reply model.</td>
+<tr><td class="n">Touchscreen</td><td>ext</td>
+    <td>External device: SPI XPT2046, deferred-reply model.</td>
     <td><span class="tag">Full</span></td></tr>
-<tr><td class="n">LCD</td><td>ext</td><td>External device: SPI 128&times;64 framebuffer.</td>
+<tr><td class="n">LCD</td><td>ext</td>
+    <td>External device: SPI 128&times;64 framebuffer.</td>
     <td><span class="tag">Full</span></td></tr>
-<tr><td class="n">BKP</td><td>&mdash;</td><td>Backup registers (10&times;16-bit), TAMPALARM flag.</td>
+<tr><td class="n">BKP</td><td>&mdash;</td>
+    <td>Backup registers (10&times;16-bit), TAMPALARM flag.</td>
     <td><span class="tag">Full</span></td></tr>
-<tr><td class="n">PWR</td><td>&mdash;</td><td>Power control: PDDS, LPDS, DBP. Deep-sleep gating of peripherals.</td>
+<tr><td class="n">PWR</td><td>&mdash;</td>
+    <td>Power control: PDDS, LPDS, DBP. Deep-sleep gating of peripherals.</td>
     <td><span class="tag">Full</span></td></tr>
-<tr><td class="n">FLASH</td><td>&mdash;</td><td>Access control, prefetch. FLASH_ACR register emulation.</td>
+<tr><td class="n">FLASH</td><td>&mdash;</td>
+    <td>Access control, prefetch. FLASH_ACR register emulation.</td>
     <td><span class="tag">Full</span></td></tr>
-<tr><td class="n">CRC</td><td>&mdash;</td><td>32-bit CRC (polynomial 0x04C11DB7), DR register.</td>
+<tr><td class="n">CRC</td><td>&mdash;</td>
+    <td>32-bit CRC (polynomial 0x04C11DB7), DR register.</td>
     <td><span class="tag">Full</span></td></tr>
-<tr><td class="n">IWDG</td><td>&mdash;</td><td>Independent watchdog: prescaler, reload, KEY register, reset on timeout.</td>
+<tr><td class="n">IWDG</td><td>&mdash;</td>
+    <td>Independent watchdog: prescaler, reload, KEY register, reset on timeout.</td>
     <td><span class="tag">Full</span></td></tr>
-<tr><td class="n">WWDG</td><td>&mdash;</td><td>Window watchdog: window size, counter, early interrupt.</td>
+<tr><td class="n">WWDG</td><td>&mdash;</td>
+    <td>Window watchdog: window size, counter, early interrupt.</td>
     <td><span class="tag">Full</span></td></tr>
-<tr><td class="n">USB</td><td>&mdash;</td><td>Stub &mdash; register reads return 0.</td>
-    <td style="color:#64748b;">Stub</td></tr>
+<tr><td class="n">USB</td><td>&mdash;</td>
+    <td>Stub &mdash; register reads return 0.</td>
+    <td><span class="tag stub">Stub</span></td></tr>
 </tbody>
 </table>
+
 <h2>Exceptions and interrupts</h2>
+<div class="card">
 <ul>
-    <li><strong>NVIC priority dispatch</strong> &mdash; pending IRQs are sorted by priority and
-    delivered in batches of up to 64 per step. A fairness mechanism prevents a single high-rate
-    IRQ from starving others.</li>
-    <li><strong>SVC (supervisor call)</strong> &mdash; fires synchronously mid-batch via the
-    Unicorn INTR hook. The 32-byte Cortex-M exception frame is built on the real stack and
-    mirrored in Rust. SVCall handler vector is resolved from the vector table.</li>
-    <li><strong>PendSV</strong> &mdash; pended via SCB ICSR PENDSVSET, dispatched at the next
-    batch boundary. Used for context-switch testing.</li>
-    <li><strong>Faults</strong> &mdash; BusFault, UsageFault and HardFault set CFSR/HFSR/BFAR
-    registers, pends the appropriate exception, and escalates to HardFault if the fault
-    handler is not enabled in SHCSR.</li>
-    <li><strong>SysTick debt drain</strong> &mdash; <code>millis()</code> / <code>micros()</code>
-    accuracy via a debt counter: missed ticks are accumulated and delivered one-per-batch to
-    avoid double-counting.</li>
-    <li><strong>Deep sleep (SLEEPDEEP)</strong> &mdash; SCB SCR bit 2 freezes all peripherals
-    except RTC and IWDG. Timers use <code>tick_frozen()</code> to advance their delta base
-    without processing state, preventing catch-up jumps on wake.</li>
+    <li><strong>NVIC priority dispatch</strong> &mdash; pending IRQs are sorted by priority and delivered in batches of up to 64 per step. A fairness mechanism prevents a single high-rate IRQ from starving others.</li>
+    <li><strong>SVC (supervisor call)</strong> &mdash; fires synchronously mid-batch via the Unicorn INTR hook. The 32-byte Cortex-M exception frame is built on the real stack and mirrored in Rust. SVCall handler vector is resolved from the vector table.</li>
+    <li><strong>PendSV</strong> &mdash; pended via SCB ICSR PENDSVSET, dispatched at the next batch boundary. Used for context-switch testing.</li>
+    <li><strong>Faults</strong> &mdash; BusFault, UsageFault and HardFault set CFSR/HFSR/BFAR registers, pends the appropriate exception, and escalates to HardFault if the fault handler is not enabled in SHCSR.</li>
+    <li><strong>SysTick debt drain</strong> &mdash; <code>millis()</code> / <code>micros()</code> accuracy via a debt counter: missed ticks are accumulated and delivered one-per-batch to avoid double-counting.</li>
+    <li><strong>Deep sleep (SLEEPDEEP)</strong> &mdash; SCB SCR bit 2 freezes all peripherals except RTC and IWDG. Timers use <code>tick_frozen()</code> to advance their delta base without processing state, preventing catch-up jumps on wake.</li>
 </ul>
+</div>
+
 <h2>CLI usage</h2>
-<p>The command-line interface runs firmware headlessly in Node.js. Install globally or use
-<code>npx</code>:</p>
+<p style="font-size:13px; color:#64748b; margin-bottom:8px;">
+The command-line interface runs firmware headlessly in Node.js. Install globally or use <code>npx</code>:
+</p>
 
 <pre><span class="c"># Run a bare ELF</span>
 node pkg/cli.mjs firmware.elf
@@ -296,24 +427,23 @@ node pkg/cli.mjs <span class="g">--verbose</span> firmware.elf
 node pkg/cli.mjs <span class="g">--regs</span> firmware.elf</pre>
 
 <h3>Flags</h3>
+<div class="card">
 <ul>
-    <li><code>--config=&lt;file.yaml&gt;</code> &mdash; configuration file: firmware path, external
-    devices (SPI flash, I2C EEPROM, OLED, LCD, touchscreen, FSMC), UART baud.</li>
+    <li><code>--config=&lt;file.yaml&gt;</code> &mdash; configuration file: firmware path, external devices (SPI flash, I2C EEPROM, OLED, LCD, touchscreen, FSMC), UART baud.</li>
     <li><code>--max=&lt;N&gt;</code> &mdash; stop after N instructions (default: unlimited).</li>
-    <li><code>--map=&lt;file.map&gt;</code> &mdash; load a linker map for PC &rarr; symbol name
-    resolution in output.</li>
-    <li><code>--uart=&lt;file&gt;</code> &mdash; write UART TX bytes to a file (default:
-    stdout).</li>
+    <li><code>--map=&lt;file.map&gt;</code> &mdash; load a linker map for PC &rarr; symbol name resolution in output.</li>
+    <li><code>--uart=&lt;file&gt;</code> &mdash; write UART TX bytes to a file (default: stdout).</li>
     <li><code>--regs</code> &mdash; dump R0-R15, xPSR and SP on exit.</li>
-    <li><code>--verbose</code> &mdash; trace every peripheral read/write, DMA transfer and
-    interrupt delivery.</li>
-    <li><code>--periph-plugin=&lt;file.mjs&gt;</code> &mdash; load a JS peripheral plugin
-    (default export: array of <code>{base, size, read, write}</code>).</li>
+    <li><code>--verbose</code> &mdash; trace every peripheral read/write, DMA transfer and interrupt delivery.</li>
+    <li><code>--periph-plugin=&lt;file.mjs&gt;</code> &mdash; load a JS peripheral plugin (default export: array of <code>{base, size, read, write}</code>).</li>
     <li><code>-h</code> / <code>--help</code> &mdash; show usage.</li>
 </ul>
+</div>
+
 <h2>Library API</h2>
-<p>Use the emulator programmatically from Node.js or the browser. The library exposes the same
-API as the browser demo uses internally:</p>
+<p style="font-size:13px; color:#64748b; margin-bottom:8px;">
+Use the emulator programmatically from Node.js or the browser:
+</p>
 
 <pre><span class="k">import</span> { createEmulator } <span class="k">from</span> <span class="s">'stm32f1-emu'</span>;
 
@@ -334,9 +464,11 @@ emu.<span class="n">uartRxBytes</span>(<span class="n">Buffer</span>.from(<span 
 
 <span class="k">const</span> <span class="n">regs</span> = emu.<span class="n">getRegisters</span>();    <span class="c">// { r0, r1, ..., r15, xpsr }</span>
 emu.<span class="n">close</span>();                        <span class="c">// free WASM memory</span></pre>
+
 <h2>Browser demo features</h2>
-<p>The live demo (<a href="index.html">index.html</a>) runs entirely in the browser with
-no server needed &mdash; just open the page or serve it with <code>python3 -m http.server</code>.</p>
+<p style="font-size:13px; color:#64748b; margin-bottom:8px;">
+The live demo (<a href="index.html">index.html</a>) runs entirely in the browser with no server needed &mdash; just open the page or serve it with <code>python3 -m http.server</code>.
+</p>
 
 <h3>10 built-in presets</h3>
 <table class="ptable">
@@ -358,6 +490,7 @@ no server needed &mdash; just open the page or serve it with <code>python3 -m ht
 </table>
 
 <h3>Interactive features</h3>
+<div class="card">
 <ul>
     <li><strong>Blue Pill board SVG</strong> &mdash; LED glow, pin-activity amber highlights, per-pin toggle counts.</li>
     <li><strong>GPIO panel</strong> &mdash; live readout of all 32 pins across ports A&ndash;D with colour-coded modes (output high, output low, input).</li>
@@ -365,24 +498,23 @@ no server needed &mdash; just open the page or serve it with <code>python3 -m ht
     <li><strong>Showcase peripherals</strong> &mdash; live OLED/LCD canvas, 7-segment display, RGB bar, buzzer indicator, button widget with EXTI13 interrupt.</li>
     <li><strong>Chip selector</strong> &mdash; switch between built-in STM32F103C8 and SVD-based STM32F105 (with CAN2) at load time.</li>
 </ul>
+</div>
+
 <h2>Multi-chip support</h2>
-<p>Beyond the built-in STM32F103C8 map, the emulator supports any STM32F1-series chip via
-CMSIS System View Description (SVD) files:</p>
+<div class="card">
+<p>Beyond the built-in STM32F103C8 map, the emulator supports any STM32F1-series chip via CMSIS System View Description (SVD) files:</p>
 <ul>
-    <li><strong>Built-in map</strong> &mdash; STM32F103C8 with hardcoded register addresses,
-    always works, no external files needed.</li>
-    <li><strong>SVD-based map</strong> &mdash; parse any STM32F1xx SVD file to generate a
-    peripheral map at runtime. Ships with <code>STM32F103.svd</code> and
-    <code>STM32F105xx.svd</code> (connectivity line, CAN2).</li>
-    <li><strong>Auto-registration</strong> &mdash; if an SVD omits ARM core peripherals (NVIC,
-    SysTick, SCB at <code>0xE000Exxx</code>), the emulator registers them automatically.
-    This fixed <code>millis()</code>/PendSV silently breaking on the F105 SVD.</li>
-    <li><strong>Last-wins overlap</strong> &mdash; custom or SVD peripherals can shadow built-in
-    entries, enabling per-chip overrides.</li>
+    <li><strong>Built-in map</strong> &mdash; STM32F103C8 with hardcoded register addresses, always works, no external files needed.</li>
+    <li><strong>SVD-based map</strong> &mdash; parse any STM32F1xx SVD file to generate a peripheral map at runtime. Ships with <code>STM32F103.svd</code> and <code>STM32F105xx.svd</code> (connectivity line, CAN2).</li>
+    <li><strong>Auto-registration</strong> &mdash; if an SVD omits ARM core peripherals (NVIC, SysTick, SCB at <code>0xE000Exxx</code>), the emulator registers them automatically. This fixed <code>millis()</code>/PendSV silently breaking on the F105 SVD.</li>
+    <li><strong>Last-wins overlap</strong> &mdash; custom or SVD peripherals can shadow built-in entries, enabling per-chip overrides.</li>
 </ul>
+</div>
+
 <h2>Custom peripherals</h2>
-<p>Add your own memory-mapped devices via JavaScript callbacks. The API matches the
-rp2040js bus model &mdash; register a base address, size, and read/write handlers:</p>
+<p style="font-size:13px; color:#64748b; margin-bottom:8px;">
+Add your own memory-mapped devices via JavaScript callbacks. The API matches the rp2040js bus model &mdash; register a base address, size, and read/write handlers:
+</p>
 
 <h3>Browser / library API</h3>
 <pre>emu.<span class="n">addJsPeripheral</span>({
@@ -401,88 +533,89 @@ rp2040js bus model &mdash; register a base address, size, and read/write handler
 }];</pre>
 <pre>node pkg/cli.mjs <span class="g">--periph-plugin=./my_periph.mjs</span> firmware.elf</pre>
 
-<p>Callbacks receive the <strong>absolute address</strong> (not offset from base). The bus
-uses last-wins overlap, so a plugin can override a built-in peripheral.</p>
+<p style="font-size:13px; color:#94a3b8; margin-top:10px;">
+Callbacks receive the <strong>absolute address</strong> (not offset from base). The bus uses last-wins overlap, so a plugin can override a built-in peripheral.
+</p>
+
 <h2>Testing</h2>
-<p>The emulator has a three-tier test suite that runs in CI on every push:</p>
+<p style="font-size:13px; color:#64748b; margin-bottom:10px;">
+The emulator has a three-tier test suite that runs in CI on every push:
+</p>
 
 <h3>Unit tests &mdash; <code>node tests/test_all.mjs</code></h3>
-<p><strong>236 tests</strong> covering every peripheral in isolation: GPIO electrical model, pin
-events, USART TX/RX, ADC conversion timing, RC sample-and-hold, DAC&rarr;ADC loopback,
-external triggers (TIM/EXTI), RCC, SysTick, all timer modes, NVIC priority dispatch, CRC,
-SPI, I2C state machine, RTC alarm, PWR/FLASH, CAN mailboxes + filters, DMA pump, AFIO,
-EXTI, BKP, DAC, TIM6, FSMC, deep-sleep gating and fault escalation.</p>
+<div class="card">
+<p><strong>236 tests</strong> covering every peripheral in isolation: GPIO electrical model, pin events, USART TX/RX, ADC conversion timing, RC sample-and-hold, DAC&rarr;ADC loopback, external triggers (TIM/EXTI), RCC, SysTick, all timer modes, NVIC priority dispatch, CRC, SPI, I2C state machine, RTC alarm, PWR/FLASH, CAN mailboxes + filters, DMA pump, AFIO, EXTI, BKP, DAC, TIM6, FSMC, deep-sleep gating and fault escalation.</p>
+</div>
 
 <h3>Firmware integration &mdash; <code>node tests/canary.mjs</code></h3>
-<p>Runs the <strong>24-peripheral Arduino sketch</strong> (<code>tests/arduino_periph_test/</code>)
-for 200M instructions with UART input &ldquo;AB&rdquo;. Asserts <strong>39/39</strong> checks
-pass (GPIO, USART TX, UART loopback, RCC, FLASH, PWR, BKP, IWDG, WWDG, RTC, CRC, DAC,
-ADC, AFIO, EXTI, CAN, SPI flash, I2C EEPROM, OLED, touchscreen, LCD, I2C2, SPI2, USART2,
-SVC, PendSV, DMA, UART RX, TIM2, EXTI0, EXTI1, EXTI13, CAN RX, SysTick, TIM3 PWM, TIM4,
-RTC Alarm). Completes in ~9 seconds.</p>
+<div class="card">
+<p>Runs the <strong>24-peripheral Arduino sketch</strong> (<code>tests/arduino_periph_test/</code>) for 200M instructions with UART input &ldquo;AB&rdquo;. Asserts <strong>39/39</strong> checks pass (GPIO, USART TX, UART loopback, RCC, FLASH, PWR, BKP, IWDG, WWDG, RTC, CRC, DAC, ADC, AFIO, EXTI, CAN, SPI flash, I2C EEPROM, OLED, touchscreen, LCD, I2C2, SPI2, USART2, SVC, PendSV, DMA, UART RX, TIM2, EXTI0, EXTI1, EXTI13, CAN RX, SysTick, TIM3 PWM, TIM4, RTC Alarm). Completes in ~9 seconds.</p>
+</div>
+
+<h3>Browser tests &mdash; Playwright</h3>
+<div class="card">
+<p><strong>3 browser tests</strong> running the full firmware in Chromium via Playwright: the periph37 200M run (39/39, ~11s), GPIO grid rendering, and F105 chip selector. Runs headlessly in CI on every push.</p>
+</div>
 
 <h3>CI pipeline</h3>
+<div class="card">
 <ul>
     <li><code>cargo check</code> &mdash; Rust compilation sanity</li>
     <li><code>tests/test_all.mjs</code> &mdash; 236 unit tests</li>
     <li><code>tests/canary.mjs</code> &mdash; 39/39 firmware checks</li>
     <li>200M full run &mdash; <code>echo -n "AB" | node pkg/cli.mjs --config=... --max=200000000</code></li>
     <li><code>tests/test_emulator_js.mjs</code> &mdash; browser run-loop path (createEmulator + run)</li>
+    <li><code>tests/test_browser.mjs</code> &mdash; Playwright Chromium: 200M firmware + GPIO + chip selector</li>
     <li><code>tests/test_firmware_formats.mjs</code> &mdash; hex/map/ELF cross-format consistency</li>
     <li><code>tests/test_esm.mjs</code> &mdash; ESM glue smoke test</li>
-    <li>Byte-exact artifact guard &mdash; <code>cmp</code> between <code>pkg/</code> and
-    <code>site/</code> for emulator.js, wasm glue and .wasm (deterministic via
-    <code>--remap-path-prefix</code>)</li>
+    <li>Byte-exact artifact guard &mdash; <code>cmp</code> between <code>pkg/</code> and <code>site/</code> for emulator.js, wasm glue and .wasm</li>
 </ul>
+</div>
+
 <h2>Project links</h2>
+<div class="card">
 <ul>
-    <li><a href="https://danish9661.github.io/STM32-Bluepill-emu/">Live demo</a> &mdash;
-    10 presets: blink, UART echo, TIM2 PWM fade, ADC-on-UART, SPI flash + I2C EEPROM/OLED,
-    a 39-check peripheral test, the peripheral showcase (OLED &middot; LCD &middot; 7-seg
-    &middot; RGB &middot; buzzer &middot; button) and an 8-LED WS2812 strip streamed over
-    SPI1 + DMA.</li>
-    <li><a href="https://github.com/danish9661/STM32-Bluepill-emu">GitHub repository</a>
-    &mdash; source, CLI, library API and full documentation.</li>
-    <li><a href="https://www.npmjs.com/package/stm32f1-emu">npm package</a> &mdash;
-    <code>npm install stm32f1-emu</code></li>
+    <li><a href="https://danish9661.github.io/STM32-Bluepill-emu/">Live demo</a> &mdash; 10 presets: blink, UART echo, TIM2 PWM fade, ADC-on-UART, SPI flash + I2C EEPROM/OLED, a 39-check peripheral test, the peripheral showcase (OLED, LCD, 7-seg, RGB, buzzer, button) and an 8-LED WS2812 strip streamed over SPI1 + DMA.</li>
+    <li><a href="https://github.com/danish9661/STM32-Bluepill-emu">GitHub repository</a> &mdash; source, CLI, library API and full documentation.</li>
+    <li><a href="https://www.npmjs.com/package/stm32f1-emu">npm package</a> &mdash; <code>npm install stm32f1-emu</code></li>
 </ul>
+</div>
+
 <h2>FAQ</h2>
 
-<p class="fq">What firmware can I run?</p>
-<p class="fa">Any firmware that targets the STM32F103C8 and fits in 128 KB of flash. This
-includes Arduino sketches compiled with STM32duino, programs built with libopencm3, and
-STM32Cube HAL projects. Load <code>.elf</code>, <code>.hex</code> or raw <code>.bin</code>
-files. The UART TX output works out of the box; external devices (SPI flash, I2C EEPROM,
-OLED) are configured via the config YAML or the library API.</p>
+<details>
+  <summary>What firmware can I run?</summary>
+  <div class="faq-body">Any firmware that targets the STM32F103C8 and fits in 128 KB of flash. This includes Arduino sketches compiled with STM32duino, programs built with libopencm3, and STM32Cube HAL projects. Load <code>.elf</code>, <code>.hex</code> or raw <code>.bin</code> files. The UART TX output works out of the box; external devices (SPI flash, I2C EEPROM, OLED) are configured via the config YAML or the library API.</div>
+</details>
 
-<p class="fq">How fast is it?</p>
-<p class="fa">~24 million instructions per second headless (Node.js CLI), ~5 MIPS in the
-browser. A 200M-instruction firmware test completes in about 9 seconds on a modern desktop.
-Performance is dominated by the Unicorn JIT &mdash; the JS/Rust peripheral layer accounts for
-less than 3% of wall time.</p>
+<details>
+  <summary>How fast is it?</summary>
+  <div class="faq-body">~24 million instructions per second headless (Node.js CLI), ~5 MIPS in the browser. A 200M-instruction firmware test completes in about 9 seconds on a modern desktop. Performance is dominated by the Unicorn JIT &mdash; the JS/Rust peripheral layer accounts for less than 3% of wall time.</div>
+</details>
 
-<p class="fq">Does it support all STM32F103 peripherals?</p>
-<p class="fa">Everything except USB. GPIO (with electrical model), USART, SPI, I2C, timers
-(1&ndash;14), ADC, DAC, DMA, CAN, RTC, NVIC, SysTick, SCB, EXTI, AFIO, FSMC, BKP, PWR,
-FLASH, CRC, IWDG, WWDG and the Cortex-M exception model (SVC, PendSV, faults) are all
-implemented with register-level accuracy and realistic timing.</p>
+<details>
+  <summary>Does it support all STM32F103 peripherals?</summary>
+  <div class="faq-body">Everything except USB. GPIO (with electrical model), USART, SPI, I2C, timers (1&ndash;14), ADC, DAC, DMA, CAN, RTC, NVIC, SysTick, SCB, EXTI, AFIO, FSMC, BKP, PWR, FLASH, CRC, IWDG, WWDG and the Cortex-M exception model (SVC, PendSV, faults) are all implemented with register-level accuracy and realistic timing.</div>
+</details>
 
-<p class="fq">Can I use it in my own project?</p>
-<p class="fa">Yes. The emulator is MIT-licensed and available on npm:
-<code>npm install stm32f1-emu</code>. Use <code>createEmulator()</code> from the library API
-section above, or load the WASM module directly in the browser. You can also write custom
-peripheral plugins in JavaScript.</p>
+<details>
+  <summary>Can I use it in my own project?</summary>
+  <div class="faq-body">Yes. The emulator is MIT-licensed and available on npm: <code>npm install stm32f1-emu</code>. Use <code>createEmulator()</code> from the library API section above, or load the WASM module directly in the browser. You can also write custom peripheral plugins in JavaScript.</div>
+</details>
+
 <h2>Acknowledgements</h2>
+<div class="card">
 <ul>
-    <li><a href="https://github.com/AlexAltea/unicorn.js">AlexAltea/unicorn.js</a> &mdash;
-    JavaScript / WebAssembly port of the Unicorn ARM CPU emulator.</li>
-    <li><a href="https://www.unicorn-engine.org/">Unicorn Engine</a> &mdash;
-    Multi-architecture CPU emulator framework based on QEMU.</li>
+    <li><a href="https://github.com/AlexAltea/unicorn.js">AlexAltea/unicorn.js</a> &mdash; JavaScript / WebAssembly port of the Unicorn ARM CPU emulator.</li>
+    <li><a href="https://www.unicorn-engine.org/">Unicorn Engine</a> &mdash; Multi-architecture CPU emulator framework based on QEMU.</li>
 </ul>
-</main>
+</div>
 
+</main>
 <footer>
-STM32 Bluepill Emulator &middot; STM32F103C8 &middot; Arduino firmware emulation in the browser via WebAssembly &mdash; open source on <a href="https://github.com/danish9661/STM32-Bluepill-emu">GitHub</a>.
+    STM32 Bluepill Emulator &middot; STM32F103C8 &middot; Arduino firmware emulation via WebAssembly &mdash;
+    <a href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">Source</a> &middot;
+    <a href="index.html">Live Demo</a>
 </footer>
 </body>
 </html>

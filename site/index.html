@@ -211,6 +211,30 @@ select:focus { outline: none; border-color: #0ea5e9; }
 #buzz-ind.on { border-color: #f59e0b; color: #f59e0b; box-shadow: 0 0 16px rgba(245,158,11,0.6); }
 #btn-widget { width: 100%; padding: 9px; font-size: 13px; font-weight: 600; }
 #btn-widget:active { background: #92400e; }
+
+/* ── Keyboard hints ──────────────────────────────────────────────────────── */
+.kbd {
+  display: inline-block; font-size: 10px; background: #0f172a; border: 1px solid #1e293b;
+  border-radius: 3px; padding: 0 4px; color: #475569; font-family: 'Cascadia Mono', Consolas, monospace;
+  line-height: 1.6; margin-left: 4px; vertical-align: middle;
+}
+.tx-row { position: relative; }
+.tx-row .send-hint {
+  font-size: 10.5px; color: #334155; position: absolute; right: 8px; top: -16px;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  header { padding: 10px 14px; gap: 8px; }
+  header h1 { font-size: 15px; }
+  header .sub { display: none; }
+  .wrap { padding: 12px 14px 0; gap: 12px; }
+  .fullrow { padding: 0 14px; }
+  .card { padding: 14px; }
+  .gpio-grid { grid-template-columns: repeat(2, 1fr); }
+  .periph-grid { grid-template-columns: 1fr; }
+  .displays { grid-template-columns: 1fr; }
+}
 </style>
 </head>
 <body>
@@ -278,9 +302,10 @@ select:focus { outline: none; border-color: #0ea5e9; }
                 <h2>UART Terminal</h2>
                 <div class="terminal" id="terminal"><span class="t-out">Bluepill emulator ready. Load firmware to begin.</span><br></div>
                 <div class="tx-row">
-                    <input id="uartInput" placeholder="Type to send bytes to UART RX (Serial.available / read)…" disabled>
-                    <button id="sendBtn" disabled>Send</button>
-                </div>
+            <input id="uartInput" placeholder="Type to send bytes to UART RX (Serial.available / read)…" disabled>
+            <button id="sendBtn" disabled>Send</button>
+        </div>
+        <span style="font-size:10.5px; color:#334155; margin-top:4px;">Press <span class="kbd">Enter</span> to send</span>
             </div>
         </div>
     </div>
@@ -1006,6 +1031,8 @@ log('Pick a preset firmware, or load a .bin/.hex/.elf firmware and a .map for sy
     STM32 Bluepill Emulator &middot; full-system emulation via WebAssembly + Unicorn ARM Cortex-M3 &middot;
     <a href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">Source</a> &middot;
     <a href="about.html">About</a>
+    <span style="margin-left:12px; color:#1e293b;">|</span>
+    <span style="margin-left:12px; font-size:10px; color:#334155;">Built with Rust + WASM</span>
 </footer>
 </body>
 </html>
