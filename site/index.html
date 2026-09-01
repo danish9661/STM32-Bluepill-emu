@@ -191,26 +191,64 @@ select:focus { outline: none; border-color: #0ea5e9; }
 .dot.in { background: #fbbf24; }
 
 /* ── Showcase peripherals ────────────────────────────────────────────────── */
-.periph-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.periph-dev { background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 10px; }
-.periph-dev h4 { font-size: 10px; color: #475569; letter-spacing: 1px; margin-bottom: 6px; text-transform: uppercase; font-weight: 700; }
-.periph-dev canvas { display: block; background: #000; image-rendering: pixelated; width: 100%; border-radius: 4px; }
-.displays { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-#seg-svg { width: 100%; }
-#seg-svg .seg { fill: #1e293b; stroke: #334155; stroke-width: 1.5; }
-#seg-svg .seg.on { fill: #ef4444; stroke: #dc2626; filter: drop-shadow(0 0 3px rgba(239,68,68,0.6)); }
-#rgb-bar { height: 14px; border-radius: 4px; border: 1px solid #1e293b; transition: background 120ms ease; }
-.ws-strip { display: flex; gap: 8px; margin: 8px 0; align-items: center; }
-.ws-led { width: 24px; height: 24px; border-radius: 50%; background: #1e293b; border: 1px solid #334155; transition: background 60ms ease, box-shadow 100ms ease; }
-.ws-count { font-size: 12px; color: #64748b; }
-#buzz-ind {
-  display: inline-block; width: 36px; height: 36px; border-radius: 50%;
-  border: 2px solid #1e293b; color: #64748b; text-align: center;
-  line-height: 32px; font-size: 16px; transition: all 0.12s ease;
+.periph-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.periph-dev {
+  background: linear-gradient(145deg, #0c1322, #0a0f1a);
+  border: 1px solid #1e293b; border-radius: 10px; padding: 12px;
+  transition: border-color 0.2s ease;
 }
-#buzz-ind.on { border-color: #f59e0b; color: #f59e0b; box-shadow: 0 0 16px rgba(245,158,11,0.6); }
-#btn-widget { width: 100%; padding: 9px; font-size: 13px; font-weight: 600; }
-#btn-widget:active { background: #92400e; }
+.periph-dev:hover { border-color: #334155; }
+.periph-dev h4 {
+  font-size: 10px; color: #64748b; letter-spacing: 1.2px;
+  margin-bottom: 8px; text-transform: uppercase; font-weight: 600;
+}
+.periph-dev canvas {
+  display: block; background: #000; image-rendering: pixelated;
+  width: 100%; border-radius: 6px;
+  border: 1px solid #1e293b; box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+}
+.displays { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+#seg-svg { width: 100%; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.4)); }
+#seg-svg .seg { fill: #1a1a2e; stroke: #2a2a3e; stroke-width: 1.5; }
+#seg-svg .seg.on { fill: #ef4444; stroke: #dc2626; filter: drop-shadow(0 0 4px rgba(239,68,68,0.7)); }
+#rgb-bar { display: flex; gap: 12px; align-items: center; padding: 8px 0; }
+.rgb-ch {
+  width: 32px; height: 32px; border-radius: 50%; background: #0a0f1a;
+  border: 2px solid #1e293b; transition: background 100ms ease, box-shadow 100ms ease, border-color 100ms ease;
+}
+.rgb-ch.on { border-color: transparent; }
+.ws-strip {
+  display: flex; gap: 10px; margin: 10px 0; align-items: center;
+  padding: 10px 14px; background: #020810; border-radius: 10px;
+  border: 1px solid #0c1a2a;
+}
+.ws-led {
+  width: 32px; height: 32px; border-radius: 50%; background: #0a0f1a;
+  border: 2px solid #1e293b; transition: background 60ms ease, box-shadow 100ms ease;
+}
+.ws-led[style*="rgb("] { border-color: transparent; }
+.ws-count {
+  font-size: 12px; color: #475569; margin-left: auto;
+  font-family: 'Cascadia Mono', Consolas, monospace;
+}
+#buzz-ind {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; border-radius: 50%;
+  background: #0a0f1a; border: 2px solid #1e293b; color: #475569;
+  font-size: 18px; transition: all 0.15s ease;
+}
+#buzz-ind.on {
+  border-color: #f59e0b; color: #fbbf24;
+  background: rgba(245,158,11,0.08);
+  box-shadow: 0 0 20px rgba(245,158,11,0.5), 0 0 40px rgba(245,158,11,0.15);
+  animation: buzzPulse 0.3s ease infinite alternate;
+}
+@keyframes buzzPulse { from { transform: scale(1); } to { transform: scale(1.08); } }
+#btn-widget {
+  width: 100%; padding: 10px; font-size: 13px; font-weight: 600;
+  border-radius: 8px; transition: all 0.12s ease;
+}
+#btn-widget:active { background: #92400e; transform: scale(0.98); }
 
 /* ── Keyboard hints ──────────────────────────────────────────────────────── */
 .kbd {
@@ -320,7 +358,7 @@ select:focus { outline: none; border-color: #0ea5e9; }
                 <div class="periph-dev"><h4>SPI LCD · 128x64</h4><canvas id="lcdCanvas" width="128" height="64"></canvas></div>
             </div>
             <div class="periph-dev"><h4>7-Segment · 74HC595 (SPI1·PA4)</h4><div id="segHost"></div></div>
-            <div class="periph-dev"><h4>RGB LED · TIM2 CH1-3 (PA0-2)</h4><div id="rgb-bar"></div></div>
+            <div class="periph-dev"><h4>RGB LED · TIM2 CH1-3 (PA0-2)</h4><div id="rgb-bar"><div class="rgb-ch" id="rgb-r" title="Red (PA0)"></div><div class="rgb-ch" id="rgb-g" title="Green (PA1)"></div><div class="rgb-ch" id="rgb-b" title="Blue (PA2)"></div></div></div>
             <div class="periph-dev"><h4>Buzzer · PB14</h4><span id="buzz-ind">♪</span></div>
             <div class="periph-dev"><h4>Button · PB13 EXTI13</h4><button id="btn-widget">Press PB13</button></div>
         </div>
@@ -578,7 +616,17 @@ function renderShowcase() {
         }
         $('segHost').innerHTML = segSvg();
         const duty = [emu.pwmDuty(0x40000000, 0), emu.pwmDuty(0x40000000, 1), emu.pwmDuty(0x40000000, 2)];
-        $('rgb-bar').style.background = `rgb(${Math.round(duty[0] * 2.55)},${Math.round(duty[1] * 2.55)},${Math.round(duty[2] * 2.55)})`;
+        const rgbR = $('rgb-r'), rgbG = $('rgb-g'), rgbB = $('rgb-b');
+        const rVal = Math.round(duty[0] * 2.55), gVal = Math.round(duty[1] * 2.55), bVal = Math.round(duty[2] * 2.55);
+        rgbR.style.background = rVal > 0 ? `rgb(${rVal},0,0)` : '#0a0f1a';
+        rgbR.classList.toggle('on', rVal > 0);
+        rgbR.style.boxShadow = rVal > 0 ? `0 0 ${8 + duty[0] * 0.2}px rgba(255,0,0,${0.3 + duty[0] * 0.006}), 0 0 ${16 + duty[0] * 0.4}px rgba(255,0,0,${0.1 + duty[0] * 0.003})` : 'none';
+        rgbG.style.background = gVal > 0 ? `rgb(0,${gVal},0)` : '#0a0f1a';
+        rgbG.classList.toggle('on', gVal > 0);
+        rgbG.style.boxShadow = gVal > 0 ? `0 0 ${8 + duty[1] * 0.2}px rgba(0,255,0,${0.3 + duty[1] * 0.006}), 0 0 ${16 + duty[1] * 0.4}px rgba(0,255,0,${0.1 + duty[1] * 0.003})` : 'none';
+        rgbB.style.background = bVal > 0 ? `rgb(0,0,${bVal})` : '#0a0f1a';
+        rgbB.classList.toggle('on', bVal > 0);
+        rgbB.style.boxShadow = bVal > 0 ? `0 0 ${8 + duty[2] * 0.2}px rgba(0,0,255,${0.3 + duty[2] * 0.006}), 0 0 ${16 + duty[2] * 0.4}px rgba(0,0,255,${0.1 + duty[2] * 0.003})` : 'none';
         $('buzz-ind').classList.toggle('on', !!emu.gpioReadOutput(1, 14));
     } catch (e) {}
 }
@@ -629,7 +677,13 @@ const wsWatch = (addr, width, value) => {
     wsFrames++;
     wsLeds.forEach((led, i) => {
         const el = document.getElementById(`ws-led-${i}`);
-        if (el) el.style.background = `rgb(${led.r},${led.g},${led.b})`;
+        if (el) {
+            const bright = (led.r + led.g + led.b) / 3;
+            el.style.background = `rgb(${led.r},${led.g},${led.b})`;
+            el.style.boxShadow = bright > 5
+                ? `0 0 ${6 + bright * 0.12}px rgba(${led.r},${led.g},${led.b},0.6), 0 0 ${12 + bright * 0.25}px rgba(${led.r},${led.g},${led.b},0.25)`
+                : 'none';
+        }
     });
     const c = document.getElementById('wsFrameCount');
     if (c) c.textContent = `${wsFrames} frames`;

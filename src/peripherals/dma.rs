@@ -68,8 +68,8 @@ struct Channel {
 impl Channel {
     fn dir(&self) -> u8 { ((self.cr >> 4) & 1) as u8 }
     fn data_size(&self) -> usize {
-        let psize = match (self.cr >> 6) & 0b11 { 0b00 => 1, 0b01 => 2, _ => 4 };
-        let msize = match (self.cr >> 8) & 0b11 { 0b00 => 1, 0b01 => 2, _ => 4 };
+        let psize = match (self.cr >> 8) & 0b11 { 0b00 => 1, 0b01 => 2, _ => 4 };
+        let msize = match (self.cr >> 10) & 0b11 { 0b00 => 1, 0b01 => 2, _ => 4 };
         std::cmp::max(msize, psize) * self.ndtr as usize
     }
 
