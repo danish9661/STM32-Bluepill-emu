@@ -1,22 +1,45 @@
 name: Publish to Registries
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to publish from'
+        required: true
+        type: choice
+        options:
+          - master
+      version:
+        description: 'Version to publish (e.g. 1.2.0)'
+        required: true
+        type: string
+      description:
+        description: 'Release notes'
+        required: false
+        type: string
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       id-token: write
       packages: write
     steps:
+      - name: Validate version format
+        run: |
+          if ! echo "${{ inputs.version }}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Version must match x.y.z pattern (e.g. 1.2.0)"
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
 
       - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.97.1
         with:
           targets: wasm32-unknown-unknown
 
@@ -45,6 +68,9 @@ jobs:
           RUSTFLAGS: "--remap-path-prefix=/home/runner=/build"
         run: wasm-pack build --target web --out-dir pkg
 
+      - name: Set package version
+        run: npm version ${{ inputs.version }} --no-git-tag-version
+
       - name: Run test suite
         run: npm test
 
@@ -65,3 +91,18 @@ jobs:
           npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create tag and GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_DESC: ${{ inputs.description || format('Release v{0}', inputs.version) }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "v${{ inputs.version }}"
+          git push origin "v${{ inputs.version }}"
+          echo "$RELEASE_DESC" > /tmp/release-notes.txt
+          gh release create "v${{ inputs.version }}" \
+            --title "v${{ inputs.version }}" \
+            --target "${{ inputs.branch }}" \
+            --notes-file /tmp/release-notes.txt
