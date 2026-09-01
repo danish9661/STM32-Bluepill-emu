@@ -187,7 +187,7 @@ Full periph39 run: ~0.5 s wall in-browser.
 ```bash
 cargo check                          # Rust sanity (fast)
 wasm-pack build --target web         # rebuild pkg/stm32_bluepill_wasm_bg* (Rust → wasm)
-node tests/test_all.mjs              # 189 unit tests
+node tests/test_all.mjs              # 236 unit tests
 node tests/canary.mjs                # regression canary: 39/39 firmware checks, ~25s
 node tests/bench.mjs                 # benchmarks
 ```
