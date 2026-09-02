@@ -632,9 +632,11 @@ Examples:
     let t_emu=0, t_batch=0, t_dma=0, t_irq=0;
     const doProfile = !!process.env.PROFILE;
 
+    const SMALL_BATCH = 20000, LARGE_BATCH = 50000;
     while (!stopRequested) {
         const dmaBusy = dma_get_pending_count() > 0;
         while (stdinQueue.length > 0 && uart_rx_pending(uartAddr) === 0 && !dmaBusy) { const b = stdinQueue.shift(); uart_rx_byte(uartAddr, b); }
+        const curBatch = (process.env.EMU_BATCH ? maxBatch : ((anyPending || dmaBusy || uart_rx_pending(uartAddr) !== 0) ? SMALL_BATCH : LARGE_BATCH));
 
         let t=0;
         if (doProfile) t=performance.now();
@@ -644,7 +646,7 @@ Examples:
         if (verbose) console.log(`--- batch ${totalSteps} PC=0x${(curPc >>> 0).toString(16)} inst=${instCount} ---`);
         if (doProfile) t=performance.now();
         try {
-            uc.emu_start(BigInt(curPc | 1), 0n, 0n, maxBatch);
+            uc.emu_start(BigInt(curPc | 1), 0n, 0n, curBatch);
         } catch (e) {
             const msg = String(e);
             const pc2 = uc.reg_read_i32(Module.ARM_REG_PC);
@@ -690,8 +692,8 @@ Examples:
             }
         }
         if (doProfile) t_emu+=performance.now()-t;
-        instCount += maxBatch;
-        batchInstCount += maxBatch;
+        instCount += curBatch;
+        batchInstCount += curBatch;
         if (doProfile) t=performance.now();
         if (batchInstCount > 0) {
             const status = process_batch(batchInstCount);

@@ -3,7 +3,8 @@ const PERIPH_RANGES = [
     [0xE0000000, 0xE1000000],
 ];
 
-const DEFAULT_MAX_BATCH = 50000;
+const DEFAULT_MAX_BATCH = 20000;
+const LARGE_BATCH = 50000;
 
 /**
  * Load the Rust peripheral WASM module.
@@ -699,6 +700,12 @@ export async function createEmulator(opts = {}) {
             let t_emu=0, t_batch=0, t_dma=0, t_irq=0, t_pin=0;
             const profile = typeof process !== 'undefined' && process.env.PROFILE;
             while (!stopRequested) {
+                // Adaptive batch: small (20K) when IRQs/DMA pending for low latency,
+                // large (50K) when idle for throughput. If user set batch_size
+                // explicitly, respect it as fixed.
+                const curBatch = (maxBatch !== DEFAULT_MAX_BATCH)
+                    ? maxBatch
+                    : ((anyPending || dma_get_pending_count() !== 0) ? DEFAULT_MAX_BATCH : LARGE_BATCH);
                 let t;
                 if (profile) t=performance.now();
                 processDma();
@@ -706,14 +713,14 @@ export async function createEmulator(opts = {}) {
                 const curPc = uc.reg_read_i32(Module.ARM_REG_PC);
                 if (profile) t=performance.now();
                 try {
-                    uc.emu_start(curPc | 1, 0, 0, maxBatch);
+                    uc.emu_start(curPc | 1, 0, 0, curBatch);
                 } catch (e) {
                     const msg = String(e);
                     if (!handleFault(msg)) throw e;
                 }
                 if (profile) t_emu+=performance.now()-t;
-                instCount += maxBatch;
-                batchInstCount += maxBatch;
+                instCount += curBatch;
+                batchInstCount += curBatch;
                 if (batchInstCount > 0) {
                     if (profile) t=performance.now();
                     const status = process_batch(batchInstCount);
@@ -737,7 +744,8 @@ export async function createEmulator(opts = {}) {
             }
             if (profile) {
                 const total = t_emu+t_batch+t_dma+t_irq+t_pin;
-                console.error(`[profile] emu ${(t_emu/total*100).toFixed(1)}% batch ${(t_batch/total*100).toFixed(1)}% dma ${(t_dma/total*100).toFixed(1)}% irq ${(t_irq/total*100).toFixed(1)}% pin ${(t_pin/total*100).toFixed(1)}%  total ${total.toFixed(1)}ms for ${totalSteps*maxBatch} instr  MIPS ${(totalSteps*maxBatch/total/1000).toFixed(1)}`);
+                const done = instCount - startInst;
+                console.error(`[profile] emu ${(t_emu/total*100).toFixed(1)}% batch ${(t_batch/total*100).toFixed(1)}% dma ${(t_dma/total*100).toFixed(1)}% irq ${(t_irq/total*100).toFixed(1)}% pin ${(t_pin/total*100).toFixed(1)}%  total ${total.toFixed(1)}ms for ${done} instr  MIPS ${(done/total/1000).toFixed(1)}`);
             }
             return {
                 totalSteps,
