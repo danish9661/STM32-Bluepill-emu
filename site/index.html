@@ -980,6 +980,15 @@ async function initEmulator(data, name, extDevices = {}) {
             worker.postMessage({ type: 'initCanvas', oled: oledOff, lcd: lcdOff }, [oledOff, lcdOff]);
           }
         } catch {}
+        // SAB for frame stats (zero-copy when crossOriginIsolated)
+        try {
+          if (typeof SharedArrayBuffer !== 'undefined' && crossOriginIsolated) {
+            const sab = new SharedArrayBuffer(32);
+            worker.postMessage({ type: 'initSAB', sab });
+            // store for main thread polling (fallback to postMessage frame still works)
+            window._sabView = new Int32Array(sab);
+          }
+        } catch {}
         // UI enabled on worker 'ready' message
         $('runBtn').disabled = true;
         $('stopBtn').disabled = true;

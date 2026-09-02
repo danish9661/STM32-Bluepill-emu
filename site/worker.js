@@ -44,6 +44,7 @@ let autoBytes = [];
 let canInjected = false;
 const CAN_RAM_FLAG = 0x200000b8;
 let oledOff = null, lcdOff = null, oledCtx = null, lcdCtx = null;
+let sabView = null;
 
 // Pin activity buffer drained per frame
 let pinBuf = [];
@@ -119,6 +120,10 @@ async function handleMessage(e) {
       try { lcdCtx = lcdOff ? lcdOff.getContext('2d') : null; } catch {}
       break;
     }
+    case 'initSAB': {
+      try { sabView = new Int32Array(msg.sab); } catch {}
+      break;
+    }
   }
 }
 
@@ -155,6 +160,9 @@ function loop() {
   const regs = emu.getRegisters();
   const uartOut = emu.getUartOutput();
   const pins = pinBuf.splice(0);
+  if (sabView) {
+    try { Atomics.store(sabView, 0, lastResult ? lastResult.instCount : 0); Atomics.store(sabView, 1, regs.PC); Atomics.store(sabView, 2, regs.SP); Atomics.store(sabView, 3, runSteps); if (typeof Atomics.notify === 'function') Atomics.notify(sabView, 0, 1); } catch {}
+  }
   // OffscreenCanvas: render directly in worker if transferred, else send FB to main
   let oledFb = null, lcdFb = null, rgbDuty = null, buzz = null;
   if (oledCtx) {
