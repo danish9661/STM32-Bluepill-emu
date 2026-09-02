@@ -2,7 +2,39 @@
 // Runs createEmulator + step loop, posts frames to main thread.
 // Main thread keeps all DOM/canvas work; this thread never touches DOM.
 
-import { createEmulator } from './emulator.js';
+let createEmulator;
+let _queue = [];
+let _ready = false;
+self.onmessage = (e) => {
+  if (!_ready) { _queue.push(e); return; }
+  handleMessage(e);
+};
+async function _initEmu() {
+  try { self.postMessage({ type: 'debug', msg: 'worker boot' }); } catch {}
+  if (!globalThis.MUnicorn) {
+    try { self.postMessage({ type: 'debug', msg: 'fetching unicorn_arm.js' }); } catch {}
+    try {
+      const r = await fetch('./unicorn_arm.js');
+      const txt = await r.text();
+      (0, eval)(txt);
+    } catch (e) {
+      try { const m = await import('./unicorn_arm.js'); globalThis.MUnicorn = m.MUnicorn || m.default || globalThis.MUnicorn; } catch {}
+    }
+  }
+  if (!globalThis.MUnicorn) {
+    try { self.postMessage({ type: 'error', message: 'MUnicorn not loaded in worker' }); } catch {}
+  } else {
+    try { self.postMessage({ type: 'debug', msg: 'MUnicorn ready' }); } catch {}
+  }
+  try { self.postMessage({ type: 'debug', msg: '_initEmu start' }); } catch {}
+  const mod = await import('./emulator.js');
+  createEmulator = mod.createEmulator;
+  try { self.postMessage({ type: 'debug', msg: 'emulator imported' }); } catch {}
+  _ready = true;
+  for (const q of _queue.splice(0)) handleMessage(q);
+  try { self.postMessage({ type: 'debug', msg: '_initEmu done' }); } catch {}
+}
+_initEmu();
 
 let emu = null;
 let running = false;
@@ -19,7 +51,8 @@ function post(type, extra = {}) {
   self.postMessage({ type, ...extra });
 }
 
-self.onmessage = async (e) => {
+async function handleMessage(e) {
+  try { self.postMessage({ type: 'debug', msg: 'handleMessage '+e.data.type }); } catch {}
   const msg = e.data;
   switch (msg.type) {
     case 'init': {
@@ -30,6 +63,7 @@ self.onmessage = async (e) => {
       autoBytes = msg.autoBytes ? msg.autoBytes.slice() : [];
       canInjected = false;
       pinBuf = [];
+      try { self.postMessage({ type: 'debug', msg: 'createEmulator start' }); } catch {}
       try {
         emu = await createEmulator({
           chip: msg.chip,
@@ -40,11 +74,13 @@ self.onmessage = async (e) => {
           vector_table: 0x08000000,
           ext_devices: msg.ext_devices || {},
         });
+        try { self.postMessage({ type: 'debug', msg: 'createEmulator done' }); } catch {}
         emu.onPinChange((port, pin, level) => pinBuf.push(port, pin, level));
         if (msg.symbols) emu.setSymbols(msg.symbols);
         const regs = emu.getRegisters();
         post('ready', { pc: regs.PC, sp: regs.SP });
       } catch (err) {
+        try { self.postMessage({ type: 'debug', msg: 'createEmulator err: '+(err.message||String(err)) }); } catch {}
         post('error', { message: err.message || String(err) });
       }
       break;
@@ -77,7 +113,7 @@ self.onmessage = async (e) => {
       break;
     }
   }
-};
+}
 
 function loop() {
   if (!running || !emu) return;
