@@ -32,7 +32,7 @@ function getPeriph() {
 }
 
 function getMUnicorn() {
-    const browserGlobal = () => (typeof window !== 'undefined' && window.MUnicorn) ? window.MUnicorn : null;
+    const browserGlobal = () => (typeof globalThis !== 'undefined' && globalThis.MUnicorn) ? globalThis.MUnicorn : null;
     // Node.js: prefer the CJS Emscripten glue, fall back to a browser-global shim
     if (typeof process !== 'undefined' && process.versions?.node) {
         return import('module').then(({ createRequire }) => {

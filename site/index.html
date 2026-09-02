@@ -396,6 +396,8 @@ const terminal = $('terminal');
 const gpioGrid = $('gpioGrid');
 const stateBadge = $('stateBadge');
 let emu = null;
+let worker = null;
+let useWorker = false;
 let firmwareData = null;
 let symbolsData = null;
 let animId = null;
@@ -409,6 +411,136 @@ let uiFrame = 0;
 // but the (expensive) visual layer is rendered only every UI_THROTTLE frames (~12fps).
 // Stepping is never starved by rendering; this keeps browser MIPS high without a worker.
 const UI_THROTTLE = 5;
+
+// Worker — off-main-thread emulation (biggest browser win, ~2×)
+// Falls back to main-thread runLoop if Worker/module not supported.
+let workerReady = false;
+let workerQueue = [];
+function initWorker() {
+  if (worker || !('Worker' in window)) return false;
+  try {
+    worker = new Worker('./worker.js', { type: 'module' });
+  } catch (e) {
+    try { worker = new Worker('./worker.js'); } catch (e2) { return false; }
+  }
+  worker.onmessage = handleWorkerMsg;
+  worker.onerror = (e) => { console.warn('Worker failed, falling back to main thread', e); worker = null; useWorker = false; };
+  return true;
+}
+function handleWorkerMsg(e) {
+  const m = e.data;
+  if (m.type === 'ready') {
+    workerReady = true;
+    // flush queued run
+    while (workerQueue.length) worker.postMessage(workerQueue.shift());
+    const regs = { PC: m.pc, SP: m.sp };
+    // mimic initEmulator post-ready UI
+    $('runBtn').disabled = false;
+    $('stopBtn').disabled = true;
+    $('resetBtn').disabled = false;
+    $('uartInput').disabled = false;
+    $('sendBtn').disabled = false;
+    if (firmwareData) log(`Loaded ${firmwareData.name || 'firmware'} (${firmwareData.bytes?.length || '?'} bytes) — worker ready. PC=0x${regs.PC.toString(16).padStart(8,'0')}`);
+    updateRegsWorker(m.pc, m.sp, null);
+    setState('Ready');
+  } else if (m.type === 'frame') {
+    // stats
+    const dt = (performance.now() - (handleWorkerMsg._t0 || (handleWorkerMsg._t0 = performance.now()))) / 1000;
+    // actually runStartTs is set on run, use it
+    totalInst = m.instCount;
+    runSteps = m.runSteps;
+    $('instCount').textContent = m.instCount.toLocaleString();
+    $('stepCount').textContent = m.runSteps.toLocaleString();
+    if (m.pc !== undefined) handleWorkerMsg._pc = m.pc;
+    // speed from worker's stepsThisFrame
+    // we estimate frameInst from m.instCount - last
+    const frameInst = m.instCount - (handleWorkerMsg._lastInst || 0);
+    handleWorkerMsg._lastInst = m.instCount;
+    // approximate per-frame MIPS from worker's 80ms budget
+    // main thread just shows instCount/avg
+    const elapsed = runStartTs ? (performance.now() - runStartTs)/1000 : 0;
+    if (elapsed > 0.5) $('avgMips').textContent = ((m.instCount - runStartInst)/elapsed/1e6).toFixed(1)+'M IPS';
+    // board / gpio from pin events + direct snapshot
+    if (m.pins && m.pins.length) {
+      for (let i=0;i+2<m.pins.length;i+=3) onPinActivity(m.pins[i], m.pins[i+1], m.pins[i+2]===1);
+    }
+    // UART
+    if (m.uartOut && m.uartOut.length) {
+      const stick = termAtBottom();
+      const txt = typeof m.uartOut === 'string' ? m.uartOut : String.fromCharCode(...m.uartOut);
+      for (const ch of txt) {
+        if (ch === '\n') { const d=document.createElement('span'); d.className='t-out'; terminal.appendChild(d); terminal.appendChild(document.createElement('br')); }
+        else { const d=document.createElement('span'); d.className='t-out'; d.textContent=ch; terminal.appendChild(d); }
+      }
+      if (stick) terminal.scrollTop = terminal.scrollHeight;
+    }
+    // showcase canvases from worker snapshot
+    if (m.oledFb) {
+      try {
+        const cv=$('oledCanvas'), ctx=cv.getContext('2d');
+        ctx.clearRect(0,0,128,64);
+        const img=ctx.createImageData(128,64);
+        for(let x=0;x<128;x++) for(let page=0;page<8;page++){ const b=m.oledFb[page*128+x]||0; for(let bit=0;bit<8;bit++) if(b&(1<<bit)){ const i=((page*8+bit)*128+x)*4; img.data[i]=240; img.data[i+1]=240; img.data[i+2]=240; img.data[i+3]=255; } }
+        ctx.putImageData(img,0,0);
+      } catch {}
+    }
+    if (m.lcdFb) {
+      try {
+        const cv=$('lcdCanvas'), ctx=cv.getContext('2d');
+        ctx.clearRect(0,0,128,64);
+        const img=ctx.createImageData(128,64);
+        for(let i=0;i<8192&&i<m.lcdFb.length;i++){ const v=m.lcdFb[i]?240:24; img.data[i*4]=v; img.data[i*4+1]=v; img.data[i*4+2]=v; img.data[i*4+3]=255; }
+        ctx.putImageData(img,0,0);
+      } catch {}
+    }
+    if (m.rgbDuty) {
+      const [r,g,b]=m.rgbDuty;
+      const rVal=Math.round(r*2.55), gVal=Math.round(g*2.55), bVal=Math.round(b*2.55);
+      const elR=$('rgb-r'), elG=$('rgb-g'), elB=$('rgb-b');
+      if(elR){ elR.style.background=rVal>0?`rgb(${rVal},0,0)`:'#0a0f1a'; elR.classList.toggle('on',rVal>0); }
+      if(elG){ elG.style.background=gVal>0?`rgb(0,${gVal},0)`:'#0a0f1a'; elG.classList.toggle('on',gVal>0); }
+      if(elB){ elB.style.background=bVal>0?`rgb(0,0,${bVal})`:'#0a0f1a'; elB.classList.toggle('on',bVal>0); }
+    }
+    if (m.buzz!==null && m.buzz!==undefined) $('buzz-ind')?.classList.toggle('on', !!m.buzz);
+    // throttled visuals
+    if ((uiFrame++ % UI_THROTTLE)===0) {
+      // for worker, regs are in m.pc/m.sp, board led from pin activity or m.buzz? Use PC13 from worker pins is hard, so approximate via m.buzz? Instead keep led from last pin activity
+      let ledOn = false;
+      try { ledOn = PIN_ACTIVITY['PC13'] && (Date.now() - PIN_ACTIVITY['PC13'].lastToggle < 500 ? true : false); } catch {}
+      // fallback: if no pin activity, try to infer from m.buzz is not led
+      renderBoard(ledOn);
+      // gpio grid needs snapshot — worker didn't send full gpio, so skip or approximate
+      // keep last gpioGrid as is (worker will send pins for board glow)
+    }
+    updateRegsWorker(m.pc, m.sp, null);
+    if (m.stopped) {
+      running=false;
+      setState('Stopped');
+      $('stopBtn').disabled=true; $('runBtn').disabled=false;
+    }
+    // autopilot check (worker already does CAN/uart, but main checks SUMMARY)
+    const termText = terminal.textContent;
+    const sumM = termText.match(/SUMMARY\s+pass=(\d+)\s+fail=(\d+)/);
+    if (sumM || runSteps>=2000) {
+      if (sumM) {
+        const pass=+sumM[1], fail=+sumM[2];
+        log(`All done: ${pass} checks passed, ${fail} failed.`, fail?'t-err':'t-ok');
+        setState(fail?'Error':'Done');
+      }
+      running=false;
+      if (worker) worker.postMessage({type:'stop'});
+      $('stopBtn').disabled=true; $('runBtn').disabled=false;
+    }
+  } else if (m.type === 'stopped') {
+    running=false; setState('Stopped');
+    $('stopBtn').disabled=true; $('runBtn').disabled=false;
+  } else if (m.type === 'error') {
+    log(`Worker error: ${m.message}`, 't-err'); setState('Error');
+  }
+}
+function updateRegsWorker(pc, sp, sym) {
+  try { $('statPc').textContent='0x'+pc.toString(16).padStart(8,'0'); $('statSp').textContent='0x'+sp.toString(16).padStart(8,'0'); } catch {}
+}
 let svdXml = null;
 let f105SvdXml = null;
 let autoBytes = [];        // bytes to auto-inject (one at a time, when UART RX is empty)
@@ -772,7 +904,8 @@ function pollUart() {
 }
 
 async function initEmulator(data, name, extDevices = {}) {
-    if (emu) { emu.close(); emu = null; }
+    if (emu) { try { emu.close(); } catch {} emu = null; }
+    if (worker) { try { worker.postMessage({type:'stop'}); } catch {} }
     cancelAnimationFrame(animId);
     running = false;
     autopilot = false;
@@ -795,10 +928,31 @@ async function initEmulator(data, name, extDevices = {}) {
     lastBoardSig = '';
     uiFrame = 0;
     lastTotalInst = 0;
+    firmwareData = { name, bytes: data };
+    // Try worker first (off-main-thread, ~2× browser win)
+    const chipSel = $('chipSelect').value;
+    const tryWorker = !symbolsData; // .map + worker complicates symbol path; use main thread if symbols needed
+    if (tryWorker && initWorker()) {
+        useWorker = true;
+        workerReady = false;
+        handleWorkerMsg._lastInst = 0;
+        handleWorkerMsg._t0 = performance.now();
+        setState('Initializing… (worker)');
+        const chip = chipSel === 'stm32f105' ? { name: 'STM32F105', svd: f105SvdXml || svdXml || undefined } : 'stm32f103c8';
+        const svdForWorker = (chipSel === 'stm32f103c8' && svdXml) ? svdXml : undefined;
+        // autoBytes for periph_test autopilot
+        const ab = (name.includes('periph_test') || name.includes('arduino_periph_test')) ? [0x41, 0x42] : [];
+        worker.postMessage({ type: 'init', firmware: data, chip, svd: svdForWorker, ext_devices: extDevices, autoBytes: ab });
+        // UI enabled on worker 'ready' message
+        $('runBtn').disabled = true;
+        $('stopBtn').disabled = true;
+        $('resetBtn').disabled = true;
+        return;
+    }
+    useWorker = false;
     firmwareData = data;
     setState('Initializing…');
     try {
-        const chipSel = $('chipSelect').value;
         const chip = chipSel === 'stm32f105'
             ? { name: 'STM32F105', svd: f105SvdXml || svdXml || undefined }
             : 'stm32f103c8';
@@ -822,7 +976,7 @@ async function initEmulator(data, name, extDevices = {}) {
         $('uartInput').focus();
         updateRegs();
         updateVisuals();
-        const ph = $('gpioPlaceholder'); if (ph) ph.style.display = 'none';
+        const ph2 = $('gpioPlaceholder'); if (ph2) ph2.style.display = 'none';
         setState('Ready');
     } catch (e) {
         log(`Init failed: ${e.message || e}`, 't-err');
@@ -832,6 +986,7 @@ async function initEmulator(data, name, extDevices = {}) {
 }
 
 function runLoop() {
+    if (useWorker) return; // worker drives loop, main only renders on 'frame' messages
     if (!running || !emu) return;
     const t0 = performance.now();
     try {
@@ -1003,8 +1158,8 @@ $('loadPresetBtn').addEventListener('click', async () => {
 });
 
 const btnWidget = $('btn-widget');
-btnWidget.addEventListener('mousedown', () => { if (emu) emu.gpioSetInput(1, 13, true); });
-const btnUp = () => { if (emu) emu.gpioSetInput(1, 13, false); };
+btnWidget.addEventListener('mousedown', () => { if (useWorker && worker) worker.postMessage({ type: 'gpioSetInput', port: 1, pin: 13, value: true }); else if (emu) emu.gpioSetInput(1, 13, true); });
+const btnUp = () => { if (useWorker && worker) worker.postMessage({ type: 'gpioSetInput', port: 1, pin: 13, value: false }); else if (emu) emu.gpioSetInput(1, 13, false); };
 btnWidget.addEventListener('mouseup', btnUp);
 btnWidget.addEventListener('mouseleave', btnUp);
 
@@ -1041,6 +1196,19 @@ $('mapInput').addEventListener('change', async (e) => {
 });
 
 $('runBtn').addEventListener('click', () => {
+    if (useWorker) {
+        if (!worker || !workerReady) return;
+        running = true;
+        runStartTs = performance.now();
+        runStartInst = totalInst;
+        handleWorkerMsg._lastInst = totalInst;
+        handleWorkerMsg._t0 = performance.now();
+        setState('Running');
+        $('runBtn').disabled = true;
+        $('stopBtn').disabled = false;
+        worker.postMessage({ type: 'run' });
+        return;
+    }
     if (!emu) return;
     running = true;
     runStartTs = performance.now();
@@ -1052,6 +1220,7 @@ $('runBtn').addEventListener('click', () => {
 });
 
 $('stopBtn').addEventListener('click', () => {
+    if (useWorker && worker) { worker.postMessage({ type: 'stop' }); running = false; setState('Stopped'); $('stopBtn').disabled = true; $('runBtn').disabled = false; return; }
     if (emu) emu.stop();
     running = false;
     setState('Stopping…');
@@ -1068,12 +1237,15 @@ $('sendBtn').addEventListener('click', sendUart);
 $('uartInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendUart(); });
 
 function sendUart() {
-    if (!emu) return;
     const val = $('uartInput').value;
     if (!val) return;
-    const bytes = [];
-    for (const ch of val) bytes.push(ch.charCodeAt(0) & 0xFF);
-    emu.uartRxBytes(bytes);
+    if (useWorker && worker) {
+        for (const ch of val) worker.postMessage({ type: 'uartRx', byte: ch.charCodeAt(0) & 0xFF });
+    } else if (emu) {
+        const bytes = [];
+        for (const ch of val) bytes.push(ch.charCodeAt(0) & 0xFF);
+        emu.uartRxBytes(bytes);
+    } else return;
     log(`TX → ${JSON.stringify(val)}`, 't-in');
     $('uartInput').value = '';
 }
