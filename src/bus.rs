@@ -70,6 +70,7 @@ impl Bus {
     /// Binary search for the slot covering `addr`. A same-slot hit (same
     /// address, or sequential accesses within one peripheral / FSMC bank)
     /// returns the cached slot without re-searching.
+    #[inline(always)]
     pub fn get(&self, addr: u32) -> Option<&PeripheralSlot<RefCell<Box<dyn Peripheral>>>> {
         if let Some((start, end, idx)) = self.last.get() {
             if addr >= start && addr < end {

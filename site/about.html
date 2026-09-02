@@ -246,51 +246,48 @@ and more &mdash; with realistic timing, interrupts and electrical behaviour.</p>
 
 <h2>At a glance</h2>
 <div class="stat-grid">
-    <div class="stat"><b>~24M IPS</b><span>headless throughput (CLI)</span></div>
-    <div class="stat"><b>~5M IPS</b><span>browser throughput</span></div>
+    <div class="stat"><b>21.8 MIPS</b><span>headless (50M/2.29s, pure 26.5)</span></div>
+    <div class="stat"><b>8.6 MIPS</b><span>browser headed (4.5 headless)</span></div>
+    <div class="stat"><b>9.22 vs 8.65</b><span>SAB ON vs OFF (+6.6%)</span></div>
     <div class="stat"><b>236/236</b><span>peripheral unit tests</span></div>
     <div class="stat"><b>39/39</b><span>integration checks</span></div>
     <div class="stat"><b>30+</b><span>emulated peripherals</span></div>
-    <div class="stat"><b>10</b><span>demo presets</span></div>
 </div>
 
 <h2>How it works</h2>
 <div class="card">
 <p>The emulator uses a <strong>dual-engine architecture</strong>:</p>
 <ol>
-    <li><strong>Unicorn ARM</strong> &mdash; a QEMU-based TCG JIT compiler executes Cortex-M3 Thumb/Thumb-2 instructions in batches of 20,000. This gives native-like CPU speed without writing a custom decoder.</li>
+    <li><strong>Unicorn ARM</strong> &mdash; a QEMU-based TCG JIT compiler executes Cortex-M3 Thumb/Thumb-2 instructions in <strong>adaptive 20K/50K batches</strong> (<code>pkg/emulator.js:698</code> — 20K when IRQ/DMA pending, 50K idle; <code>batch_size</code> overrides). This gives native-like CPU speed without a custom decoder.</li>
     <li><strong>Rust Peripheral WASM</strong> &mdash; a WebAssembly module models every chip register with cycle-accurate timing, electrical behaviour (GPIO pull-ups, open-drain, slew), interrupt priorities and DMA transfers.</li>
+    <li><strong>Module Worker + OffscreenCanvas + SAB</strong> &mdash; browser emulation runs off-main-thread (<code>site/worker.js:1</code>, <code>site/index.html:449</code>); canvas is transferred via <code>OffscreenCanvas</code> (<code>site/worker.js:117</code>); <code>SharedArrayBuffer</code> + <code>Atomics</code> (<code>site/worker.js:163</code>) shares frame stats when <code>crossOriginIsolated</code> (<code>site/_headers:1</code>), with <code>coi-serviceworker.js</code> polyfill for GitHub Pages (SAB ON +6.6%).</li>
 </ol>
 </div>
 
 <h3>Batch loop</h3>
 <div class="card">
-<p>Each emulation step follows this cycle:</p>
+<p>Each emulation step follows this cycle (adaptive batch, <code>pkg/emulator.js:698</code>):</p>
 <ol>
     <li>Pump stdin &mdash; UART RX bytes from the host</li>
     <li>Process DMA transfers queued by peripherals</li>
-    <li>Execute a 20K-instruction batch via Unicorn&rsquo;s JIT</li>
-    <li>Tick all peripherals by the elapsed instruction count</li>
-    <li>Deliver pending interrupts (up to 64 per batch)</li>
+    <li>Execute an adaptive batch via Unicorn&rsquo;s JIT (20K busy / 50K idle)</li>
+    <li>Tick all peripherals by the elapsed instruction count (<code>step_batch</code>)</li>
+    <li>Deliver pending interrupts (up to 64 per batch, NVIC-priority ordered)</li>
     <li>Check watchdog reset flags</li>
+    <li>Worker posts frame → main renders (OffscreenCanvas if transferred, <code>site/worker.js:168</code>); <code>UI_THROTTLE 10</code> (<code>site/index.html:441</code>) — step 60fps, paint 6fps, never starves throughput</li>
 </ol>
 </div>
 
 <h3>Performance techniques</h3>
 <div class="card">
 <ul>
-    <li><strong>Hookless instruction counting</strong> &mdash; Unicorn&rsquo;s built-in
-    <code>emu_start(begin, 0, 0, maxBatch)</code> stops exactly at the batch limit, removing
-    the per-instruction JS callback that cost ~20% of runtime.</li>
-    <li><strong>Closed-form timer advance</strong> &mdash; timer CNT jumps directly to the next
-    event tick (update wrap, compare match) instead of iterating every tick. 124&times; speedup
-    on TIM&rsquo;s <code>advance()</code> function.</li>
-    <li><strong>Bus binary search</strong> &mdash; peripheral lookups use a sorted vector + binary
-    search, achieving ~99% hit rate on the hot path.</li>
-    <li><strong>Batch register transport</strong> &mdash; interrupt frame save/restore crosses the
-    WASM boundary only twice (17&times; reduction) using batch read/write APIs.</li>
-    <li><strong>Rust-side DMA pump</strong> &mdash; DMA transfers are resolved entirely in Rust
-    (absorb, push, memcpy) and returned as a flat op-plan for JS to execute on Unicorn RAM.</li>
+    <li><strong>Hookless instruction counting</strong> &mdash; <code>emu_start(begin,0,0,maxBatch)</code> stops exactly at the batch limit, removing the per-instruction callback (~20% win).</li>
+    <li><strong>Closed-form timer advance</strong> &mdash; CNT jumps to next event tick (124&times; on <code>advance()</code>).</li>
+    <li><strong>Adaptive 20K/50K batch</strong> (<code>pkg/emulator.js:698</code>) &mdash; 20K keeps IRQ latency ≈1.1 ms; 50K doubles idle throughput, free when idle.</li>
+    <li><strong>REG_POOL pooling</strong> (<code>pkg/emulator.js:228</code>) &mdash; batch register transport reuses 3 mallocs (384 allocs/40M → pooled).</li>
+    <li><strong>Worker + OffscreenCanvas + SAB</strong> (<code>site/worker.js:1</code>) &mdash; off-main-thread + zero-copy canvas + <code>SharedArrayBuffer</code> (<code>site/worker.js:163</code>) + <code>queueMicrotask</code> (<code>site/worker.js:220</code>) vs <code>setTimeout 4ms</code>; browser 8.6 MIPS headed, SAB ON +6.6%.</li>
+    <li><strong>UI_THROTTLE 10</strong> (<code>site/index.html:441</code>) &mdash; DOM 6fps vs emulation 60fps decoupling.</li>
+    <li><strong>Bus binary search + Rust DMA pump</strong> &mdash; sorted-vector lookup (~99% hit) + DMA resolved entirely in Rust (flat op-plan).</li>
 </ul>
 </div>
 
@@ -467,7 +464,7 @@ emu.<span class="n">close</span>();                        <span class="c">// fr
 
 <h2>Browser demo features</h2>
 <p style="font-size:13px; color:#64748b; margin-bottom:8px;">
-The live demo (<a href="index.html">index.html</a>) runs entirely in the browser with no server needed &mdash; just open the page or serve it with <code>python3 -m http.server</code>.
+The live demo (<a href="index.html">index.html</a>) runs entirely in the browser with no server needed &mdash; just open the page or serve it with <code>python3 -m http.server -d site</code>. Worker off-thread + OffscreenCanvas + SAB dual-mode + adaptive batch + <code>batch_size</code> option (<code>site/worker.js:1</code>, <code>site/_headers:1</code>, <code>pkg/emulator.js:217</code>) — see <code>docs/USAGE.md</code>. Badge shows <code>SAB ON/OFF</code> (<code>site/index.html:300</code>, both work).
 </p>
 
 <h3>10 built-in presets</h3>
@@ -590,7 +587,7 @@ The emulator has a three-tier test suite that runs in CI on every push:
 
 <details>
   <summary>How fast is it?</summary>
-  <div class="faq-body">~24 million instructions per second headless (Node.js CLI), ~5 MIPS in the browser. A 200M-instruction firmware test completes in about 9 seconds on a modern desktop. Performance is dominated by the Unicorn JIT &mdash; the JS/Rust peripheral layer accounts for less than 3% of wall time.</div>
+  <div class="faq-body"><strong>Headless (Node CLI)</strong>: <strong>21.8 MIPS</strong> (50M in 2.29s, pure compute 26.5 MIPS). <strong>Browser</strong>: 8.6 MIPS headed (40.7M/8.97s), 4.5 MIPS headless (rAF throttled). <strong>SAB ON 9.22 vs OFF 8.65 = +6.6%</strong> — SAB uses <code>SharedArrayBuffer</code> + <code>Atomics</code> (<code>site/worker.js:163</code>) when <code>crossOriginIsolated</code> (<code>site/_headers:1</code>); <code>coi-serviceworker.js</code> polyfills GitHub Pages (still works, just slower). Unicorn JIT is ~97.5% of wall time; JS/Rust layer &lt;3%. See <code>docs/ARCHITECTURE.md:201</code>.</div>
 </details>
 
 <details>

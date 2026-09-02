@@ -36,7 +36,7 @@ await mcu.execute(100_000);
 | `STM32F1.fromHex(text, opts?)` | Load Intel HEX text |
 | `STM32F1.create(opts)` | Pass `opts` straight to `createEmulator()` |
 
-`opts` is the `createEmulator()` options object. To attach virtual devices, pass
+`opts` is the `createEmulator()` options object (`pkg/emulator.js:205`). `batch_size` (`pkg/emulator.js:217`) is `20000` by default or adaptive `20K` (IRQ/DMA pending) / `50K` idle when omitted — pass `batch_size: 50000` to force a fixed batch, see `site/worker.js:130` / `pkg/cli.mjs:632`. To attach virtual devices, pass
 `opts.ext_devices` exactly as `cli.mjs`/`emulator.js` expect it:
 
 ```js
@@ -51,7 +51,7 @@ const mcu = await STM32F1.fromELF(elf, {
 });
 ```
 
-Instance methods: `execute(cycles) -> {instCount, stopped}`, `step(cycles)`,
+Instance methods: `execute(cycles) -> {instCount, stopped}`, `step(cycles)` (respects `batch_size` / adaptive 20K/50K, `pkg/emulator.js:698`),
 `stop()`, `close()`, `reset()`, `loadELF/loadBin/loadHex(buf)`, `uartRx(byte)`,
 `uartOutput`, `onPeriphWrite(fn)`, `setSymbols(text)`, `resolveSymbol(pc)`.
 

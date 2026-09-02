@@ -26,6 +26,7 @@ const emu = await createEmulator({
   svd: null,           // SVD XML string (optional; overrides the builtin map)
   js_peripherals: [],  // rp2040js-style custom peripherals, see below
   uart_addr: 0x40013800,    // USART used by uartRx()
+  batch_size: 20000,   // fixed batch size; omit for adaptive 20K/50K (pkg/emulator.js:217)
   verbose: false,
   ext_devices: {},     // see below
 });
@@ -172,15 +173,22 @@ node tests/canary.mjs          # same thing with --max=100000000, asserts 39/39,
   synchronous SVC check works in `setup()`.
 - Use `--max=200000000` for the full run (50M stops mid-print, which is not a deadlock).
 
-## Browser demo
+## Browser demo (`site/index.html:16`, `site/worker.js:1`, `site/_headers:1`)
 
 ```bash
-python -m http.server -d pkg    # open http://localhost:8000
+python -m http.server -d site   # open http://localhost:8000  (site/ serves index.html)
+# or: npx serve site -p 8000
 ```
 
-The demo runs the periph39 firmware live with a run loop that batches
-`step(20000)` per rAF frame, renders UART output per frame, and reports real IPS.
-Full periph39 run: ~0.5 s wall in-browser.
+The demo runs the periph39 firmware live. Dual-mode:
+
+- **Worker path** (preferred, `site/worker.js:48`): `new Worker('./worker.js', {type:'module'})` (`site/index.html:449`) — emulation runs off-main-thread at ~60fps / 80ms budget (`site/worker.js:130`), posts `{frame, pins, uartOut, oledFb/lcdFb}` to main. Main thread only renders. ~8.6 MIPS headed.
+- **Main-thread fallback** (`site/index.html:1034`): `requestAnimationFrame(runLoop)` when Worker unavailable — same `emu.step()` logic, same 8.6 MIPS (headed) / 4.5 MIPS (headless rAF throttled).
+- **SAB ON/OFF** (`site/_headers:1`, `site/coi-serviceworker.js:1`, `site/index.html:300`): `Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: require-corp` → `crossOriginIsolated=true` → `SharedArrayBuffer` 32B + `Atomics.store/notify` (`site/worker.js:163`) + `queueMicrotask` loop vs `setTimeout 4ms` (`site/worker.js:220`). Badge shows `SAB ON` (green, 9.22 MIPS) vs `SAB OFF` (grey, 8.65 MIPS = +6.6%). GitHub Pages has no headers → `coi-serviceworker.js` polyfill injects them via ServiceWorker and reloads; both modes work.
+- **OffscreenCanvas** (`site/worker.js:117`, `site/index.html:977`): main calls `canvas.transferControlToOffscreen()` and sends `[oledOff, lcdOff]` to worker (`site/worker.js:118`); worker renders `oledCtx`/`lcdCtx` directly (`site/worker.js:168`). If transfer not supported (Safari) worker sends framebuffers to main — no feature loss.
+- **Adaptive batch** (`pkg/emulator.js:698`): `20K` when IRQ/DMA pending (≈1.1 ms latency), `50K` idle; override with `batch_size` (`pkg/emulator.js:217`) e.g. `{batch_size: 20000}` for fixed. `UI_THROTTLE 10` (`site/index.html:441`) decouples DOM — step every rAF, render every 10th frame (~6fps).
+
+Full periph39 run: ~0.5 s wall headed (~40.7M in 8.97s pure = 8.6 MIPS; 4.5 MIPS headless).
 
 ## Development
 
@@ -211,10 +219,11 @@ fs.writeFileSync('tests/arduino_periph_test/build/spi_flash2.bin', Buffer.alloc(
 Disassembly for ISR debugging (Windows PowerShell):
 `arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino.elf > isr.asm`
 
-## Performance notes
+## Performance notes (`docs/ARCHITECTURE.md:201`)
 
-- ~22M instructions/sec in Node; the demo runs the whole 24-peripheral firmware in
-  ~0.5 s wall.
-- Batch size 20K → IRQ latency ≈ 1.1 ms at real speed.
-- RSS stable at ~150 MB regardless of instruction count (no leaks — stress-verified
-  over ~2.5B instructions).
+- **Headless (Node CLI)**: **21.8 MIPS** — 50M in 2.29s (`pkg/cli.mjs:632` adaptive 20K/50K); **26.5 MIPS pure** (no IRQ/DMA batch overhead).
+- **Browser (headed)**: **8.6 MIPS** (40.7M/8.97s); **4.5 MIPS** headless (rAF throttled). **SAB ON 9.22 vs OFF 8.65 = +6.6%** (`site/_headers:1`, `site/worker.js:163` SharedArrayBuffer + `site/worker.js:220` queueMicrotask).
+- **Batch**: adaptive **20K** (IRQ/DMA pending, ≈1.1 ms latency) / **50K** idle (`pkg/emulator.js:698`); `batch_size` option overrides (`pkg/emulator.js:217`).
+- **Pooling**: `REG_POOL 16` `regsRead`/`regsWrite` pooled (`pkg/emulator.js:228`) — 384 allocs/40M → once.
+- **Worker + OffscreenCanvas + UI_THROTTLE 10** (`site/worker.js:1`, `site/index.html:441`): emulation off-main-thread, canvas in worker, DOM 6fps vs step 60fps — never starves throughput.
+- RSS stable at ~150 MB regardless of instruction count (no leaks — stress-verified over ~2.5B instructions).

@@ -13,16 +13,38 @@ layer bridges the two.
 │  stops exactly at maxBatch (faults: ~0.01% of batches, skip + credit full batch)        │
 │  memReadHook / memWriteHook → periph_read / periph_write   [fires ~0.1% of instructions]│
 │                                                                                          │
-│  Loop (1 iteration = 1 batch of 20K instructions):                                       │
+│  Loop (1 iteration = 1 batch, adaptive 20K/50K):                                         │
 │    1. pump stdin → uart_rx_byte()                                                        │
 │    2. processDma()              ← move queued DMA data via Unicorn mem_read/write       │
-│    3. uc.emu_start(pc|1, 0, 0, 20000)  ← run one batch in Unicorn                       │
-│    4. step_batch(20000)          ← Rust ticks ALL peripherals once (instruction-delta)  │
+│    3. uc.emu_start(pc|1, 0, 0, curBatch)  ← run one batch in Unicorn                    │
+│       curBatch = 20K when IRQ/DMA pending, 50K when idle (pkg/emulator.js:698)          │
+│       batch_size opts overrides adaptive (pkg/emulator.js:217)                           │
+│    4. step_batch(curBatch)       ← Rust ticks ALL peripherals once (instruction-delta)  │
 │       (status==1 → watchdog reset requested → stop)                                     │
 │    5. processDma()                                                                       │
 │    6. processInterrupts()       ← up to 64 IRQs per batch, NVIC-priority ordered        │
 │    7. watchdog reset check                                                               │
+│  Pooling: REG_POOL 16 regsRead/regsWrite reuse 3×malloc (pkg/emulator.js:228)           │
 └──────────────────────────────────────────────────────────────────────────────────────────┘
+
+Browser dual-mode (`site/index.html:16`, `site/worker.js:1`, `site/_headers:1`):
+  ┌─ Worker path (preferred, off-main-thread) ──────────────────────────────────┐
+  │  main thread → new Worker('./worker.js', {type:'module'}) (site/index.html:449)      │
+  │  worker.js: createEmulator + step loop @ ~60fps / 80ms budget (site/worker.js:130)   │
+  │  worker posts {frame, pins, uartOut, oledFb/lcdFb, rgbDuty, buzz} → main renders     │
+  │  OffscreenCanvas: main transfers canvas → worker renders directly (site/worker.js:117) │
+  │  SAB fast path when crossOriginIsolated (site/worker.js:123, site/_headers:1):        │
+  │    SharedArrayBuffer 32B [instCount, PC, SP, runSteps] + Atomics.store/notify        │
+  │    queueMicrotask loop (~0ms) vs setTimeout 4ms clamp when not isolated              │
+  │  UI_THROTTLE 10: step every rAF, render visuals every 10th frame (site/index.html:441)│
+  └────────────────────────────────────────────────────────────────────────────────────────┘
+  ┌─ Main-thread fallback ──────────────────────────────────────────────────────┐
+  │  requestAnimationFrame(runLoop) (site/index.html:1034) when Worker unavailable       │
+  │  same adaptive 20K/50K batch + UI_THROTTLE 10 DOM decoupling                         │
+  └────────────────────────────────────────────────────────────────────────────────────────┘
+  SAB dual-mode (`site/coi-serviceworker.js:1`, `site/index.html:300` badge):
+    COOP/COEP headers present → crossOriginIsolated=true → SAB ON (zero-copy, faster)
+    GitHub Pages (no headers) → coi-serviceworker polyfill → SAB OFF → still works
 ```
 
 ## The two modules
@@ -184,6 +206,15 @@ each enabled bank (`BCR.MBKEN`, writes also need `BCR.WREN`) reads/writes a JS-b
 byte image (`add_fsmc_bank('FSMC.BANK1', data)`) at its 0x6000_0000+ window, with
 byte/16/32-bit accesses. NAND/PC-Card banks are always enabled.
 
+## Worker + SAB + OffscreenCanvas + adaptive batch & pooling
+
+- **Worker** (`site/worker.js:1`, `site/index.html:449`): module Worker (`{type:'module'}`) runs `createEmulator` + `emu.step()` loop at ~60fps (80ms budget, `site/worker.js:130`). Main thread keeps DOM/canvas; worker posts `{frame, pins, uartOut, oledFb/lcdFb, rgbDuty, buzz}` per frame (`site/worker.js:199`). Fallback is main-thread `requestAnimationFrame(runLoop)` (`site/index.html:1034`) when Worker unavailable. Both paths share the same `emulator.js` batch logic.
+- **SAB dual-mode** (`site/_headers:1`, `site/coi-serviceworker.js:1`, `site/index.html:16`, `site/index.html:300`, `site/worker.js:123`): `Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: require-corp` → `crossOriginIsolated=true` → `SharedArrayBuffer` 32B `[instCount, PC, SP, runSteps]` written with `Atomics.store`/`Atomics.notify` (`site/worker.js:163`). Loop uses `queueMicrotask(loop)` when isolated (~0ms, `site/worker.js:220`) vs `setTimeout 4ms` clamp otherwise. GitHub Pages has no headers → `coi-serviceworker.js` polyfill registers a ServiceWorker that injects COOP/COEP and reloads; SAB badge (`site/index.html:300`) shows `SAB ON` (green) or `SAB OFF` (grey) — both modes work, ON is +6.6% faster.
+- **OffscreenCanvas** (`site/worker.js:117`, `site/index.html:977`): main transfers `oledCanvas`/`lcdCanvas` via `transferControlToOffscreen()` to worker; worker renders via `OffscreenCanvas.getContext('2d')` directly (`site/worker.js:168`, `site/worker.js:185`). If transfer fails (Safari/no support) worker sends framebuffers to main for rendering — no capability loss.
+- **Adaptive batch** (`pkg/emulator.js:698`, `pkg/cli.mjs:632`, `site/worker.js:130`): `curBatch = (anyPending || dmaBusy) ? 20K : 50K` (`pkg/emulator.js:217` `batch_size` overrides adaptive). 20K keeps IRQ latency ≈1.1 ms when active; 50K doubles idle throughput. Measured free vs fixed 20K.
+- **Pooling** (`pkg/emulator.js:228`, `pkg/cli.mjs:172`): `REG_POOL 16` — 3 `Module._malloc` buffers (`regIdsPtr`, `regValsPtr`, `regPtrsPtr`) reused for `regsRead`/`regsWrite`; IRQ dispatch used 3×malloc+free per IRQ ×64 IRQs/batch ×2 (save/restore) = 384 allocs per 40M instructions → now pooled once. `pkg/cli.mjs:172` and `pkg/emulator.js:228` are identical pools.
+- **UI_THROTTLE 10** (`site/index.html:441`, `site/index.html:1082`): DOM decoupling — `step()` runs every `rAF` frame (~60fps) for full throughput; visuals (`renderBoard`, `renderGpio`, `renderShowcase`, `updateRegs`) run only every 10th frame (~6fps). Stepping is never starved by rendering; this lifted headed browser from 4.5 → 8.6 MIPS before Worker, and with Worker keeps main thread ~6fps paint.
+
 ## Known workarounds (temporary, in the JS layer)
 
 1. **`mrs rX, msp` → `mov rX, sp`** (`patchMrsMsp` in cli.mjs): Unicorn cannot decode the
@@ -202,15 +233,18 @@ byte/16/32-bit accesses. NAND/PC-Card banks are always enabled.
 
 | Metric | Value |
 |---|---|
-| Throughput (periph39 firmware) | **~24M instructions/sec** (200M in ~8.3s) |
-| Browser demo (periph39 full run) | ~0.5 s wall |
-| Batch size | 20K instructions (≈1.1 ms IRQ latency) |
+| Headless (Node CLI, periph39) | **21.8 MIPS** — 50M in 2.29s; pure compute 26.5 MIPS (`pkg/cli.mjs:632`) |
+| Browser (headed, 40.7M/8.97s) | **8.6 MIPS** headed, **4.5 MIPS** headless (rAF throttled) |
+| SAB ON vs OFF (browser) | 9.22 MIPS (ON) vs 8.65 MIPS (OFF) = **+6.6%** (`site/_headers:1`, `site/worker.js:163`) |
+| Batch | **adaptive 20K/50K** — 20K when IRQ/DMA pending (≈1.1 ms latency), 50K idle (`pkg/emulator.js:698`, `pkg/cli.mjs:632`); `batch_size` overrides (`pkg/emulator.js:217`) |
 | Memory | stable ~150 MB RSS, no growth with instruction count |
-| Per-instruction JS cost | only the mem hooks (~0.1% of instructions) |
+| Per-instruction JS cost | only mem hooks (~0.1% of instructions); Unicorn TCG ~97.5% of runtime |
 
 Historical optimizations, in order: per-instruction tick → once-per-batch `step_batch`
 (3.8×), plain-number counters (1.19×), **hookless batch crediting** (1.16×), 20K batches
 (latency, free), **closed-form timer advance** (1.15×; step_batch 1409ms → 11ms — the
 only remaining O(ticks) loop was `tim.rs advance()`, rewritten to jump directly
-to update/compare-match event ticks with bit-identical event sets; Unicorn TCG
-is now ~97.5% of runtime, so the JS/Rust layers are exhausted).
+to update/compare-match event ticks with bit-identical event sets), **adaptive 20K/50K**
+(idle throughput, free), **REG_POOL pooling** (pkg/emulator.js:228 — 384 allocs/40M → pooled),
+**Worker + OffscreenCanvas + SAB** (site/worker.js:1 — browser 8-9 MIPS, +6.6% SAB),
+**UI_THROTTLE 10** (site/index.html:441 — DOM 6fps, step 60fps; never starves emulation).
