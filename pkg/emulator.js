@@ -3,7 +3,7 @@ const PERIPH_RANGES = [
     [0xE0000000, 0xE1000000],
 ];
 
-const DEFAULT_MAX_BATCH = 20000;
+const DEFAULT_MAX_BATCH = 50000;
 
 /**
  * Load the Rust peripheral WASM module.
@@ -213,7 +213,9 @@ export async function createEmulator(opts = {}) {
         uart_addr = 0x40013800,
         ext_devices = {},
         verbose = false,
+        batch_size = DEFAULT_MAX_BATCH,
     } = opts;
+    const maxBatch = batch_size;
 
     const MUnicorn = await getMUnicorn();
     const Module = await MUnicorn({});
@@ -257,7 +259,7 @@ export async function createEmulator(opts = {}) {
 
     const { periph_read, periph_write, tick, step_batch, process_batch, get_next_pending_interrupt,
     intr_next, intr_svc_enter, intr_svc_leave, intr_svc_depth,
-    dma_pump_all, dma_take_absorbed, dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested,
+    dma_pump_all, dma_take_absorbed, dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested, dma_get_pending_count,
     add_spi_flash, add_i2c_eeprom, add_touchscreen, add_lcd, add_i2c_oled, add_software_spi, reset_ext_devices,
     add_fsmc_bank, fsmc_write_byte, fsmc_read_byte,
     register_js_peripheral,
@@ -449,7 +451,8 @@ export async function createEmulator(opts = {}) {
         // the peripheral bus exactly like real hardware taps the pins.
         // Pin events first: a CS-level change recorded by periph_write must be
         // visible to the write watchers of the NEXT hook call (SPI DR while CS low).
-        drainPinEvents();
+        // Fast-path: skip the WASM crossing when no one is listening.
+        if (pinWatchers.length) drainPinEvents();
         if (writeWatchers.length) {
             for (let wi = 0; wi < writeWatchers.length; wi++) {
                 try { writeWatchers[wi](addr32, size, valueNum); } catch (e) {}
@@ -539,7 +542,9 @@ export async function createEmulator(opts = {}) {
     uc.hook_add(Module.HOOK_INTR, intrHook, null);
 
     const processDma = () => {
+        if (dma_get_pending_count() === 0) return;
         const plan = dma_pump_all();
+        if (plan.length === 0) return;
         for (let i = 0; i + 4 <= plan.length; i += 4) {
             const op = plan[i], a = plan[i + 1], b = plan[i + 2], c = plan[i + 3];
             try {
@@ -690,29 +695,49 @@ export async function createEmulator(opts = {}) {
             const startInst = instCount;
             let totalSteps = 0;
             let anyPending = false;
+            // profiling
+            let t_emu=0, t_batch=0, t_dma=0, t_irq=0, t_pin=0;
+            const profile = typeof process !== 'undefined' && process.env.PROFILE;
             while (!stopRequested) {
+                let t;
+                if (profile) t=performance.now();
                 processDma();
+                if (profile) t_dma+=performance.now()-t;
                 const curPc = uc.reg_read_i32(Module.ARM_REG_PC);
+                if (profile) t=performance.now();
                 try {
-                    uc.emu_start(curPc | 1, 0, 0, DEFAULT_MAX_BATCH);
+                    uc.emu_start(curPc | 1, 0, 0, maxBatch);
                 } catch (e) {
                     const msg = String(e);
                     if (!handleFault(msg)) throw e;
                 }
-                instCount += DEFAULT_MAX_BATCH;
-                batchInstCount += DEFAULT_MAX_BATCH;
+                if (profile) t_emu+=performance.now()-t;
+                instCount += maxBatch;
+                batchInstCount += maxBatch;
                 if (batchInstCount > 0) {
+                    if (profile) t=performance.now();
                     const status = process_batch(batchInstCount);
+                    if (profile) t_batch+=performance.now()-t;
                     batchInstCount = 0;
                     if (status & 0x80000000) { stopRequested = true; break; }
                     anyPending = (status & 0x40000000) !== 0;
                 }
+                if (profile) t=performance.now();
                 processDma();
+                if (profile) t_dma+=performance.now()-t;
+                if (profile) t=performance.now();
                 processInterrupts(anyPending);
+                if (profile) t_irq+=performance.now()-t;
+                if (profile) t=performance.now();
                 drainPinEvents();
+                if (profile) t_pin+=performance.now()-t;
                 totalSteps++;
                 if (is_watchdog_reset_requested()) break;
                 if (maxInstructions > 0 && instCount - startInst >= maxInstructions) break;
+            }
+            if (profile) {
+                const total = t_emu+t_batch+t_dma+t_irq+t_pin;
+                console.error(`[profile] emu ${(t_emu/total*100).toFixed(1)}% batch ${(t_batch/total*100).toFixed(1)}% dma ${(t_dma/total*100).toFixed(1)}% irq ${(t_irq/total*100).toFixed(1)}% pin ${(t_pin/total*100).toFixed(1)}%  total ${total.toFixed(1)}ms for ${totalSteps*maxBatch} instr  MIPS ${(totalSteps*maxBatch/total/1000).toFixed(1)}`);
             }
             return {
                 totalSteps,
@@ -721,17 +746,17 @@ export async function createEmulator(opts = {}) {
             };
         },
 
-        /** Run one batch (default 20K instructions) and return after processing DMA/interrupts. */
-        step(maxBatch = DEFAULT_MAX_BATCH) {
+        /** Run one batch (default batch_size) and return after processing DMA/interrupts. */
+        step(count = maxBatch) {
             processDma();
             const curPc = uc.reg_read_i32(Module.ARM_REG_PC);
             try {
-                uc.emu_start(curPc | 1, 0, 0, maxBatch);
+                uc.emu_start(curPc | 1, 0, 0, count);
             } catch (e) {
                 if (!handleFault(String(e))) throw e;
             }
-            instCount += maxBatch;
-            batchInstCount += maxBatch;
+            instCount += count;
+            batchInstCount += count;
             let anyPending = false;
             if (batchInstCount > 0) {
                 const status = process_batch(batchInstCount);

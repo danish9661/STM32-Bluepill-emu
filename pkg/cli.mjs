@@ -547,7 +547,9 @@ Examples:
     uc.hook_add(Module.HOOK_INTR, intrHook, null);
 
     const processDma = () => {
+        if (dma_get_pending_count() === 0) return;
         const plan = dma_pump_all();
+        if (plan.length === 0) return;
         for (let i = 0; i + 4 <= plan.length; i += 4) {
             const op = plan[i], a = plan[i + 1], b = plan[i + 2], c = plan[i + 3];
             try {
@@ -619,7 +621,7 @@ Examples:
         }
     };
 
-    const maxBatch = 20000;
+    const maxBatch = parseInt(process.env.EMU_BATCH || '20000', 10);
     let totalSteps = 0;
     const startTime = Date.now();
     const traceResolve = makeResolver(fwSymbols);
@@ -627,14 +629,20 @@ Examples:
     /* CAN RX injection: firmware sets canRxArmed=1, then waits for a frame */
     let canInjected = false;
     let anyPending = false;
+    let t_emu=0, t_batch=0, t_dma=0, t_irq=0;
+    const doProfile = !!process.env.PROFILE;
 
     while (!stopRequested) {
         const dmaBusy = dma_get_pending_count() > 0;
         while (stdinQueue.length > 0 && uart_rx_pending(uartAddr) === 0 && !dmaBusy) { const b = stdinQueue.shift(); uart_rx_byte(uartAddr, b); }
 
+        let t=0;
+        if (doProfile) t=performance.now();
         processDma();
+        if (doProfile) t_dma+=performance.now()-t;
         const curPc = uc.reg_read_i32(Module.ARM_REG_PC);
         if (verbose) console.log(`--- batch ${totalSteps} PC=0x${(curPc >>> 0).toString(16)} inst=${instCount} ---`);
+        if (doProfile) t=performance.now();
         try {
             uc.emu_start(BigInt(curPc | 1), 0n, 0n, maxBatch);
         } catch (e) {
@@ -681,16 +689,23 @@ Examples:
                 break;
             }
         }
+        if (doProfile) t_emu+=performance.now()-t;
         instCount += maxBatch;
         batchInstCount += maxBatch;
+        if (doProfile) t=performance.now();
         if (batchInstCount > 0) {
             const status = process_batch(batchInstCount);
             batchInstCount = 0;
             if (status & 0x80000000) { stopRequested = true; break; }
             anyPending = (status & 0x40000000) !== 0;
         }
+        if (doProfile) t_batch+=performance.now()-t;
+        if (doProfile) t=performance.now();
         processDma();
+        if (doProfile) t_dma+=performance.now()-t;
+        if (doProfile) t=performance.now();
         try { processInterrupts(anyPending); } catch (irqErr) { console.error('processInterrupts error at step', totalSteps, ':', irqErr?.message || irqErr); break; }
+        if (doProfile) t_irq+=performance.now()-t;
         totalSteps++;
 
         if (canArmedSym && !canInjected) {
@@ -703,7 +718,12 @@ Examples:
 
         try { if (stopRequested || is_watchdog_reset_requested()) break; } catch (wdErr) { console.error('WDT check error:', wdErr); break; }
         if (instCount >= maxInst) break;
+        if (doProfile && totalSteps % 100 === 0) {} // keep t var alive
         await new Promise(r => setImmediate(r));
+    }
+    if (doProfile) {
+        const total = t_emu+t_batch+t_dma+t_irq;
+        console.error(`[profile] emu ${(t_emu/total*100).toFixed(1)}% batch ${(t_batch/total*100).toFixed(1)}% dma ${(t_dma/total*100).toFixed(1)}% irq ${(t_irq/total*100).toFixed(1)}%  total ${total.toFixed(1)}ms  MIPS ${(instCount/total/1000).toFixed(1)}`);
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);

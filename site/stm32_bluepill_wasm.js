@@ -31,7 +31,7 @@ export function add_fsmc_bank(name, data) {
 }
 
 /**
- * Add an SPI flash device. Must be called before init().
+ * Add an I2C EEPROM device. Must be called before init().
  * @param {string} peripheral
  * @param {number} address
  * @param {Uint8Array} data
