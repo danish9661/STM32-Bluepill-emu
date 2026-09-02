@@ -222,40 +222,33 @@ export async function createEmulator(opts = {}) {
     const Module = await MUnicorn({});
     const periph = await getPeriph();
 
-    // unicorn_arm exposes the raw uc_reg_read_batch/write_batch C functions but
-    // no marshalling wrapper — allocate the id/pointer/value arrays so a whole
-    // register set crosses the boundary once instead of once per register
-    // (IRQ dispatch used ~17 individual crossings; now 2). Identical helper in
-    // cli.mjs — keep both in sync.
+    // Pool the 3 mallocs for regsRead/regsWrite — up to 64 IRQs/batch ×2 calls each
+    // used to do 3×malloc+free per IRQ (6×64=384 allocs/40M). Pool once, reuse.
+    const REG_POOL = 16;
+    const regIdsPtr = Module._malloc(REG_POOL * 4);
+    const regValsPtr = Module._malloc(REG_POOL * 4);
+    const regPtrsPtr = Module._malloc(REG_POOL * 4);
     const regsRead = (uc, regIds) => {
         const n = regIds.length;
         const handle = Module.getValue(uc.handle_ptr, '*');
-        const idsPtr = Module._malloc(n * 4);
-        const valsPtr = Module._malloc(n * 4);
-        const ptrsPtr = Module._malloc(n * 4);
-        const out = new Array(n);
         for (let i = 0; i < n; i++) {
-            Module.setValue(idsPtr + i * 4, regIds[i], 'i32');
-            Module.setValue(ptrsPtr + i * 4, valsPtr + i * 4, 'i32');
+            Module.setValue(regIdsPtr + i * 4, regIds[i], 'i32');
+            Module.setValue(regPtrsPtr + i * 4, regValsPtr + i * 4, 'i32');
         }
-        Module.ccall('uc_reg_read_batch', 'number', ['number', 'number', 'number', 'number'], [handle, idsPtr, ptrsPtr, n]);
-        for (let i = 0; i < n; i++) out[i] = Module.getValue(valsPtr + i * 4, 'i32');
-        Module._free(idsPtr); Module._free(valsPtr); Module._free(ptrsPtr);
+        Module.ccall('uc_reg_read_batch', 'number', ['number', 'number', 'number', 'number'], [handle, regIdsPtr, regPtrsPtr, n]);
+        const out = new Array(n);
+        for (let i = 0; i < n; i++) out[i] = Module.getValue(regValsPtr + i * 4, 'i32');
         return out;
     };
     const regsWrite = (uc, regIds, values) => {
         const n = regIds.length;
         const handle = Module.getValue(uc.handle_ptr, '*');
-        const idsPtr = Module._malloc(n * 4);
-        const valsPtr = Module._malloc(n * 4);
-        const ptrsPtr = Module._malloc(n * 4);
         for (let i = 0; i < n; i++) {
-            Module.setValue(idsPtr + i * 4, regIds[i], 'i32');
-            Module.setValue(valsPtr + i * 4, values[i], 'i32');
-            Module.setValue(ptrsPtr + i * 4, valsPtr + i * 4, 'i32');
+            Module.setValue(regIdsPtr + i * 4, regIds[i], 'i32');
+            Module.setValue(regValsPtr + i * 4, values[i], 'i32');
+            Module.setValue(regPtrsPtr + i * 4, regValsPtr + i * 4, 'i32');
         }
-        Module.ccall('uc_reg_write_batch', 'number', ['number', 'number', 'number', 'number'], [handle, idsPtr, ptrsPtr, n]);
-        Module._free(idsPtr); Module._free(valsPtr); Module._free(ptrsPtr);
+        Module.ccall('uc_reg_write_batch', 'number', ['number', 'number', 'number', 'number'], [handle, regIdsPtr, regPtrsPtr, n]);
     };
 
     const { periph_read, periph_write, tick, step_batch, process_batch, get_next_pending_interrupt,

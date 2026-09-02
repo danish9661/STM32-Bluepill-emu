@@ -208,6 +208,7 @@ function loop() {
     post('stopped');
     return;
   }
-  // schedule next frame off main thread — use setTimeout(0) to yield to message queue
-  setTimeout(loop, 0);
+  // SAB fast path: when crossOriginIsolated, queueMicrotask is ~0ms vs setTimeout 4ms clamp
+  if (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated) queueMicrotask(loop);
+  else setTimeout(loop, 0);
 }
