@@ -525,7 +525,7 @@ pub fn add_spi_flash(peripheral: &str, jedec_id: u32, data: &[u8], cs: Option<St
         .push(std::rc::Rc::new(std::cell::RefCell::new(flash)));
 }
 
-/// Add an SPI flash device. Must be called before init().
+/// Add an I2C EEPROM device. Must be called before init().
 #[wasm_bindgen]
 pub fn add_i2c_eeprom(peripheral: &str, address: u8, data: &[u8]) {
     use crate::ext_devices::i2c_eeprom::{I2cEeprom, I2cEepromConfig};

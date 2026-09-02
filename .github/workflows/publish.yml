@@ -69,7 +69,12 @@ jobs:
         run: wasm-pack build --target web --out-dir pkg
 
       - name: Set package version
-        run: npm version ${{ inputs.version }} --no-git-tag-version
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          npm version ${{ inputs.version }} --no-git-tag-version
+          git add package.json
+          git commit -m "v${{ inputs.version }}"
 
       - name: Run test suite
         run: npm test

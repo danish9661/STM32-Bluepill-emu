@@ -170,7 +170,7 @@ export class STM32F1 {
         this.usart3 = this.usart[3];
         this.spi = {};
         this.i2c = {};
-        for (let ch = 1; ch <= 6; ch++) this.spi[ch] = new SPI(this, ch);
+        for (let ch = 1; ch <= 3; ch++) this.spi[ch] = new SPI(this, ch);
         for (let ch = 1; ch <= 3; ch++) this.i2c[ch] = new I2C(this, ch);
         this.spi1 = this.spi[1]; this.spi2 = this.spi[2]; this.spi3 = this.spi[3];
         this.i2c1 = this.i2c[1]; this.i2c2 = this.i2c[2]; this.i2c3 = this.i2c[3];
@@ -278,7 +278,8 @@ export class STM32F1 {
                 const size = flat[i++]; const value = flat[i++];
                 if (this.onFsmcAccess) this.onFsmcAccess(bank, offset, write, size, value);
             } else {
-                break; // unknown discriminant: stop to avoid desync
+                console.warn('STM32F1: unknown event discriminant', type, 'at index', i - 1);
+                break; // unknown length: stop to avoid desync
             }
         }
     }

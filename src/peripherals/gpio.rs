@@ -132,17 +132,6 @@ impl GpioPorts {
         self.write_callbacks[pin.port as usize].push((pin.pin, Box::new(cb)));
     }
 
-    #[allow(dead_code)]
-    pub fn read_port(&mut self, sys: &System, port: u8) -> u16 {
-        let mut v = 0;
-        for (pin, cb) in &mut self.read_callbacks[port as usize] {
-            if cb(sys) {
-                v |= 1 << *pin;
-            }
-        }
-        v
-    }
-
     /// External driver level for a pin (read callback), if one is registered.
     pub fn read_pin_option(&mut self, sys: &System, port: u8, pin: u8) -> Option<bool> {
         for (p, cb) in &mut self.read_callbacks[port as usize] {
@@ -315,11 +304,6 @@ impl Gpio {
         self.pin_mode(pin) != 0 && self.pin_cnf(pin) == 2
     }
 
-    #[allow(dead_code)]
-    fn pin_is_analog(&self, pin: u8) -> bool {
-        self.pin_mode(pin) == 0 && self.pin_cnf(pin) == 0
-    }
-
     /// Electrical wire level of a pin:
     /// - external driver (read callback) wins whenever present;
     /// - input floating: external or 0;
@@ -363,11 +347,6 @@ impl Gpio {
             }
             changes &= !(stride_mask as u32) << (pin * stride);
         }
-    }
-
-    #[allow(dead_code)]
-    fn port_str(&self, pin: u8) -> String {
-        format!("GPIO{} P{}{}", self.port_letter, self.port_letter, pin)
     }
 }
 

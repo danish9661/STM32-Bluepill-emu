@@ -721,7 +721,7 @@ export async function createEmulator(opts = {}) {
             };
         },
 
-        /** Run one batch (default 100K instructions) and return after processing DMA/interrupts. */
+        /** Run one batch (default 20K instructions) and return after processing DMA/interrupts. */
         step(maxBatch = DEFAULT_MAX_BATCH) {
             processDma();
             const curPc = uc.reg_read_i32(Module.ARM_REG_PC);
