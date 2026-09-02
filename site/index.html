@@ -13,6 +13,20 @@
 <meta property="og:type" content="website">
 <meta property="og:image" content="https://danish9661.github.io/STM32-Bluepill-emu/og-image.png">
 <meta property="og:url" content="https://danish9661.github.io/STM32-Bluepill-emu/">
+<script>
+// COOP/COEP → SharedArrayBuffer dual-mode (GitHub Pages has no headers, so use coi-serviceworker polyfill)
+// If crossOriginIsolated is false, register coi-serviceworker.js which adds the headers via ServiceWorker
+// and reloads. When true, Worker can use SAB for zero-copy (future: shared wasmMemory).
+if (!crossOriginIsolated && 'serviceWorker' in navigator) {
+  // avoid infinite reload loop: only register once per session
+  if (!sessionStorage.getItem('coi-tried')) {
+    sessionStorage.setItem('coi-tried', '1');
+    navigator.serviceWorker.register('./coi-serviceworker.js').then(() => {
+      // coi-serviceworker will reload the page once it controls it
+    }).catch(() => {});
+  }
+}
+</script>
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -283,6 +297,7 @@ select:focus { outline: none; border-color: #0ea5e9; }
     <span class="spacer"></span>
     <a class="nav" href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">GitHub</a>
     <a class="nav" href="about.html">About</a>
+    <span id="sabBadge" class="badge off" title="SharedArrayBuffer: ON when COOP/COEP headers present (faster), OFF on plain GitHub Pages (still works)">SAB OFF</span>
     <span id="stateBadge" class="badge off">Idle</span>
 </header>
 
@@ -395,6 +410,19 @@ const boardWrap = $('boardWrap');
 const terminal = $('terminal');
 const gpioGrid = $('gpioGrid');
 const stateBadge = $('stateBadge');
+const sabBadge = $('sabBadge');
+if (sabBadge) {
+  if (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined') {
+    sabBadge.textContent = 'SAB ON';
+    sabBadge.classList.remove('off');
+    sabBadge.style.background = '#22c55e';
+    sabBadge.style.color = '#052e16';
+    sabBadge.title = 'SharedArrayBuffer ON — COOP/COEP headers present, zero-copy Worker';
+  } else {
+    sabBadge.textContent = 'SAB OFF';
+    sabBadge.title = 'SAB OFF — GitHub Pages (no headers). Self-host with COOP/COEP (_headers) or coi-serviceworker for SAB.';
+  }
+}
 let emu = null;
 let worker = null;
 let useWorker = false;
