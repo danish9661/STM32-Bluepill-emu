@@ -43,6 +43,7 @@ let totalInstBase = 0;
 let autoBytes = [];
 let canInjected = false;
 const CAN_RAM_FLAG = 0x200000b8;
+let oledOff = null, lcdOff = null, oledCtx = null, lcdCtx = null;
 
 // Pin activity buffer drained per frame
 let pinBuf = [];
@@ -112,6 +113,12 @@ async function handleMessage(e) {
       post('symbolsSet', { pc: regs.PC });
       break;
     }
+    case 'initCanvas': {
+      oledOff = msg.oled; lcdOff = msg.lcd;
+      try { oledCtx = oledOff ? oledOff.getContext('2d') : null; } catch {}
+      try { lcdCtx = lcdOff ? lcdOff.getContext('2d') : null; } catch {}
+      break;
+    }
   }
 }
 
@@ -148,10 +155,36 @@ function loop() {
   const regs = emu.getRegisters();
   const uartOut = emu.getUartOutput();
   const pins = pinBuf.splice(0);
-  // light showcase snapshot for main thread (optional, main can ignore)
-  let oledFb = null, lcdFb = null, segDigits = null, rgbDuty = null, buzz = null, wsInfo = null;
-  try { oledFb = emu.i2cOledFb('I2C1', 0x3C); } catch {}
-  try { lcdFb = emu.lcdFb('SPI1'); } catch {}
+  // OffscreenCanvas: render directly in worker if transferred, else send FB to main
+  let oledFb = null, lcdFb = null, rgbDuty = null, buzz = null;
+  if (oledCtx) {
+    try {
+      const fb = emu.i2cOledFb('I2C1', 0x3C);
+      oledCtx.clearRect(0, 0, 128, 64);
+      if (fb && fb.length) {
+        const img = oledCtx.createImageData(128, 64);
+        for (let x = 0; x < 128; x++) for (let page = 0; page < 8; page++) {
+          const b = fb[page * 128 + x] || 0;
+          for (let bit = 0; bit < 8; bit++) if (b & (1 << bit)) {
+            const i = ((page * 8 + bit) * 128 + x) * 4;
+            img.data[i] = 240; img.data[i + 1] = 240; img.data[i + 2] = 240; img.data[i + 3] = 255;
+          }
+        }
+        oledCtx.putImageData(img, 0, 0);
+      }
+    } catch {}
+  } else { try { oledFb = emu.i2cOledFb('I2C1', 0x3C); } catch {} }
+  if (lcdCtx) {
+    try {
+      const fb = emu.lcdFb('SPI1');
+      lcdCtx.clearRect(0, 0, 128, 64);
+      if (fb && fb.length) {
+        const img = lcdCtx.createImageData(128, 64);
+        for (let i = 0; i < 8192 && i < fb.length; i++) { const v = fb[i] ? 240 : 24; img.data[i * 4] = v; img.data[i * 4 + 1] = v; img.data[i * 4 + 2] = v; img.data[i * 4 + 3] = 255; }
+        lcdCtx.putImageData(img, 0, 0);
+      }
+    } catch {}
+  } else { try { lcdFb = emu.lcdFb('SPI1'); } catch {} }
   try { rgbDuty = [emu.pwmDuty(0x40000000, 0), emu.pwmDuty(0x40000000, 1), emu.pwmDuty(0x40000000, 2)]; } catch {}
   try { buzz = !!emu.gpioReadOutput(1, 14); } catch {}
 

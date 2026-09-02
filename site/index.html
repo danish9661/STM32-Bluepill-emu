@@ -408,9 +408,9 @@ let totalInst = 0;
 let lastBoardSig = '';
 let uiFrame = 0;
 // DOM-decoupling: the emulation steps every rAF frame (~60fps) for full throughput,
-// but the (expensive) visual layer is rendered only every UI_THROTTLE frames (~12fps).
+// but the (expensive) visual layer is rendered only every UI_THROTTLE frames (~6fps).
 // Stepping is never starved by rendering; this keeps browser MIPS high without a worker.
-const UI_THROTTLE = 5;
+const UI_THROTTLE = 10;
 
 // Worker — off-main-thread emulation (biggest browser win, ~2×)
 // Falls back to main-thread runLoop if Worker/module not supported.
@@ -944,6 +944,14 @@ async function initEmulator(data, name, extDevices = {}) {
         // autoBytes for periph_test autopilot
         const ab = (name.includes('periph_test') || name.includes('arduino_periph_test')) ? [0x41, 0x42] : [];
         worker.postMessage({ type: 'init', firmware: data, chip, svd: svdForWorker, ext_devices: extDevices, autoBytes: ab });
+        // Try OffscreenCanvas transfer for showcase (worker renders directly, no copy)
+        try {
+          if (typeof OffscreenCanvas !== 'undefined' && $('oledCanvas')?.transferControlToOffscreen) {
+            const oledOff = $('oledCanvas').transferControlToOffscreen();
+            const lcdOff = $('lcdCanvas').transferControlToOffscreen();
+            worker.postMessage({ type: 'initCanvas', oled: oledOff, lcd: lcdOff }, [oledOff, lcdOff]);
+          }
+        } catch {}
         // UI enabled on worker 'ready' message
         $('runBtn').disabled = true;
         $('stopBtn').disabled = true;
