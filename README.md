@@ -8,7 +8,7 @@
 A full-system emulator for the **STM32F1 family** (STM32F103C8 "Blue Pill", STM32F105, etc.)
 that runs **real, unmodified Arduino / STM32Cube firmware** in Node.js or the browser.
 
-**~21.8M instructions/sec** headless (`50M` in `2.3s`, `pure b .` `26.5`), **~8-9M instr/sec** in the browser (`periph_test 40M` `8.6` headed, `4.5` headless `Worker` `4.5` `SAB OFF` `→` `9.2` `SAB ON`).
+**~23M instructions/sec** headless (`50M` in `~2.1s`, emulator.js `200M` in `8.2s`) and **~21M in headless Chromium** (`200M` in `9.3s`, SAB OFF) — the browser matches Node since the CAN-autopilot timing fix. The interactive page loop stays frame-budgeted (`~8-9M` headed, `SAB ON +6.6%`).
 
 ---
 

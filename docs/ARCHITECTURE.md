@@ -234,9 +234,11 @@ byte/16/32-bit accesses. NAND/PC-Card banks are always enabled.
 
 | Metric | Value |
 |---|---|
-| Headless (Node CLI, periph39) | **21.8 MIPS** — 50M in 2.29s; pure compute 26.5 MIPS (`pkg/cli.mjs:632`) |
-| Browser (headed, 40.7M/8.97s) | **8.6 MIPS** headed, **4.5 MIPS** headless (rAF throttled) |
-| SAB ON vs OFF (browser) | 9.22 MIPS (ON) vs 8.65 MIPS (OFF) = **+6.6%** (`site/_headers:1`, `site/worker.js:163`) |
+| Headless (Node CLI, periph39) | **~23 MIPS** — 50M in ~2.1s; pure compute 26.5 MIPS (`pkg/cli.mjs:632`) |
+| Emulator.js path (Node, periph39) | **~24 MIPS** — 200M in 8.2s (`tests/test_emulator_js.mjs`) |
+| Browser direct run (headless Chromium) | **~21.5 MIPS** — 200M in 9.3s, SAB OFF (`tests/test_browser.mjs`) — parity with Node since the CAN-autopilot fix below |
+| Browser interactive loop | **8.6 MIPS** headed (frame-budgeted rAF/worker loop, `site/worker.js:130`); headless rAF throttled |
+| SAB ON vs OFF (browser loop) | 9.22 MIPS (ON) vs 8.65 MIPS (OFF) = **+6.6%** (`site/_headers:1`, `site/worker.js:163`) |
 | Batch | **adaptive 20K/50K** — 20K when IRQ/DMA pending (≈1.1 ms latency), 50K idle (`pkg/emulator.js:698`, `pkg/cli.mjs:632`); `batch_size` overrides (`pkg/emulator.js:217`) |
 | Memory | stable ~150 MB RSS, no growth with instruction count |
 | Per-instruction JS cost | only mem hooks (~0.1% of instructions); Unicorn TCG ~97.5% of runtime |
@@ -247,5 +249,9 @@ Historical optimizations, in order: per-instruction tick → once-per-batch `ste
 only remaining O(ticks) loop was `tim.rs advance()`, rewritten to jump directly
 to update/compare-match event ticks with bit-identical event sets), **adaptive 20K/50K**
 (idle throughput, free), **REG_POOL pooling** (pkg/emulator.js:228 — 384 allocs/40M → pooled),
-**Worker + OffscreenCanvas + SAB** (site/worker.js:1 — browser 8-9 MIPS, +6.6% SAB),
-**UI_THROTTLE 10** (site/index.html:441 — DOM 6fps, step 60fps; never starves emulation).
+**Worker + OffscreenCanvas + SAB** (site/worker.js:1 — browser loop 8-9 MIPS, +6.6% SAB),
+**UI_THROTTLE 10** (site/index.html:441 — DOM 6fps, step 60fps; never starves emulation),
+**CAN-autopilot symbol resolution** (all drivers parseElf-resolve `canRxArmed` instead of
+a hardcoded address that went stale: emulator.js 200M 12.45s → 8.18s, browser 9.2 → 21.8 MIPS),
+**poll-aware batch shrinking** (pkg/emulator.js:14, pkg/cli.mjs:501 — 8+ consecutive reads
+of one address shrink the batch to 5K with backoff; ~4% on periph39).

@@ -110,7 +110,9 @@ test.describe('Browser firmware tests', () => {
     await page.click('#loadPresetBtn');
     await expect(page.locator('#runBtn')).toBeEnabled({ timeout: 30000 });
     await page.click('#runBtn');
-    await page.waitForTimeout(3000);
+    // Worker boot + firmware init time varies with machine load: poll instead
+    // of a fixed sleep (a fixed 3s wait flakes when the tab is slow to start).
+    await expect.poll(async () => page.locator('.gpio-port').count(), { timeout: 30000 }).toBeGreaterThanOrEqual(3);
     const gpioPorts = await page.locator('.gpio-port').count();
     expect(gpioPorts).toBeGreaterThanOrEqual(3);
     await page.click('#stopBtn');

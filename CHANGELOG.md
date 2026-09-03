@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.0] — 2026-09-03
+
+### Performance
+- Poll-aware batch shrinking — 8+ consecutive reads of one peripheral address shrink the batch to 5K (batch-boundary flags land sooner), with backoff for external waits; ~4% on periph39 (`pkg/emulator.js`, `pkg/cli.mjs`, `POLL_SHRINK=0` disables)
+- CAN-autopilot flag resolved from ELF symbols instead of a hardcoded address that went stale (`canRxArmed` moved; the stale address cost a 3M-iteration spin storm per run): emulator.js 200M 12.45s → 8.18s, browser 9.2 → 21.8 MIPS
+
+### Added
+- `dmaPending()` emulator accessor (mirrors the CLI `dmaBusy` UART gate)
+- Browser speed benchmark (`tests/test_browser_speed.mjs`, wired into Playwright)
+- Worker sends a GPIO snapshot per frame so the page grid renders on the worker path (previously dark); chip name in worker-ready log
+
+### Fixed
+- Browser CI suite: GPIO-grid test polls instead of fixed sleep; F105 chip test expects the worker log line
+- `test_emulator_js.mjs` autopilot granularity 10M → 1M chunks
+
 ## [0.1.0] — 2026-08-22
 
 ### Added

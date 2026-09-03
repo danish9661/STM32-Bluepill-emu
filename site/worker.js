@@ -199,6 +199,14 @@ function loop() {
   } else { try { lcdFb = emu.lcdFb('SPI1'); } catch {} }
   try { rgbDuty = [emu.pwmDuty(0x40000000, 0), emu.pwmDuty(0x40000000, 1), emu.pwmDuty(0x40000000, 2)]; } catch {}
   try { buzz = !!emu.gpioReadOutput(1, 14); } catch {}
+  // GPIO snapshot for the main-thread grid (worker path has no local emu):
+  // 96 entries [odr0,idr0, odr1,idr1, ...] ports A-C. ~96 cheap crossings.
+  let gpioSnap = null;
+  try {
+    gpioSnap = [];
+    for (let port = 0; port < 3; port++) for (let pin = 0; pin < 16; pin++)
+      gpioSnap.push(emu.gpioReadOutput(port, pin) ? 1 : 0, emu.gpioReadInput(port, pin) ? 1 : 0);
+  } catch { gpioSnap = null; }
 
   post('frame', {
     instCount: lastResult ? lastResult.instCount : 0,
@@ -212,6 +220,7 @@ function loop() {
     lcdFb: lcdFb && lcdFb.length ? lcdFb.slice(0) : null,
     rgbDuty,
     buzz,
+    gpio: gpioSnap,
     stopped: lastResult ? lastResult.stopped : false,
   });
 
