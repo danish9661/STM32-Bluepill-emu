@@ -246,9 +246,9 @@ and more &mdash; with realistic timing, interrupts and electrical behaviour.</p>
 
 <h2>At a glance</h2>
 <div class="stat-grid">
-    <div class="stat"><b>21.8 MIPS</b><span>headless (50M/2.29s, pure 26.5)</span></div>
-    <div class="stat"><b>8.6 MIPS</b><span>browser headed (4.5 headless)</span></div>
-    <div class="stat"><b>9.22 vs 8.65</b><span>SAB ON vs OFF (+6.6%)</span></div>
+    <div class="stat"><b>~23 MIPS</b><span>headless (50M/~2.1s, pure 26.5)</span></div>
+    <div class="stat"><b>~21 MIPS</b><span>browser direct run (200M/9.3s, SAB OFF)</span></div>
+    <div class="stat"><b>9.22 vs 8.65</b><span>loop SAB ON vs OFF (+6.6%)</span></div>
     <div class="stat"><b>236/236</b><span>peripheral unit tests</span></div>
     <div class="stat"><b>39/39</b><span>integration checks</span></div>
     <div class="stat"><b>30+</b><span>emulated peripherals</span></div>
@@ -587,7 +587,7 @@ The emulator has a three-tier test suite that runs in CI on every push:
 
 <details>
   <summary>How fast is it?</summary>
-  <div class="faq-body"><strong>Headless (Node CLI)</strong>: <strong>21.8 MIPS</strong> (50M in 2.29s, pure compute 26.5 MIPS). <strong>Browser</strong>: 8.6 MIPS headed (40.7M/8.97s), 4.5 MIPS headless (rAF throttled). <strong>SAB ON 9.22 vs OFF 8.65 = +6.6%</strong> — SAB uses <code>SharedArrayBuffer</code> + <code>Atomics</code> (<code>site/worker.js:163</code>) when <code>crossOriginIsolated</code> (<code>site/_headers:1</code>); <code>coi-serviceworker.js</code> polyfills GitHub Pages (still works, just slower). Unicorn JIT is ~97.5% of wall time; JS/Rust layer &lt;3%. See <code>docs/ARCHITECTURE.md:201</code>.</div>
+  <div class="faq-body"><strong>Headless (Node CLI)</strong>: <strong>~23 MIPS</strong> (50M in ~2.1s, pure compute 26.5 MIPS); emulator.js path 200M in 8.2s. <strong>Browser direct run</strong> (headless Chromium): 200M in 9.3s (<strong>~21.5 MIPS</strong>, SAB OFF) — parity with Node since the CAN-autopilot timing fix (a stale flag address used to cost 3M-iteration spin storms). <strong>Interactive page loop</strong>: 8.6 MIPS headed (frame-budgeted); <strong>SAB ON 9.22 vs OFF 8.65 = +6.6%</strong> on the loop scheduler — SAB uses <code>SharedArrayBuffer</code> + <code>Atomics</code> (<code>site/worker.js:163</code>) when <code>crossOriginIsolated</code> (<code>site/_headers:1</code>); <code>coi-serviceworker.js</code> polyfills GitHub Pages (still works, just slower). Unicorn TCI is ~97.5% of wall time; JS/Rust layer &lt;3%. See <code>docs/ARCHITECTURE.md:201</code>.</div>
 </details>
 
 <details>
