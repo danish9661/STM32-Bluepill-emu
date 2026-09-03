@@ -938,7 +938,7 @@ function pollUart() {
     } catch (e) {}
 }
 
-async function initEmulator(data, name, extDevices = {}) {
+async function initEmulator(data, name, extDevices = {}, needsMainThread = false) {
     if (emu) { try { emu.close(); } catch {} emu = null; }
     if (worker) { try { worker.postMessage({type:'stop'}); } catch {} }
     cancelAnimationFrame(animId);
@@ -975,7 +975,11 @@ async function initEmulator(data, name, extDevices = {}) {
     // Try worker first (off-main-thread, ~2× browser win)
     const chipSel = $('chipSelect').value;
     firmwareData.chip = chipSel;
-    const tryWorker = !symbolsData; // .map + worker complicates symbol path; use main thread if symbols needed
+    // Try worker first (off-main-thread); main thread is forced when symbols
+    // are loaded, or when the preset taps the peripheral bus directly
+    // (showcase 7-seg / ws2812 strip decoders need a local emu:
+    // onPinChange/onPeriphWrite don't cross the worker boundary).
+    const tryWorker = !symbolsData && !needsMainThread;
     if (tryWorker && initWorker()) {
         useWorker = true;
         workerReady = false;
@@ -1194,7 +1198,7 @@ $('loadPresetBtn').addEventListener('click', async () => {
             await initEmulator(new Uint8Array(fw), 'arduino_hw_showcase.elf (7 peripherals live)', {
                 i2c_oled: [{ peripheral: 'I2C1', address: 0x3C, width: 128, height: 64 }],
                 lcd: [{ peripheral: 'SPI1', cs: 'PA8' }],
-            });
+            }, true); // main thread: 7-seg decoder taps onPinChange/onPeriphWrite
             segBuf = []; segDigits = [0x3F, 0x3F, 0x3F, 0x3F]; segCsLow = false;
             emu.onPinChange(segCsWatch);
             emu.onPeriphWrite(segSpiWatch);
@@ -1202,7 +1206,7 @@ $('loadPresetBtn').addEventListener('click', async () => {
             log('Press Run — OLED + LCD framebuffers, 7-seg, RGB PWM, buzzer at PB14 and the PB13 button widget go live.', 't-in');
         } else if (preset === 'ws2812') {
             const fw = await fetch('arduino_ws2812.elf').then(r => r.arrayBuffer());
-            await initEmulator(new Uint8Array(fw), 'arduino_ws2812.elf (WS2812 strip via SPI1+DMA)');
+            await initEmulator(new Uint8Array(fw), 'arduino_ws2812.elf (WS2812 strip via SPI1+DMA)', {}, true); // main thread: strip decoder taps onPeriphWrite
             wsBuf.length = 0;
             wsFrames = 0;
             wsLeds.forEach(led => { led.r = led.g = led.b = 0; });

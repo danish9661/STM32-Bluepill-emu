@@ -188,4 +188,34 @@ test.describe('Browser firmware tests', () => {
     expect(result.fails).toHaveLength(0);
     expect(result.summary).toMatch(/pass=39 fail=0/);
   });
+
+  test('bus-tapping presets load without errors (showcase + ws2812)', async ({ page }) => {
+    // Regression: these presets wire onPinChange/onPeriphWrite after init,
+    // which threw on a null emu on the worker path (main thread has no emu).
+    // They now force the main-thread path; assert no load failure + decoders live.
+    page.on('pageerror', (err) => console.log('PAGEERROR:', String(err).slice(0, 200)));
+    await page.goto('http://localhost:8765/');
+
+    await page.selectOption('#presetSelect', 'showcase');
+    await page.click('#loadPresetBtn');
+    await expect(page.locator('#runBtn')).toBeEnabled({ timeout: 30000 });
+    await page.click('#runBtn');
+    await page.waitForTimeout(12000);
+    let term = await page.locator('#terminal').textContent();
+    expect(term.includes('Failed to load preset')).toBe(false);
+    const segOn = await page.locator('#seg-svg .seg.on').count();
+    console.log(`showcase: ${segOn} 7-seg segments lit`);
+    expect(segOn).toBeGreaterThan(0);
+
+    await page.selectOption('#presetSelect', 'ws2812');
+    await page.click('#loadPresetBtn');
+    await expect(page.locator('#runBtn')).toBeEnabled({ timeout: 30000 });
+    await page.click('#runBtn');
+    await page.waitForTimeout(12000);
+    term = await page.locator('#terminal').textContent();
+    expect(term.includes('Failed to load preset')).toBe(false);
+    const frames = await page.locator('#wsFrameCount').textContent();
+    console.log(`ws2812: ${frames}`);
+    expect(frames).not.toMatch(/^0 frames/);
+  });
 });
