@@ -5,6 +5,15 @@ const PERIPH_RANGES = [
 
 const DEFAULT_MAX_BATCH = 20000;
 const LARGE_BATCH = 50000;
+// Poll-aware shrinking (see run()): a tight `while(!(REG & FLAG))` spin shows
+// up as many consecutive memReadHook hits on one address. Peripheral flags
+// refresh only between batches, so a spin wastes ~B/2 instructions per awaited
+// event at batch size B — shrink to POLL_BATCH while polling. Sustained
+// polling means an external wait (UART RX/CAN from outside: smaller batches
+// can't hurry those), so back off to normal batches after POLL_BACKOFF_AFTER.
+const POLL_BATCH = 5000;
+const POLL_THRESHOLD = 8;
+const POLL_BACKOFF_AFTER = 8;
 
 /**
  * Load the Rust peripheral WASM module.
@@ -413,6 +422,15 @@ export async function createEmulator(opts = {}) {
 
     const memReadHook = (handle, type, address, size, value, user_data) => {
         const addr32 = Number(address);
+        // Poll detector: consecutive reads of one address = firmware spinning
+        // on a status flag. Any other address ends the streak (progress).
+        if (addr32 === lastPollAddr) {
+            if (++pollStreak >= POLL_THRESHOLD) polling = true;
+        } else {
+            lastPollAddr = addr32;
+            pollStreak = 1;
+            polling = false;
+        }
         let val;
         if (addr32 >= 0xE0001000 && addr32 < 0xE0001100) {
             // SysTick: Rust never decrements CVR; fake a counting-down value
@@ -462,6 +480,9 @@ export async function createEmulator(opts = {}) {
     let stopRequested = false;
     let instCount = 0;
     let batchInstCount = 0;
+    // Poll-aware batch state (written by memReadHook, consumed by run()).
+    let lastPollAddr = 0, pollStreak = 0, polling = false;
+    let smallBatchStreak = 0, pollBackoff = 0;
     const writeWatchers = [];
     const pinWatchers = [];
 
@@ -694,11 +715,27 @@ export async function createEmulator(opts = {}) {
             const profile = typeof process !== 'undefined' && process.env.PROFILE;
             while (!stopRequested) {
                 // Adaptive batch: small (20K) when IRQs/DMA pending for low latency,
-                // large (50K) when idle for throughput. If user set batch_size
-                // explicitly, respect it as fixed.
-                const curBatch = (maxBatch !== DEFAULT_MAX_BATCH)
-                    ? maxBatch
-                    : ((anyPending || dma_get_pending_count() !== 0) ? DEFAULT_MAX_BATCH : LARGE_BATCH);
+                // large (50K) when idle for throughput. Poll-aware shrink: while
+                // the firmware spins on a status flag, run POLL_BATCH so the
+                // batch-boundary flag refresh lands sooner (saves ~B/2 spin
+                // instructions per awaited event). Back off after sustained
+                // polling (external wait — small batches only add overhead).
+                // If user set batch_size explicitly, respect it as fixed.
+                let curBatch;
+                if (maxBatch !== DEFAULT_MAX_BATCH) {
+                    curBatch = maxBatch;
+                } else if (polling && pollBackoff === 0 && (typeof process === 'undefined' || process.env.POLL_SHRINK !== '0')) {
+                    curBatch = POLL_BATCH;
+                    polling = false; // re-armed by the hook if the spin continues
+                    if (++smallBatchStreak >= POLL_BACKOFF_AFTER) {
+                        pollBackoff = POLL_BACKOFF_AFTER;
+                        smallBatchStreak = 0;
+                    }
+                } else {
+                    curBatch = ((anyPending || dma_get_pending_count() !== 0) ? DEFAULT_MAX_BATCH : LARGE_BATCH);
+                    smallBatchStreak = 0;
+                    if (pollBackoff > 0) pollBackoff--;
+                }
                 let t;
                 if (profile) t=performance.now();
                 processDma();

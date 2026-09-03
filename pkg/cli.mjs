@@ -437,6 +437,15 @@ Examples:
 
     const memReadHook = (handle, type, address, size, value, user_data) => {
         const addr32 = Number(address);
+        // Poll detector: consecutive reads of one address = firmware spinning
+        // on a status flag. Any other address ends the streak (progress).
+        if (addr32 === lastPollAddr) {
+            if (++pollStreak >= POLL_THRESHOLD) polling = true;
+        } else {
+            lastPollAddr = addr32;
+            pollStreak = 1;
+            polling = false;
+        }
         let val;
         if (addr32 >= 0xE0001000 && addr32 < 0xE0001100) {
             val = addr32 === 0xE0001004
@@ -479,6 +488,19 @@ Examples:
     let instCount = 0;
     let batchInstCount = 0;
     let stopRequested = false;
+    // Poll-aware batch state (written by memReadHook, consumed by the loop).
+    let lastPollAddr = 0, pollStreak = 0, polling = false;
+    let smallBatchStreak = 0, pollBackoff = 0;
+    // Poll-aware shrinking (mirrors pkg/emulator.js run()): a tight
+    // `while(!(REG & FLAG))` spin shows up as many consecutive memReadHook
+    // hits on one address. Peripheral flags refresh only between batches, so
+    // a spin wastes ~B/2 instructions per awaited event at batch size B —
+    // shrink to POLL_BATCH while polling. Sustained polling means an external
+    // wait (UART RX/CAN from outside: smaller batches can't hurry those), so
+    // back off to normal batches after POLL_BACKOFF_AFTER.
+    const POLL_BATCH = 5000;
+    const POLL_THRESHOLD = 8;
+    const POLL_BACKOFF_AFTER = 8;
 
     // Hookless instruction counting: emu_start(begin, 0, 0, maxBatch) stops exactly at
     // maxBatch instructions except on a fault (unmapped access, ~0.01% of batches),
@@ -632,7 +654,21 @@ Examples:
     while (!stopRequested) {
         const dmaBusy = dma_get_pending_count() > 0;
         while (stdinQueue.length > 0 && uart_rx_pending(uartAddr) === 0 && !dmaBusy) { const b = stdinQueue.shift(); uart_rx_byte(uartAddr, b); }
-        const curBatch = (process.env.EMU_BATCH ? maxBatch : ((anyPending || dmaBusy || uart_rx_pending(uartAddr) !== 0) ? SMALL_BATCH : LARGE_BATCH));
+        let curBatch;
+        if (process.env.EMU_BATCH) {
+            curBatch = maxBatch; // explicit override wins
+        } else if (polling && pollBackoff === 0 && process.env.POLL_SHRINK !== '0') {
+            curBatch = POLL_BATCH;
+            polling = false; // re-armed by the hook if the spin continues
+            if (++smallBatchStreak >= POLL_BACKOFF_AFTER) {
+                pollBackoff = POLL_BACKOFF_AFTER;
+                smallBatchStreak = 0;
+            }
+        } else {
+            curBatch = ((anyPending || dmaBusy || uart_rx_pending(uartAddr) !== 0) ? SMALL_BATCH : LARGE_BATCH);
+            smallBatchStreak = 0;
+            if (pollBackoff > 0) pollBackoff--;
+        }
 
         let t=0;
         if (doProfile) t=performance.now();
