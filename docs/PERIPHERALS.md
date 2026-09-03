@@ -44,7 +44,7 @@ including interrupt generation, status flags, and timing. Support levels:
 | Unit | Level | Notes |
 |---|---|---|
 | USART1–3 | Full | TXE/TC with **baud-rate byte pacing** (byte_time = 8M/baud instructions), RXNE + RX interrupt, overrun, HDSEL half-duplex loopback (loopback works for self-test), `uart_rx_byte()` injection, `uart_rx_pending()` gate, `get_uart_output()` capture of all transmitted text. |
-| SPI1–2 | Full | Master mode with 8/16-bit frames, CPOL/CPHA, bit-order; device selection via GPIO CS; serves external devices (flash/OLED/LCD/touchscreen); TX/RX FIFO behaviour. I2S registers decode but audio output is simulated (`generate_i2s_audio`). |
+| SPI1–2 (+SPI3 on SVD/high-density map) | Full | Master mode with 8/16-bit frames, CPOL/CPHA, bit-order; device selection via GPIO CS; serves external devices (flash/OLED/LCD/touchscreen); TX/RX FIFO behaviour. I2S registers decode but audio output is simulated (`generate_i2s_audio`). |
 | I2C1–2 | Full | Master state machine (START, address 7-bit, TX/RX, STOP, repeated START), SR1/SR2 status flags, error handling (AF, BER), interrupts (EV/ER). 10-bit addressing and slave mode are **not** implemented. |
 | CAN1 | Full | Mailboxes (TIR/TDTR/TDLR/TDHR), filters (ID-list and mask modes), TX request + TX-complete IRQ, RX FIFO + RX IRQ, `can_inject_message()` to inject a received frame from JS. |
 | SDIO | Full | SD host @ 0x40018000, IRQ 49, SDHC only (CCS=1): CMD0/2/3/6/7/8/9/12/13/16/17/18/24/25/55 + ACMD41 (busy-first power-up), 32-word FIFO, DATAEND/DBCKEND/CMDREND/CMDSENT/CTIMEOUT + MASK-gated IRQ, DMA2 CH4 requests. Backed by an `SdCard` image (`add_sd_card('SDIO', data)`); CSD capacity derived from image size. |
