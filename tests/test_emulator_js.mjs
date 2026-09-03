@@ -4,14 +4,22 @@
 // (the xPSR-restore bug was cli-only) — the browser path must stay green.
 // Runs the 24-peripheral firmware to completion and asserts 39/39 like the CLI.
 import { readFileSync } from 'fs';
-import { createEmulator } from '../pkg/emulator.js';
+import { createEmulator, parseElf } from '../pkg/emulator.js';
 
 const BUILD = 'tests/arduino_periph_test/build';
 const read = (f) => readFileSync(`${BUILD}/${f}`);
 
 const MAX = 200000000;           // full run (canary pace, ~30-60s)
-const CHUNK = 10000000;          // run in chunks so we can poll canRxArmed
-const CAN_RAM_FLAG = 0x200000b8; // firmware 'canRxArmed' symbol (periph_test build)
+const CHUNK = 1000000;            // 1M autopilot granularity: the CAN frame must
+                                  // land within ~a batch of arming (like cli.mjs),
+                                  // else the firmware burns an RF0R spin storm
+                                  // waiting (10M chunks cost ~3s per 200M run)
+// Resolve canRxArmed from the ELF symbols at runtime — a hardcoded address
+// goes stale on every firmware rebuild (was 0x200000b8 = canRxTries after
+// one rebuild: injection landed a full 3M-iteration RF0R timeout late).
+const CAN_RAM_FLAG = parseElf(read('arduino_periph_test.ino.elf'))
+    .symbols.find((s) => s.name === 'canRxArmed')?.addr
+    ?? (() => { throw new Error('canRxArmed symbol missing from ELF'); })();
 
 let passed = 0, failed = 0;
 const ok = (cond, name) => { if (cond) { passed++; } else { failed++; console.log(`FAIL: ${name}`); } };

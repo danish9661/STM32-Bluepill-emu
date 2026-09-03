@@ -5,7 +5,7 @@
 import { test, expect } from '@playwright/test';
 
 const SPEED_JS = async (useSvd) => {
-  const { createEmulator } = await import('./emulator.js');
+  const { createEmulator, parseElf } = await import('./emulator.js');
   const load = async (name) => {
     const r = await fetch(name);
     return new Uint8Array(await r.arrayBuffer());
@@ -37,8 +37,12 @@ const SPEED_JS = async (useSvd) => {
   });
   // Gated UART feed (A reserved for DMA RX, B for UART RX) + CAN autopilot,
   // mirroring pkg/cli.mjs so the firmware takes the same path as Node runs.
+  // canRxArmed is resolved from the ELF symbols — never hardcode it (a stale
+  // address silently costs a 3M-iteration RF0R spin storm per run).
+  const canSym = parseElf(fw).symbols.find((s) => s.name === 'canRxArmed');
+  if (!canSym) throw new Error('canRxArmed symbol missing from ELF');
+  const CAN_RAM_FLAG = canSym.addr;
   const queue = [0x41, 0x42];
-  const CAN_RAM_FLAG = 0x200000b8;
   let canInjected = false;
   const N = 20_000_000;
   let done = 0;

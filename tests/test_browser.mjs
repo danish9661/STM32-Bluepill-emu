@@ -18,7 +18,7 @@ test.describe('Browser firmware tests', () => {
     // Run the firmware directly in the browser context via createEmulator.
     // This bypasses the page's rAF runLoop and its step budget.
     const result = await page.evaluate(async () => {
-      const { createEmulator } = await import('./emulator.js');
+      const { createEmulator, parseElf } = await import('./emulator.js');
 
       const load = async (name) => {
         const r = await fetch(name);
@@ -56,7 +56,11 @@ test.describe('Browser firmware tests', () => {
 
       const MAX = 200_000_000;
       const CHUNK = 10_000_000;
-      const CAN_RAM_FLAG = 0x200000b8;
+      // Resolved from ELF symbols — a hardcoded address goes stale on rebuild
+      // (0x200000b8 silently became canRxTries: 3M-iteration RF0R spin storms).
+      const canSym = parseElf(fw).symbols.find((s) => s.name === 'canRxArmed');
+      if (!canSym) throw new Error('canRxArmed symbol missing from ELF');
+      const CAN_RAM_FLAG = canSym.addr;
       let canInjected = false;
       let done = 0;
       const t0 = performance.now();
@@ -123,7 +127,7 @@ test.describe('Browser firmware tests', () => {
 
     // Run directly in browser context (bypass rAF loop)
     const result = await page.evaluate(async () => {
-      const { createEmulator } = await import('./emulator.js');
+      const { createEmulator, parseElf } = await import('./emulator.js');
       const load = async (name) => {
         const r = await fetch(name);
         return new Uint8Array(await r.arrayBuffer());
@@ -155,7 +159,11 @@ test.describe('Browser firmware tests', () => {
       emu.uartRx(0x41);
       emu.uartRx(0x42);
       const MAX = 200_000_000, CHUNK = 10_000_000;
-      const CAN_RAM_FLAG = 0x200000b8;
+      // Resolved from ELF symbols — a hardcoded address goes stale on rebuild
+      // (0x200000b8 silently became canRxTries: 3M-iteration RF0R spin storms).
+      const canSym = parseElf(fw).symbols.find((s) => s.name === 'canRxArmed');
+      if (!canSym) throw new Error('canRxArmed symbol missing from ELF');
+      const CAN_RAM_FLAG = canSym.addr;
       let canInjected = false, done = 0;
       while (done < MAX) {
         const n = Math.min(CHUNK, MAX - done);

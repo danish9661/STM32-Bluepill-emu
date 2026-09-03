@@ -784,17 +784,35 @@ export async function createEmulator(opts = {}) {
             };
         },
 
-        /** Run one batch (default batch_size) and return after processing DMA/interrupts. */
+        /** Run one batch and return after processing DMA/interrupts. Default-size
+         *  steps shrink while the firmware spins on a status flag (same
+         *  poll-aware policy as run() — worker.js / page runLoop land here);
+         *  explicit sizes, or an explicit batch_size opt, always run exact. */
         step(count = maxBatch) {
+            let n = count;
+            if (count === maxBatch && maxBatch === DEFAULT_MAX_BATCH
+                && (typeof process === 'undefined' || process.env.POLL_SHRINK !== '0')) {
+                if (polling && pollBackoff === 0) {
+                    n = POLL_BATCH;
+                    polling = false; // re-armed by the hook if the spin continues
+                    if (++smallBatchStreak >= POLL_BACKOFF_AFTER) {
+                        pollBackoff = POLL_BACKOFF_AFTER;
+                        smallBatchStreak = 0;
+                    }
+                } else {
+                    smallBatchStreak = 0;
+                    if (pollBackoff > 0) pollBackoff--;
+                }
+            }
             processDma();
             const curPc = uc.reg_read_i32(Module.ARM_REG_PC);
             try {
-                uc.emu_start(curPc | 1, 0, 0, count);
+                uc.emu_start(curPc | 1, 0, 0, n);
             } catch (e) {
                 if (!handleFault(String(e))) throw e;
             }
-            instCount += count;
-            batchInstCount += count;
+            instCount += n;
+            batchInstCount += n;
             let anyPending = false;
             if (batchInstCount > 0) {
                 const status = process_batch(batchInstCount);
@@ -861,6 +879,11 @@ export async function createEmulator(opts = {}) {
 
         /** Unread bytes still queued in the UART RX buffer (0 = empty). */
         rxPending() { return uart_rx_pending(uart_addr); },
+
+        /** True while a DMA transfer is queued (mirror of cli.mjs dmaBusy gate:
+         *  hold UART bytes back while DMA is busy so the DMA RX test, not the
+         *  UART RX test, consumes the reserved byte). */
+        dmaPending() { return dma_get_pending_count() > 0; },
 
         /** Read a 32-bit word from emulated memory (e.g. a RAM flag). */
         memRead32(addr) {

@@ -42,7 +42,8 @@ let runSteps = 0;
 let totalInstBase = 0;
 let autoBytes = [];
 let canInjected = false;
-const CAN_RAM_FLAG = 0x200000b8;
+const CAN_RAM_FLAG = 0x200000b8; // fallback when main thread sends no address
+let canFlagAddr = CAN_RAM_FLAG;
 let oledOff = null, lcdOff = null, oledCtx = null, lcdCtx = null;
 let sabView = null;
 
@@ -64,6 +65,9 @@ async function handleMessage(e) {
       totalInstBase = 0;
       autoBytes = msg.autoBytes ? msg.autoBytes.slice() : [];
       canInjected = false;
+      // Main thread resolves 'canRxArmed' from the ELF symbols (hardcoded
+      // addresses go stale on rebuild); fall back for hex/bin firmware.
+      canFlagAddr = msg.canFlagAddr || CAN_RAM_FLAG;
       pinBuf = [];
       try { self.postMessage({ type: 'debug', msg: 'createEmulator start' }); } catch {}
       try {
@@ -144,7 +148,7 @@ function loop() {
       }
       if (!canInjected) {
         try {
-          if (emu.memRead32(CAN_RAM_FLAG) !== 0) {
+          if (emu.memRead32(canFlagAddr) !== 0) {
             canInjected = !!emu.canInjectMessage(0x40006400, 0 << 21, 2, 0xDEAD, 0);
           }
         } catch {}
