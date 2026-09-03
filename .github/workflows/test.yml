@@ -112,6 +112,8 @@ jobs:
         run: echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml --max=200000000
       - name: Emulator.js path (browser run loop) 200M firmware run
         run: node tests/test_emulator_js.mjs
+      - name: WebSocket bridge (headless server + WS client round-trip)
+        run: node tests/test_ws_bridge.mjs
       - name: WS2812 strip (SPI1 + DMA1 CH3) regression
         run: node tests/test_ws2812.mjs
       - name: STM32F1 wrapper API (ergonomic class over emulator.js)
