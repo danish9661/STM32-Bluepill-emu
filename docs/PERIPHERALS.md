@@ -47,7 +47,7 @@ including interrupt generation, status flags, and timing. Support levels:
 | SPI1–2 (+SPI3 on SVD/high-density map) | Full | Master mode with 8/16-bit frames, CPOL/CPHA, bit-order; device selection via GPIO CS; serves external devices (flash/OLED/LCD/touchscreen); TX/RX FIFO behaviour. I2S registers decode but audio output is simulated (`generate_i2s_audio`). |
 | I2C1–2 | Full | Master state machine (START, address 7-bit, TX/RX, STOP, repeated START), SR1/SR2 status flags, error handling (AF, BER), interrupts (EV/ER). 10-bit addressing and slave mode are **not** implemented. |
 | CAN1 | Full | Mailboxes (TIR/TDTR/TDLR/TDHR), filters (ID-list and mask modes), TX request + TX-complete IRQ, RX FIFO + RX IRQ, `can_inject_message()` to inject a received frame from JS. |
-| SDIO | Full | SD host @ 0x40018000, IRQ 49, SDHC only (CCS=1): CMD0/2/3/6/7/8/9/12/13/16/17/18/24/25/55 + ACMD41 (busy-first power-up), 32-word FIFO, DATAEND/DBCKEND/CMDREND/CMDSENT/CTIMEOUT + MASK-gated IRQ, DMA2 CH4 requests. Backed by an `SdCard` image (`add_sd_card('SDIO', data)`); CSD capacity derived from image size. |
+| SDIO | Full | SD host @ 0x40018000, IRQ 49: CMD0/1/2/3/6/7/8/9/12/13/16/17/18/24/25/32/33/35/36/38/55 + ACMD41 (busy-first power-up), 32-word FIFO, DATAEND/DBCKEND/CMDREND/CMDSENT/CTIMEOUT + MASK-gated IRQ, DMA2 CH4 requests. SD mode (CMD55+ACMD41, CSD v2) and MMC mode (CMD1, EXT_CSD with sector count) share the block R/W path; erase commands fill 0xFF. Backed by an `SdCard` image (`add_sd_card('SDIO', data)`); CSD capacity derived from image size. |
 | USB | Full | FS device @ 0x40005C00 + 512 B packet memory @ 0x40006000 (byte-exact sub-word access): EP0-7R with real toggle semantics (STAT toggle-on-1, CTR clear-on-0, DTOG read-only), CNTR masks, ISTR (event flags W0C; CTR/DIR/EP_ID derived like hardware), DADDR, BTABLE. USB RESET on FRES release, SETUP/OUT injection (`usb_inject_setup/out`, NAK unless armed, DTOG sequencing), IN completion drained as `UsbIn` event + IRQ20. No SOF engine (FNR=0), suspend/resume, wakeup IRQ42, or double-buffered endpoints. |
 
 ## Timers
@@ -78,7 +78,7 @@ These are *extra* peripherals the STM32 talks to over SPI/I2C — the "rest of t
 | LCD (e.g. SPI TFT) | SPI | Partial | Command/data stream state machine (`0xFB` command latch); pixel rendering is not provided — the 128×64 byte-per-pixel framebuffer is exposed via `lcd_fb('SPI1')` and the page renders it. |
 | Resistive touchscreen (ADS7846) | SPI | Full | Command decoding (channels incl. pressure 0x94), 8/12-bit modes, **deferred reply** (reply arrives on the SPI transfer *after* the command, like the real part), touch injection via `touchscreen_set_touch()` + touch-detect GPIO line. |
 | Software SPI (bit-banged GPIO) | GPIO | Full | `add_software_spi()`: CS/CLK/MISO/MOSI pins, emulated on GPIO transitions. |
-| SD card (SDHC) | SDIO | Full | Block-addressed image (512 B sectors); CID/CSD/OCR/RCA derived deterministically, CSD capacity from image size. File-backed via `add_sd_card('SDIO', data)`. |
+| SD card (SDHC) + eMMC (block layer) | SDIO | Full | Block-addressed image (512 B sectors); CID/CSD/OCR/RCA derived deterministically, CSD capacity + EXT_CSD sector count from image size. File-backed via `add_sd_card('SDIO', data)`. |
 
 ## What is NOT emulated
 
@@ -100,7 +100,7 @@ These are *extra* peripherals the STM32 talks to over SPI/I2C — the "rest of t
 
 ## Verification coverage
 
-- **354 unit tests** (`node tests/test_all.mjs`) — GPIO (incl. electrical model: pull-ups,
+- **372 unit tests** (`node tests/test_all.mjs`) — GPIO (incl. electrical model: pull-ups,
   open-drain, external-driver precedence, slew readback, pin-change events), USART, ADC (real conversion
   timing, RC sample-and-hold via gpioSetAnalog, DAC→ADC loopback, AWD IRQ, TIM1 TRGO /
   TIM1_CC1 / EXTI 11 external triggers), RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C,

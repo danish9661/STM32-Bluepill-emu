@@ -1689,6 +1689,79 @@ sdCmd(0, 0, 0);
 assert_eq(periph_read(SDIO + S_STA, 4) & F_CMDSENT, F_CMDSENT, 'SDIO no-card CMD0 CMDSENT');
 
 // ============================================================
+// SDIO MMC mode: CMD1 identification, EXT_CSD, erase commands
+// ============================================================
+group('SDIO MMC');
+
+const mmcImg = new Uint8Array(2048 * 512);
+for (let i = 0; i < mmcImg.length; i++) mmcImg[i] = i & 0xFF;
+add_sd_card('SDIO', mmcImg);
+reset();
+
+// CMD8 before any OP_COND keeps SD probe order (R7 echo)
+sdCmd(8, 0x1AA);
+assert_eq(periph_read(SDIO + S_RESP1, 4), 0x1AA, 'MMC CMD8 pre-init echoes (SD probe order)');
+periph_write(SDIO + S_ICR, 4, 0xFFFFFFFF);
+
+// CMD1 needs no APP latch: busy first polls, then R3 ready + sector mode
+let mocr = 0;
+for (let i = 0; i < 10 && !((mocr >>> 31) === 1); i++) {
+    sdCmd(1, 0x40FF8000);
+    mocr = periph_read(SDIO + S_RESP1, 4);
+}
+assert_eq((mocr >>> 31), 1, 'MMC CMD1 OCR ready bit sets');
+assert_eq((mocr >>> 30) & 1, 1, 'MMC CMD1 sector access mode bit');
+periph_write(SDIO + S_ICR, 4, 0xFFFFFFFF);
+
+// CMD8 after MMC init -> EXT_CSD register read (512 B)
+periph_write(SDIO + S_DLEN, 4, 512);
+periph_write(SDIO + S_DCTRL, 4, 0x1); // DTEN
+sdCmd(8, 0);
+assert_eq(periph_read(SDIO + S_STA, 4) & F_CMDREND, F_CMDREND, 'MMC CMD8 CMDREND');
+const ext = [];
+for (let i = 0; i < 128; i++) {
+    const w = periph_read(SDIO + S_FIFO, 4) >>> 0;
+    ext.push(w & 0xFF, (w >>> 8) & 0xFF, (w >>> 16) & 0xFF, (w >>> 24) & 0xFF);
+}
+assert_eq(ext.length, 512, 'MMC EXT_CSD 512 bytes drained');
+assert_eq(ext[192], 8, 'MMC EXT_CSD_REV');
+assert_eq(ext[196], 3, 'MMC EXT_CSD CARD_TYPE');
+assert_eq(ext[212] | (ext[213] << 8) | (ext[214] << 16) | (ext[215] << 24), 2048, 'MMC EXT_CSD SEC_COUNT');
+assert_eq(periph_read(SDIO + S_STA, 4) & (F_DATAEND | F_DBCKEND), F_DATAEND | F_DBCKEND, 'MMC EXT_CSD DATAEND');
+periph_write(SDIO + S_ICR, 4, 0xFFFFFFFF);
+
+// Shared path after MMC init: CID/RCA/block read
+sdCmd(2, 0, WR_LONG);
+assert_neq(periph_read(SDIO + S_RESP1, 4), 0, 'MMC CMD2 CID non-zero');
+sdCmd(3, 0);
+assert_eq(periph_read(SDIO + S_RESP1, 4) >>> 16, 0x1234, 'MMC CMD3 R6 RCA');
+sdCmd(17, 9);
+assert_eq(periph_read(SDIO + S_FIFO, 4) >>> 0, 0x03020100, 'MMC CMD17 first word of block 9');
+for (let i = 1; i < 128; i++) periph_read(SDIO + S_FIFO, 4);
+periph_write(SDIO + S_ICR, 4, 0xFFFFFFFF);
+
+// Erase CMD32/33/38: blocks read back as erased (0xFF)
+sdCmd(32, 10);
+assert_eq(periph_read(SDIO + S_RESP1, 4), 0x900, 'MMC CMD32 R1');
+sdCmd(33, 11);
+assert_eq(periph_read(SDIO + S_RESP1, 4), 0x900, 'MMC CMD33 R1');
+sdCmd(38, 0);
+assert_eq(periph_read(SDIO + S_RESP1, 4), 0x900, 'MMC CMD38 R1');
+sdCmd(17, 10);
+assert_eq(periph_read(SDIO + S_FIFO, 4) >>> 0, 0xFFFFFFFF, 'MMC erased block reads 0xFF');
+for (let i = 1; i < 128; i++) periph_read(SDIO + S_FIFO, 4);
+assert_eq(periph_read(SDIO + S_STA, 4) & F_DATAEND, F_DATAEND, 'MMC DATAEND after erased read');
+periph_write(SDIO + S_ICR, 4, 0xFFFFFFFF);
+
+// No card: CMD1 times out like any response command
+reset_ext_devices();
+reset();
+sdCmd(1, 0x40FF8000);
+assert_eq(periph_read(SDIO + S_STA, 4) & F_CTIMEOUT, F_CTIMEOUT, 'MMC no-card CMD1 CTIMEOUT');
+
+// ============================================================
+// Summary
+// ============================================================
 // WWDG early-wakeup interrupt (EWI -> IRQ0 at counter 0x40)
 // ============================================================
 group('WWDG EWI');

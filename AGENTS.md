@@ -59,7 +59,7 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 > gracefully instead of aborting the WASM module), and an audit document
 > (`docs/AUDIT.md`) covering memory, security, overhead and performance.
 ### Test suite: `node tests/test_all.mjs`
-**354/354 unit tests PASS** (GPIO incl. electrical model + pin events, USART, ADC incl. RC sample-and-hold / DAC loopback / external triggers / AWD IRQ, RCC incl. clock decode, SysTick, TIM, IWDG, WWDG EWI, NVIC, CRC, SPI, I2C, RTC incl. second/overflow + flags, PWR incl. PVD, FLASH, CAN, DMA, AFIO, EXTI, BKP incl. tamper, DAC, TIM6, RTC Alarm, UART RX, FSMC, SDIO, USB, deep-sleep gating, fault escalation).
+**354/354 unit tests PASS** (GPIO incl. electrical model + pin events, USART, ADC incl. RC sample-and-hold / DAC loopback / external triggers / AWD IRQ, RCC incl. clock decode, SysTick, TIM, IWDG, WWDG EWI, NVIC, CRC, SPI, I2C, RTC incl. second/overflow + flags, PWR incl. PVD, FLASH, CAN, DMA, AFIO, EXTI, BKP incl. tamper, DAC, TIM6, RTC Alarm, UART RX, FSMC, SDIO incl. MMC, USB, deep-sleep gating, fault escalation).
 
 ### Firmware test — `tests/arduino_periph_test/` (24-peripheral Arduino sketch, 39 checks)
 ```

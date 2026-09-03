@@ -87,26 +87,22 @@ isochronous endpoints (treated as bulk).
 
 ## 4. Storage: SD card vs eMMC (status answer)
 
-## 4. Storage: SD card vs eMMC (status answer)
+## 4. Storage: SD card vs eMMC (bridged this sprint)
 
-The SDIO host speaks the **SD protocol completely for block I/O**: CMD0/8/55/
-ACMD41 init with busy polling, SDHC CSD v2.0 capacity, CMD17/18/24/25 data at
-any block, DMA + polled paths. Any FAT stack (SdFat, FatFs over STM32SD) that
-talks SD will work, at any image size.
+The SDIO host now speaks both identification protocols behind one block
+layer. SD mode is unchanged (CMD55+ACMD41, CSD v2.0). MMC mode adds:
+CMD1 SEND_OP_COND with no APP latch (busy-first, R3 with sector-access bit),
+EXT_CSD register read via CMD8 (revision, card type, sector count from the
+image size), and erase commands CMD32/33/35/36/38 (fill 0xFF). The card mode
+latches on whichever OP_COND completes first, so real probe order works:
+CMD8 pre-init still echoes R7 (SD probing), then CMD1 switches the same card
+to MMC. CID/RCA/block R/W are shared; 8-bit WIDBUS needs no modeling (the
+FIFO is width-agnostic).
 
-**eMMC/MMC is not modeled.** Concretely missing: CMD1 SEND_OP_COND (MMC uses
-it instead of CMD55+ACMD41), OCR semantics without HCS/CCS negotiation,
-EXT_CSD (the MMC CMD8 is a 512-byte register read, unrelated to SD's CMD8
-voltage check), CID/CSD layout differences, 8-bit WIDBUS, erase-group/TRIM
-commands (CMD32/33/35/36/38 are absent on the SD path too), RPMB and boot
-partitions (out of scope regardless). A card strapped as eMMC would fail at
-identification (no response to CMD1 → timeout) and never reach block I/O.
-
-Practical note: eMMC on a Blue Pill is essentially nonexistent (BGA153/169
-package, 8 data lines, 1.8/3.3 V rails) — every real Blue Pill storage project
-uses SD over SPI or SDIO. If an eMMC firmware ever shows up, the cheap bridge
-is a CMD1 → OCR-ready fallback (~30 lines) treating the image as block storage;
-full EXT_CSD/boot/RPMB fidelity is not worth building without a consumer.
+Still out (documented, no consumer): HS200/HS400 speed modes (need 1.8 V +
+tuning the F1 lacks), RPMB authenticated access, boot partitions. Practical
+note stands: eMMC on a Blue Pill needs an adapter breakout (BGA package) —
+every real Blue Pill storage project uses SD.
 
 ## 5. Test coverage of the above
 

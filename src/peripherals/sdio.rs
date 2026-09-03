@@ -24,6 +24,12 @@ pub const SDIO_IRQ: i32 = 49;
 /// Global DMA channel number for DMA2 CH4 (see Peripherals::dma_request).
 pub const SDIO_DMA_CHANNEL: u32 = 11;
 const FIFO_DEPTH_WORDS: usize = 32;
+// Card identification mode, latched by whichever OP_COND completes first:
+// SD stacks probe CMD8 (R7 echo) before ACMD41; MMC stacks send CMD1. The
+// data path (block R/W) is identical afterwards.
+const MODE_UNKNOWN: u8 = 0;
+const MODE_SD: u8 = 1;
+const MODE_MMC: u8 = 2;
 
 // STA event flags (latched until cleared via ICR).
 const F_CMDREND: u32 = 1 << 6;
@@ -64,6 +70,10 @@ pub struct Sdio {
     mask: u32,
     app_cmd: bool,
     acmd41_polls: u32,
+    cmd1_polls: u32,
+    card_mode: u8,
+    erase_start: u32,
+    erase_end: u32,
     blocklen: u32,
     selected: bool,
     xfer: DataXfer,
@@ -159,7 +169,12 @@ impl Sdio {
         if let Some(card) = self.find_card() {
             card.borrow().read_block(lba, &mut payload);
         }
-        self.xfer = DataXfer { active: true, write: false, lba, rx: payload, rx_pos: 0, tx: Vec::new() };
+        self.start_read_buf(sys, payload);
+    }
+
+    /// Start a read transfer from an already-built buffer (EXT_CSD path).
+    fn start_read_buf(&mut self, sys: &System, payload: Vec<u8>) {
+        self.xfer = DataXfer { active: true, write: false, lba: 0, rx: payload, rx_pos: 0, tx: Vec::new() };
         if self.dctrl & (1 << 3) != 0 {
             sys.p.dma_request(sys, SDIO_DMA_CHANNEL);
         }
@@ -208,8 +223,20 @@ impl Sdio {
         match idx {
             0 => { // GO_IDLE_STATE: no response.
                 self.acmd41_polls = 0;
+                self.cmd1_polls = 0;
+                self.card_mode = MODE_UNKNOWN;
                 self.selected = false;
                 self.raise(sys, F_CMDSENT);
+            }
+            1 => { // MMC SEND_OP_COND: R3 OCR, busy-first like ACMD41.
+                // No APP latch needed (direct command, unlike ACMD41).
+                self.cmd1_polls += 1;
+                let ready = self.cmd1_polls >= 3;
+                self.resp[0] = card.borrow().ocr_mmc(ready);
+                if ready {
+                    self.card_mode = MODE_MMC;
+                }
+                self.raise(sys, F_CMDREND);
             }
             2 => { // ALL_SEND_CID: R2.
                 let cid = card.borrow().cid();
@@ -230,9 +257,19 @@ impl Sdio {
                 self.resp[0] = R1_READY_TRAN;
                 self.raise(sys, F_CMDREND);
             }
-            8 => { // SEND_IF_COND: R7 echoes the argument.
-                self.resp[0] = self.arg;
-                self.raise(sys, F_CMDREND);
+            8 => {
+                if self.card_mode == MODE_MMC {
+                    // MMC SEND_EXT_CSD: R1 + 512 B register read.
+                    self.resp[0] = R1_READY_TRAN;
+                    self.raise(sys, F_CMDREND);
+                    if self.dctrl & 1 != 0 {
+                        self.start_read_buf(sys, card.borrow().ext_csd());
+                    }
+                } else {
+                    // SD SEND_IF_COND (also the pre-init probe order): R7 echo.
+                    self.resp[0] = self.arg;
+                    self.raise(sys, F_CMDREND);
+                }
             }
             9 => { // SEND_CSD: R2.
                 let csd = card.borrow().csd();
@@ -242,6 +279,34 @@ impl Sdio {
             16 => { // SET_BLOCKLEN.
                 if self.arg == 512 {
                     self.blocklen = 512;
+                }
+                self.resp[0] = R1_READY_TRAN;
+                self.raise(sys, F_CMDREND);
+            }
+            32 | 35 => { // ERASE_WR_BLK_START: latch first erase block.
+                self.erase_start = self.arg;
+                self.resp[0] = R1_READY_TRAN;
+                self.raise(sys, F_CMDREND);
+            }
+            33 | 36 => { // ERASE_WR_BLK_END: latch last erase block.
+                self.erase_end = self.arg;
+                self.resp[0] = R1_READY_TRAN;
+                self.raise(sys, F_CMDREND);
+            }
+            38 => { // ERASE: fill the latched range with erased (0xFF) state.
+                let (lo, hi) = if self.erase_start <= self.erase_end {
+                    (self.erase_start, self.erase_end)
+                } else {
+                    (self.erase_end, self.erase_start)
+                };
+                if let Some(card) = self.find_card() {
+                    let mut c = card.borrow_mut();
+                    let sectors = c.sectors();
+                    for lba in lo..=hi {
+                        if lba < sectors {
+                            c.write_block(lba, &[0xFF; 512]);
+                        }
+                    }
                 }
                 self.resp[0] = R1_READY_TRAN;
                 self.raise(sys, F_CMDREND);
@@ -264,6 +329,9 @@ impl Sdio {
                 self.acmd41_polls += 1;
                 let ready = self.acmd41_polls >= 3;
                 self.resp[0] = card.borrow().ocr(ready);
+                if ready {
+                    self.card_mode = MODE_SD;
+                }
                 self.raise(sys, F_CMDREND);
             }
             55 => { // APP_CMD: R1 with APP_CMD bit.

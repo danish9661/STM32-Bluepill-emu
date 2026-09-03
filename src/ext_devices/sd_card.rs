@@ -42,6 +42,25 @@ impl SdCard {
         0x00FF_8000 | if ready { 0xC000_0000 } else { 0 }
     }
 
+    /// R3 OCR for the MMC path (CMD1): same busy polarity, sector-access
+    /// mode (bit 30) instead of SD's CCS once ready.
+    pub fn ocr_mmc(&self, ready: bool) -> u32 {
+        0x00FF_8000 | if ready { 0xC000_0000 } else { 0 }
+    }
+
+    /// 512-byte EXT_CSD register (MMC CMD8): revision, card type and sector
+    /// count are the fields stacks actually consume.
+    pub fn ext_csd(&self) -> Vec<u8> {
+        let mut ext = vec![0u8; 512];
+        ext[192] = 8; // EXT_CSD_REV: v5.1
+        ext[196] = 0x03; // CARD_TYPE: 26 MHz + 52 MHz supported
+        ext[183] = 0; // BUS_WIDTH: 1-bit default
+        ext[185] = 0; // HS_TIMING: legacy speed
+        let sec = self.sectors();
+        ext[212..216].copy_from_slice(&sec.to_le_bytes()); // SEC_COUNT
+        ext
+    }
+
     /// 128-bit CID (R2 order: [127:96], [95:64], [63:32], [31:0]).
     pub fn cid(&self) -> [u32; 4] {
         // MID=0x03, OID="SD", PNM="EMU01", PRV=1.0, PSN=0x12345678.

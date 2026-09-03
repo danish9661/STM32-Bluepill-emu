@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.0] — 2026-09-03
+
+### Added
+- MMC/eMMC identification path in SDIO: CMD1 SEND_OP_COND (no APP latch, busy-first R3 with sector-access bit), EXT_CSD register read via CMD8 (revision, card type, sector count from image), erase commands CMD32/33/35/36/38 (fill 0xFF); card mode latches on whichever OP_COND completes first so real SD-then-MMC probe order works
+- Coverage audit (`docs/COVERAGE.md`): 67-block SVD census (38 Full, 1 Partial, 0 stubs)
+
+### Tests
+- 18 new MMC unit tests (372/372 total): CMD1 init without APP latch, pre-init CMD8 echo preserved, EXT_CSD exact bytes, shared CID/RCA/block path, erase + 0xFF read-back, no-card CMD1 timeout
+
 ## [1.3.0] — 2026-09-03
 
 ### Added
