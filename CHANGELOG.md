@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.0] — 2026-09-03
+
+### Added
+- SDIO host peripheral (`src/peripherals/sdio.rs`): SDHC card model at 0x40018000, IRQ 49 — CMD0/2/3/6/7/8/9/12/13/16/17/18/24/25/55 + ACMD41 (busy-first init), 32-word FIFO, DATAEND/DBCKEND/CMDREND/CMDSENT/CTIMEOUT with MASK-gated IRQ, DCOUNT/FIFOCNT, DMA2 CH4 requests
+- SD card ext device (`src/ext_devices/sd_card.rs`, `add_sd_card('SDIO', data)`): CID/CSD/OCR/RCA derived, CSD capacity from image size; `ext_devices.sd_card` in library + `sd_card:` (file/size) in CLI config
+
+### Fixed
+- DMA2 completion routing: completion streams/IRQ tables were sized 8 with local indices, so DMA1 CH4 and DMA2 CH4 both claimed stream 3 and DMA1's tick drained DMA2's bits (DMA2 ISR/CNDTR never completed). Streams are now global (DMA1 0-6, DMA2 7-11) with masked per-DMA takes; JS pump untouched
+
+### Tests
+- 41 new SDIO unit tests (277/277 total): init sequence, block R/W + read-back, IRQ49, DMA2 pump absorb of real image bytes + TCIF4/CNDTR clear, no-card timeouts, F103-SVD registration
+
 ## [1.1.0] — 2026-09-03
 
 ### Performance

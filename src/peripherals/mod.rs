@@ -23,6 +23,7 @@ pub mod exti;
 pub mod bkp;
 pub mod dac;
 pub mod usb;
+pub mod sdio;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -258,6 +259,7 @@ impl Peripherals {
             .or_else(|| Exti::new(name))
             .or_else(|| Bkp::new(name))
             .or_else(|| Dac::new(name))
+            .or_else(|| Sdio::new(name))
     }
 
     pub fn new_wasm(gpio: GpioPorts, ext_devices: &ExtDevices) -> Self {
@@ -288,6 +290,7 @@ impl Peripherals {
             (0x4001_2C00, "TIM1"),
             (0x4001_3000, "SPI1"),
             (0x4001_3800, "USART1"),
+            (0x4001_8000, "SDIO"),
             (0x4002_0000, "DMA1"), (0x4002_0400, "DMA2"),
             (0x4002_1000, "RCC"),  (0x4002_2000, "FLASH"),
             (0x4002_3000, "CRC"),
@@ -395,6 +398,7 @@ impl Peripherals {
             0x4001_2C00 => (apb2enr & (1 << 11)) != 0,
             0x4001_3000 => (apb2enr & (1 << 12)) != 0,
             0x4001_3800 => (apb2enr & (1 << 14)) != 0,
+            0x4001_8000 => (ahbenr & (1 << 10)) != 0, // SDIOEN
             0x4000_0000 => (apb1enr & 1) != 0,
             0x4000_0400 => (apb1enr & (1 << 1)) != 0,
             0x4000_0800 => (apb1enr & (1 << 2)) != 0,
@@ -643,6 +647,7 @@ use exti::Exti;
 use bkp::Bkp;
 use dac::Dac;
 use usb::Usb;
+use sdio::Sdio;
 
 #[cfg(test)]
 mod tests {

@@ -80,6 +80,7 @@ pub fn reset_ext_devices() {
     ext.displays.clear();
     ext.i2c_oleds.clear();
     ext.fsmc_nors.clear();
+    ext.sd_cards.clear();
     drop(ext);
     system::get_software_spi_configs().lock().unwrap().clear();
 }
@@ -342,7 +343,9 @@ pub fn dma_set_completed(stream_idx: u32, success: bool) {
 
 #[wasm_bindgen]
 pub fn dma_set_completed_many(bits: u32) {
-    for stream in 0..8 {
+    // Streams are global across both DMAs (DMA1 ch0-6 -> 0-6, DMA2 ch0-4 ->
+    // 7-11); the JS pump passes the plan's done bits straight through.
+    for stream in 0..12 {
         if bits & (1 << stream) != 0 {
             sys().mark_dma_completed(stream, true);
         }
@@ -546,6 +549,15 @@ pub fn add_i2c_eeprom(peripheral: &str, address: u8, data: &[u8]) {
 #[wasm_bindgen]
 pub fn raise_fault(kind: u32, addr: u32) {
     sys().p.raise_fault(&*sys(), kind, addr);
+}
+
+/// Add an SD card image for the SDIO peripheral (SDHC, 512 B sectors).
+/// Must be called before init().
+#[wasm_bindgen]
+pub fn add_sd_card(peripheral: &str, data: &[u8]) {
+    use crate::ext_devices::sd_card::SdCard;
+    let card = std::rc::Rc::new(std::cell::RefCell::new(SdCard::new(peripheral, data)));
+    system::get_ext_devices().lock().unwrap().sd_cards.push(card);
 }
 
 /// Add an FSMC NOR/PSRAM memory device backed by `data` (byte image).

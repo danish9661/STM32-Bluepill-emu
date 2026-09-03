@@ -199,6 +199,7 @@ export function parseElf(buffer) {
  * ext_devices shape:
  *   { spi_flash: [{peripheral, jedec_id, data, cs?}],
  *     i2c_eeprom: [{peripheral, address, data}],
+ *     sd_card:   [{peripheral, data}],
  *     i2c_oled:   [{peripheral, address, width, height}],
  *     lcd:        [{peripheral, cs}],
  *     touchscreen:[{peripheral, touch_detected_pin, cs}],
@@ -265,6 +266,7 @@ export async function createEmulator(opts = {}) {
     dma_pump_all, dma_take_absorbed, dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested, dma_get_pending_count,
     add_spi_flash, add_i2c_eeprom, add_touchscreen, add_lcd, add_i2c_oled, add_software_spi, reset_ext_devices,
     add_fsmc_bank, fsmc_write_byte, fsmc_read_byte,
+    add_sd_card,
     register_js_peripheral,
     init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
     gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt, finish_interrupt,
@@ -294,6 +296,9 @@ export async function createEmulator(opts = {}) {
     }
     for (const d of ext_devices.fsmc_bank || []) {
         add_fsmc_bank(d.name, d.data);
+    }
+    for (const d of ext_devices.sd_card || []) {
+        add_sd_card(d.peripheral, d.data ?? new Uint8Array(0));
     }
 
     const chipSvd = (typeof chip === 'string') ? (svd ?? null) : (chip.svd ?? null);

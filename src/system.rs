@@ -67,18 +67,21 @@ impl DmaTransfer {
 
 static DMA_COMPLETION_BITS: AtomicU32 = AtomicU32::new(0);
 
-// Per-stream DMA interrupt info: IRQ number (-1 = none) and flags (bit 0=TCIE, 1=HTIE, 2=TEIE)
-static DMA_STREAM_IRQ: [AtomicI32; 8] = [
+// Per-stream DMA interrupt info: IRQ number (-1 = none) and flags (bit 0=TCIE, 1=HTIE, 2=TEIE).
+// Streams are GLOBAL across both DMAs (DMA1 ch0-6 -> 0-6, DMA2 ch0-4 -> 7-11).
+static DMA_STREAM_IRQ: [AtomicI32; 12] = [
+    AtomicI32::new(-1), AtomicI32::new(-1), AtomicI32::new(-1), AtomicI32::new(-1),
     AtomicI32::new(-1), AtomicI32::new(-1), AtomicI32::new(-1), AtomicI32::new(-1),
     AtomicI32::new(-1), AtomicI32::new(-1), AtomicI32::new(-1), AtomicI32::new(-1),
 ];
-static DMA_STREAM_FLAGS: [AtomicU8; 8] = [
+static DMA_STREAM_FLAGS: [AtomicU8; 12] = [
+    AtomicU8::new(0), AtomicU8::new(0), AtomicU8::new(0), AtomicU8::new(0),
     AtomicU8::new(0), AtomicU8::new(0), AtomicU8::new(0), AtomicU8::new(0),
     AtomicU8::new(0), AtomicU8::new(0), AtomicU8::new(0), AtomicU8::new(0),
 ];
 
 pub fn set_dma_intr_info(stream_idx: usize, irq: i32, flags: u8) {
-    if stream_idx < 8 {
+    if stream_idx < 12 {
         DMA_STREAM_IRQ[stream_idx].store(irq, Ordering::Release);
         DMA_STREAM_FLAGS[stream_idx].store(flags, Ordering::Release);
     }
@@ -238,11 +241,11 @@ impl WasmSystem {
     }
 
     pub fn mark_dma_completed(&self, stream_idx: usize, _success: bool) {
-        if stream_idx < 8 {
+        if stream_idx < 12 {
             DMA_COMPLETION_BITS.fetch_or(1 << stream_idx, Ordering::Release);
         }
         // Fire NVIC interrupt after transfer completes
-        if stream_idx < 8 {
+        if stream_idx < 12 {
             let irq = DMA_STREAM_IRQ[stream_idx].swap(-1, Ordering::Acquire);
             if irq >= 0 {
                 let flags = DMA_STREAM_FLAGS[stream_idx].swap(0, Ordering::Acquire);
@@ -254,7 +257,7 @@ impl WasmSystem {
     }
 
     pub fn dma_check_completion(&self, stream_idx: usize) -> bool {
-        if stream_idx < 8 {
+        if stream_idx < 12 {
             let mask = 1 << stream_idx;
             DMA_COMPLETION_BITS.fetch_and(!mask, Ordering::Acquire) & mask != 0
         } else {
@@ -264,6 +267,14 @@ impl WasmSystem {
 
     pub fn dma_take_completions(&self) -> u32 {
         DMA_COMPLETION_BITS.swap(0, Ordering::Acquire)
+    }
+
+    /// Take only the completion bits in `mask`, leaving other streams' bits
+    /// queued for their own DMA's tick.
+    pub fn dma_take_completions_masked(&self, mask: u32) -> u32 {
+        let old = DMA_COMPLETION_BITS.load(Ordering::Acquire);
+        DMA_COMPLETION_BITS.fetch_and(!mask, Ordering::AcqRel);
+        old & mask
     }
 
     /// Append a virtual-peripheral event to the drain queue.

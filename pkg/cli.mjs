@@ -5,7 +5,7 @@ import * as yaml from 'js-yaml';
 import { parseIntelHex, parseSymbolMap, parseElf } from './emulator.js';
 import * as periph from './stm32_bluepill_wasm.js';
 const { periph_read, periph_write, tick, step, step_batch, process_batch, get_next_pending_interrupt, intr_next, intr_svc_enter, intr_svc_leave, intr_svc_depth, dma_pump_all, dma_take_absorbed, dma_get_pending_count,
-dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen,
+dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen, add_sd_card,
 add_lcd, add_i2c_oled, reset_ext_devices, register_js_peripheral, can_inject_message, raise_fault,
 init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
 set_intr_masks, clear_current_interrupt, finish_interrupt } = periph;
@@ -232,6 +232,9 @@ Examples:
                     } else if (type === 'spi_flash') {
                         const data = d.file ? readFileSync(path.resolve(config._devices_dir, d.file)) : new Uint8Array(d.size || 0);
                         add_spi_flash(d.peripheral, parseHex(d.jedec_id), data, d.cs || null);
+                    } else if (type === 'sd_card') {
+                        const data = d.file ? readFileSync(path.resolve(config._devices_dir, d.file)) : new Uint8Array(d.size || 0);
+                        add_sd_card(d.peripheral, data);
                     } else if (type === 'usart_probe') {
                         uartAddr = parseHex(d.peripheral.match(/[0-9a-fA-F]+/)?.[0]) ? parseInt(d.peripheral, 16) : (PERIPH_ADDR[d.peripheral] || uartAddr);
                     } else if (type === 'touchscreen') {

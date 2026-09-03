@@ -71,6 +71,20 @@ export function add_lcd(peripheral, cs) {
 }
 
 /**
+ * Add an SD card image for the SDIO peripheral (SDHC, 512 B sectors).
+ * Must be called before init().
+ * @param {string} peripheral
+ * @param {Uint8Array} data
+ */
+export function add_sd_card(peripheral, data) {
+    const ptr0 = passStringToWasm0(peripheral, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    wasm.add_sd_card(ptr0, len0, ptr1, len1);
+}
+
+/**
  * Register a software SPI device. Must be called before init().
  * @param {string} name
  * @param {string | null | undefined} cs

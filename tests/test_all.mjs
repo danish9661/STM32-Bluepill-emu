@@ -7,6 +7,7 @@ const { init, init_svd, periph_read, periph_write, tick, step_batch, has_pending
         gpio_read_input, get_uart_output, uart_rx_byte, adc_set_sim_value,
         is_watchdog_reset_requested, can_inject_message, gpio_set_slew, raise_fault,
         add_fsmc_bank, gpio_set_analog, adc_set_rc_tau, register_js_peripheral,
+        add_sd_card, reset_ext_devices,
         gpio_take_pin_events } = periph;
 
 let passed = 0, failed = 0;
@@ -1484,6 +1485,169 @@ group('Chip: STM32F105 (SVD)');
   // Unsupported peripherals in the SVD (ETH) are skipped, not fatal
   assert_eq(periph_read(0x40028000, 4), 0, 'F105 ETH (0x40028000) not mapped (skipped)');
 }
+
+// ============================================================
+// SDIO host + SD card image (CMD engine, FIFO, IRQ49, DMA2 CH4)
+// ============================================================
+group('SDIO');
+
+const SDIO = 0x40018000;
+const S_POWER = 0x00, S_CLKCR = 0x04, S_ARG = 0x08, S_CMD = 0x0C;
+const S_RESPCMD = 0x10, S_RESP1 = 0x14, S_DLEN = 0x28, S_DCTRL = 0x2C;
+const S_STA = 0x34, S_ICR = 0x38, S_MASK = 0x3C, S_FIFO = 0x80;
+const F_CMDREND = 1 << 6, F_CMDSENT = 1 << 7, F_DATAEND = 1 << 8;
+const F_DBCKEND = 1 << 10, F_CTIMEOUT = 1 << 2;
+const CPSMEN = 1 << 10, WR_SHORT = 1 << 6, WR_LONG = 3 << 6;
+// SVD path: STM32F103.svd lists SDIO @ 0x40018000 — auto-registers, no overlap panic
+{
+  const { readFileSync } = await import('fs');
+  const svd103 = readFileSync(new URL('../svd/STM32F103.svd', import.meta.url), 'utf8');
+  init_svd(svd103);
+  assert_eq(periph_read(SDIO + S_POWER, 4), 0, 'F103 SVD: SDIO POWER reset 0');
+}
+// 2048 sectors (1 MiB): CSD C_SIZE = 1; marker pattern per sector.
+const sdImg = new Uint8Array(2048 * 512);
+for (let i = 0; i < sdImg.length; i++) sdImg[i] = (i >> 9) & 0xFF;
+add_sd_card('SDIO', sdImg);
+reset();
+const sdCmd = (idx, arg, rsp = WR_SHORT) => {
+    periph_write(SDIO + S_ARG, 4, arg);
+    periph_write(SDIO + S_CMD, 4, (idx & 0x3F) | rsp | CPSMEN);
+};
+
+// Register defaults
+assert_eq(periph_read(SDIO + S_POWER, 4), 0, 'SDIO POWER reset 0');
+assert_eq(periph_read(SDIO + S_STA, 4) & (1 << 19), 1 << 19, 'SDIO RXFIFOE set when idle');
+assert_eq(periph_read(SDIO + S_STA, 4) & (1 << 18), 1 << 18, 'SDIO TXFIFOE set when idle');
+
+// POWER + clock
+periph_write(SDIO + S_POWER, 4, 0x03);
+assert_eq(periph_read(SDIO + S_POWER, 4), 0x03, 'SDIO POWER PWRCTRL=on');
+periph_write(SDIO + S_CLKCR, 4, 0x100 | 0x76);
+assert_eq(periph_read(SDIO + S_CLKCR, 4), 0x176, 'SDIO CLKCR readback');
+
+// CMD0: no response -> CMDSENT
+sdCmd(0, 0, 0);
+assert_eq(periph_read(SDIO + S_STA, 4) & F_CMDSENT, F_CMDSENT, 'SDIO CMD0 sets CMDSENT');
+assert_eq(periph_read(SDIO + S_RESPCMD, 4), 0, 'SDIO RESPCMD=0');
+periph_write(SDIO + S_ICR, 4, 0xFFFFFFFF);
+assert_eq(periph_read(SDIO + S_STA, 4) & (F_CMDSENT | F_CMDREND), 0, 'SDIO ICR clears flags');
+
+// CMD8: R7 echoes the argument
+sdCmd(8, 0x1AA);
+assert_eq(periph_read(SDIO + S_RESP1, 4), 0x1AA, 'SDIO CMD8 R7 echo');
+assert_eq(periph_read(SDIO + S_STA, 4) & F_CMDREND, F_CMDREND, 'SDIO CMDREND set');
+periph_write(SDIO + S_ICR, 4, 0xFFFFFFFF);
+
+// ACMD41 init: busy for the first polls, then OCR ready + CCS (SDHC)
+let ocr = 0;
+for (let i = 0; i < 10 && !(ocr & 0x80000000); i++) {
+    sdCmd(55, 0);
+    assert_eq(periph_read(SDIO + S_RESP1, 4) & 0x20, 0x20, 'SDIO CMD55 R1 APP_CMD bit');
+    sdCmd(41, 1 << 30);
+    ocr = periph_read(SDIO + S_RESP1, 4);
+}
+assert((ocr >>> 31) === 1, 'SDIO ACMD41 OCR ready bit sets');
+assert(((ocr >>> 30) & 1) === 1, 'SDIO ACMD41 CCS=1 (SDHC)');
+periph_write(SDIO + S_ICR, 4, 0xFFFFFFFF);
+
+// CMD2 CID / CMD3 RCA / CMD9 CSD / CMD7 select / CMD16 blocklen
+sdCmd(2, 0, WR_LONG);
+assert_neq(periph_read(SDIO + S_RESP1, 4), 0, 'SDIO CMD2 CID non-zero');
+sdCmd(3, 0);
+assert_eq(periph_read(SDIO + S_RESP1, 4) >>> 16, 0x1234, 'SDIO CMD3 R6 RCA');
+sdCmd(7, 0x12340000);
+assert_eq(periph_read(SDIO + S_RESP1, 4), 0x900, 'SDIO CMD7 R1 ready/tran');
+sdCmd(9, 0x12340000, WR_LONG);
+assert_eq(periph_read(SDIO + S_RESP1, 4) >>> 30, 1, 'SDIO CMD9 CSD v2.0 structure');
+assert_eq(periph_read(SDIO + 0x18, 4) & 0x3F, 0, 'SDIO CMD9 CSD C_SIZE lo for 2048 sectors');
+assert_eq(periph_read(SDIO + 0x1C, 4) >>> 16, 1, 'SDIO CMD9 CSD C_SIZE hi for 2048 sectors');
+sdCmd(16, 512);
+assert_eq(periph_read(SDIO + S_RESP1, 4), 0x900, 'SDIO CMD16 R1');
+periph_write(SDIO + S_ICR, 4, 0xFFFFFFFF);
+
+// CMD17 polled single-block read (block 3 = fill byte 3)
+periph_write(SDIO + S_DLEN, 4, 512);
+periph_write(SDIO + S_DCTRL, 4, 0x1); // DTEN
+sdCmd(17, 3);
+assert_eq(periph_read(SDIO + S_STA, 4) & F_CMDREND, F_CMDREND, 'SDIO CMD17 CMDREND');
+assert_eq(periph_read(SDIO + S_STA, 4) & F_DATAEND, 0, 'SDIO DATAEND not set before drain');
+assert_eq(periph_read(SDIO + 0x30, 4), 512, 'SDIO DCOUNT=512 at transfer start');
+let word0 = periph_read(SDIO + S_FIFO, 4);
+assert_eq(word0, 0x03030303, 'SDIO FIFO first word of block 3');
+for (let i = 1; i < 128; i++) {
+    const w = periph_read(SDIO + S_FIFO, 4);
+    if (w !== 0x03030303) { assert_eq(w, 0x03030303, `SDIO FIFO word ${i} of block 3`); break; }
+}
+assert_eq(periph_read(SDIO + S_STA, 4) & (F_DATAEND | F_DBCKEND), F_DATAEND | F_DBCKEND, 'SDIO DATAEND+DBCKEND after drain');
+assert_eq(periph_read(SDIO + 0x30, 4), 0, 'SDIO DCOUNT=0 after drain');
+assert_eq(periph_read(SDIO + S_STA, 4) & (1 << 19), 1 << 19, 'SDIO RXFIFOE after drain');
+periph_write(SDIO + S_ICR, 4, 0xFFFFFFFF);
+
+// CMD24 polled write + read-back verify (block 5)
+const pat = new Uint32Array(128);
+for (let i = 0; i < 128; i++) pat[i] = (0xA5000000 + i) >>> 0;
+periph_write(SDIO + S_DLEN, 4, 512);
+periph_write(SDIO + S_DCTRL, 4, 0x3); // DTEN + DTDIR(write)
+sdCmd(24, 5);
+for (let i = 0; i < 128; i++) periph_write(SDIO + S_FIFO, 4, pat[i]);
+assert_eq(periph_read(SDIO + S_STA, 4) & (F_DATAEND | F_DBCKEND), F_DATAEND | F_DBCKEND, 'SDIO CMD24 DATAEND after fill');
+periph_write(SDIO + S_ICR, 4, 0xFFFFFFFF);
+periph_write(SDIO + S_DCTRL, 4, 0x1); // back to read
+sdCmd(17, 5);
+for (let i = 0; i < 128; i++) {
+    const w = periph_read(SDIO + S_FIFO, 4);
+    if (w !== pat[i]) { assert_eq(w, pat[i], `SDIO block 5 read-back word ${i}`); break; }
+}
+assert_eq(periph_read(SDIO + S_STA, 4) & F_DATAEND, F_DATAEND, 'SDIO read-back DATAEND');
+periph_write(SDIO + S_ICR, 4, 0xFFFFFFFF);
+
+// IRQ49: mask CMDREND + NVIC ISER1 bit 17, CMD13 fires it
+periph_write(0xE000E104, 4, 1 << 17); // ISER1: enable IRQ 49
+periph_write(SDIO + S_MASK, 4, F_CMDREND);
+sdCmd(13, 0x12340000);
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 49,
+    'SDIO CMDREND pends IRQ 49 when masked+enabled');
+clear_current_interrupt();
+periph_write(SDIO + S_ICR, 4, 0xFFFFFFFF);
+periph_write(SDIO + S_MASK, 4, 0);
+
+// DMA RX via DMA2 CH4: program channel, CMD17 + DMAEN, pump absorbs image bytes
+const DMA2 = 0x40020400, CH4 = 0x08 + 3 * 0x14;
+periph_write(DMA2 + CH4, 4, (2 << 10) | (2 << 8) | (1 << 7) | 0); // MSIZE/PSIZE=32b, MINC, EN=0
+periph_write(DMA2 + CH4 + 2 * 4, 4, SDIO + S_FIFO); // CPAR = FIFO
+periph_write(DMA2 + CH4 + 3 * 4, 4, 0x20000000);    // CMAR (no Unicorn here: plan only)
+periph_write(DMA2 + CH4 + 1 * 4, 4, 128);          // CNDTR = 128 words
+periph_write(DMA2 + CH4, 4, (2 << 10) | (2 << 8) | (1 << 7) | 1); // EN (DIR=0: periph->mem)
+periph_write(SDIO + S_DLEN, 4, 512);
+periph_write(SDIO + S_DCTRL, 4, 0x9); // DTEN + DMAEN
+sdCmd(17, 7);
+step_batch(1); // DMA2 tick queues the transfer
+assert_eq(periph.dma_get_pending_count() >= 1, true, 'SDIO DMA RX queues a transfer');
+// The pump plan must absorb 512 B from the FIFO (op 1), served from block 7.
+const plan = periph.dma_pump_all();
+let absorb = null;
+for (let i = 0; i + 4 <= plan.length; i += 4) {
+    if (plan[i] === 1 && plan[i + 2] === 512) absorb = [plan[i + 1], plan[i + 3]];
+}
+assert_eq(absorb !== null, true, 'SDIO DMA pump plan absorbs 512 B');
+const taken = new Uint8Array(periph.dma_take_absorbed(absorb[1], 512));
+let dmaOk = taken.length === 512;
+for (let i = 0; i < 512 && dmaOk; i++) if (taken[i] !== 7) dmaOk = false;
+assert_eq(dmaOk, true, 'SDIO DMA absorbed bytes are block 7 fill');
+periph.dma_set_completed_many(1 << 10); // global stream 10 = DMA2 CH4
+step_batch(1);
+assert_eq(periph_read(DMA2 + 0x00, 4) & (1 << 13), 1 << 13, 'SDIO DMA2 ISR TCIF4 after completion');
+assert_eq(periph_read(DMA2 + CH4 + 1 * 4, 4), 0, 'SDIO DMA2 CH4 CNDTR=0 after completion');
+
+// No card attached: CMD8 times out, CMD0 still sends
+reset_ext_devices();
+reset();
+sdCmd(8, 0x1AA);
+assert_eq(periph_read(SDIO + S_STA, 4) & F_CTIMEOUT, F_CTIMEOUT, 'SDIO no-card CMD8 CTIMEOUT');
+assert_eq(periph_read(SDIO + S_RESP1, 4), 0, 'SDIO no-card CMD8 no response');
+sdCmd(0, 0, 0);
+assert_eq(periph_read(SDIO + S_STA, 4) & F_CMDSENT, F_CMDSENT, 'SDIO no-card CMD0 CMDSENT');
 
 // ============================================================
 // Summary

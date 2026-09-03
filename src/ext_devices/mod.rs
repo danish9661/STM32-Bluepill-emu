@@ -6,6 +6,7 @@ pub mod touchscreen;
 pub mod display;
 pub mod i2c_oled;
 pub mod fsmc_nor;
+pub mod sd_card;
 
 pub use spi_flash::SpiFlash;
 pub use i2c_eeprom::I2cEeprom;
@@ -15,6 +16,7 @@ pub use touchscreen::Touchscreen;
 pub use display::Display;
 pub use i2c_oled::I2cOled;
 pub use fsmc_nor::FsmcNor;
+pub use sd_card::SdCard;
 
 use std::{rc::Rc, cell::RefCell};
 
@@ -41,6 +43,7 @@ pub struct ExtDevices {
     pub displays: Vec<Rc<RefCell<Display>>>,
     pub i2c_oleds: Vec<Rc<RefCell<I2cOled>>>,
     pub fsmc_nors: Vec<Rc<RefCell<FsmcNor>>>,
+    pub sd_cards: Vec<Rc<RefCell<SdCard>>>,
 }
 
 impl ExtDevices {

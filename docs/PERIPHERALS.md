@@ -47,6 +47,7 @@ including interrupt generation, status flags, and timing. Support levels:
 | SPI1–2 | Full | Master mode with 8/16-bit frames, CPOL/CPHA, bit-order; device selection via GPIO CS; serves external devices (flash/OLED/LCD/touchscreen); TX/RX FIFO behaviour. I2S registers decode but audio output is simulated (`generate_i2s_audio`). |
 | I2C1–2 | Full | Master state machine (START, address 7-bit, TX/RX, STOP, repeated START), SR1/SR2 status flags, error handling (AF, BER), interrupts (EV/ER). 10-bit addressing and slave mode are **not** implemented. |
 | CAN1 | Full | Mailboxes (TIR/TDTR/TDLR/TDHR), filters (ID-list and mask modes), TX request + TX-complete IRQ, RX FIFO + RX IRQ, `can_inject_message()` to inject a received frame from JS. |
+| SDIO | Full | SD host @ 0x40018000, IRQ 49, SDHC only (CCS=1): CMD0/2/3/6/7/8/9/12/13/16/17/18/24/25/55 + ACMD41 (busy-first power-up), 32-word FIFO, DATAEND/DBCKEND/CMDREND/CMDSENT/CTIMEOUT + MASK-gated IRQ, DMA2 CH4 requests. Backed by an `SdCard` image (`add_sd_card('SDIO', data)`); CSD capacity derived from image size. |
 | USB | **Stub** | Registers read 0; USB firmware will not work. |
 
 ## Timers
@@ -77,6 +78,7 @@ These are *extra* peripherals the STM32 talks to over SPI/I2C — the "rest of t
 | LCD (e.g. SPI TFT) | SPI | Partial | Command/data stream state machine (`0xFB` command latch); pixel rendering is not provided — the 128×64 byte-per-pixel framebuffer is exposed via `lcd_fb('SPI1')` and the page renders it. |
 | Resistive touchscreen (ADS7846) | SPI | Full | Command decoding (channels incl. pressure 0x94), 8/12-bit modes, **deferred reply** (reply arrives on the SPI transfer *after* the command, like the real part), touch injection via `touchscreen_set_touch()` + touch-detect GPIO line. |
 | Software SPI (bit-banged GPIO) | GPIO | Full | `add_software_spi()`: CS/CLK/MISO/MOSI pins, emulated on GPIO transitions. |
+| SD card (SDHC) | SDIO | Full | Block-addressed image (512 B sectors); CID/CSD/OCR/RCA derived deterministically, CSD capacity from image size. File-backed via `add_sd_card('SDIO', data)`. |
 
 ## What is NOT emulated
 
@@ -99,14 +101,15 @@ These are *extra* peripherals the STM32 talks to over SPI/I2C — the "rest of t
 
 ## Verification coverage
 
-- **236 unit tests** (`node tests/test_all.mjs`) — GPIO (incl. electrical model: pull-ups,
+- **277 unit tests** (`node tests/test_all.mjs`) — GPIO (incl. electrical model: pull-ups,
   open-drain, external-driver precedence, slew readback, pin-change events), USART, ADC (real conversion
   timing, RC sample-and-hold via gpioSetAnalog, DAC→ADC loopback, AWD IRQ, TIM1 TRGO /
   TIM1_CC1 / EXTI 11 external triggers), RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C,
   RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX, FSMC
   (MBKEN/WREN gating, byte/word access), deep-sleep gating (TIM frozen, RTC alive, resume
   without catch-up), fault escalation (CFSR/HFSR/BFAR, BusFault vs HardFault, IBUSERR,
-  SHPR routing).
+  SHPR routing), SDIO (CMD0/8/55/41/2/3/7/9/16/17/24 init + block R/W, IRQ49, DMA2 CH4
+  pump, no-card timeouts, F103-SVD registration).
 - **39-check firmware test** (`node tests/canary.mjs`, 39/39): runs a real Arduino sketch
   compiled with STM32duino against sync + async scenarios (DMA TX/RX with real-HW ISR
   bits + CMSIS DIR, UART RX, TIM2

@@ -146,6 +146,7 @@ const mcu = await STM32F1.fromHex(hexText, opts?);
   touchscreen:   [{ peripheral: 'SPI1', cs: 'PA1', touch_detected_pin: 'PC5' }],
   software_spi:  [{ name: 'FLASH', cs: 'PB12', clk: 'PB13', miso: 'PB14', mosi: 'PB15' }],
   fsmc_bank:     [{ name: 'FSMC.BANK1', data: new Uint8Array(65536) }],
+  sd_card:       [{ peripheral: 'SDIO', data: new Uint8Array(1048576) }],
 }
 ```
 
@@ -407,7 +408,7 @@ RUSTFLAGS="--remap-path-prefix=$HOME=/build" \
 wasm-pack build --target web --out-dir pkg
 
 # Run tests
-node tests/test_all.mjs              # 236 unit tests
+node tests/test_all.mjs              # 277 unit tests
 node tests/canary.mjs                # 39/39 firmware checks (~25s)
 node tests/test_emulator_js.mjs      # browser run-loop path (200M, 39/39)
 node tests/test_browser.mjs          # Playwright browser tests
@@ -427,7 +428,7 @@ GPIO (A–D) with electrical model, USART1–3, SPI1–2, I2C1–2, TIM1–14
 DAC1–2, DMA1 (7ch) + DMA2 (5ch), CAN1 (RX injection + filters), RTC (alarm),
 CRC, NVIC (priority dispatch + 64-IRQ budget), SysTick, SCB (deep sleep, SHPR
 routing, fault escalation), EXTI, AFIO (pin remap), BKP, WWDG, IWDG, PWR, FLASH,
-FSMC (NOR/NAND/PC-Card), **USB is a stub**.
+FSMC (NOR/NAND/PC-Card), SDIO (SDHC card image, CMD engine, DMA2 CH4), **USB is a stub**.
 
 ---
 

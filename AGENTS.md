@@ -59,7 +59,7 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 > gracefully instead of aborting the WASM module), and an audit document
 > (`docs/AUDIT.md`) covering memory, security, overhead and performance.
 ### Test suite: `node tests/test_all.mjs`
-**236/236 unit tests PASS** (GPIO incl. electrical model + pin events, USART, ADC incl. RC sample-and-hold / DAC loopback / external triggers / AWD IRQ, RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C, RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX, FSMC, deep-sleep gating, fault escalation).
+**277/277 unit tests PASS** (GPIO incl. electrical model + pin events, USART, ADC incl. RC sample-and-hold / DAC loopback / external triggers / AWD IRQ, RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C, RTC, PWR, FLASH, CAN, DMA, AFIO, EXTI, BKP, DAC, TIM6, RTC Alarm, UART RX, FSMC, SDIO, deep-sleep gating, fault escalation).
 
 ### Firmware test — `tests/arduino_periph_test/` (24-peripheral Arduino sketch, 39 checks)
 ```
@@ -250,6 +250,12 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - **Usage**: `node pkg/ws-server.mjs <firmware.elf> [--port=8080]`, then open
   `http://localhost:8080/ws-viewer.html` in a browser.
 - **Committed** as `224a65a`. `pkg/.gitignore` updated with `!ws-server.mjs`.
+
+### 20. SDIO host + SDHC card image + DMA2 completion fix (`src/peripherals/sdio.rs`, `src/ext_devices/sd_card.rs`, `src/peripherals/dma.rs`, `src/system.rs`, `src/lib.rs`, `pkg/emulator.js`, `pkg/cli.mjs`, `tests/test_all.mjs`) [committed]
+- **SDIO** @ 0x40018000, IRQ 49, SDHC-only (CCS=1): CMD0/2/3/6/7/8/9/12/13/16/17/18/24/25/55 + ACMD41 (busy-first power-up), 32-word FIFO window, DATAEND/DBCKEND/CMDREND/CMDSENT/CTIMEOUT + MASK-gated IRQ, DCOUNT/FIFOCNT. Commands complete synchronously on CPSMEN (all firmware timeouts generous); unknown CMDs get lenient R1; no card → CMDSENT/CTIMEOUT. `SdCard` ext device (`add_sd_card('SDIO', data)`): CID/CSD/OCR/RCA derived, CSD capacity from image size; `ext_devices.sd_card` + cli `sd_card:` config (file/size).
+- **DMA2 completion was broken**: completion streams/IRQ tables were sized 8 with local channel indices, so DMA1 CH4 and DMA2 CH4 both claimed stream 3 and DMA1's tick drained DMA2's bits — DMA2 ISR/CNDTR never completed (nothing had driven DMA2 concurrently before, so it never showed). Streams are now GLOBAL (DMA1 ch0-6 → 0-6, DMA2 ch0-4 → 7-11): `do_xfer` maps by name, ticks take only their own bits (`dma_take_completions_masked`), tables siz 12, `dma_set_completed_many` loops 0..12. JS pump untouched (passes plan bits through). SDIO issues one `dma_request(11)` (DMA2 CH4) per transfer; TX finalizes when DLEN bytes land in the FIFO path, RX drains from the image — polled and DMA share one implementation.
+- **Verified**: 277/277 unit (41 SDIO: init sequence, block R/W + read-back, IRQ49, DMA2 pump absorb of real image bytes + TCIF4/CNDTR clear, no-card timeouts, F103-SVD registration); full gate green (canary 39/39, cli + emulator.js 200M 39/39, all event/format/esm/ws/browser tests).
+
 
 
 ## Next Phase — Long-term Optimizations

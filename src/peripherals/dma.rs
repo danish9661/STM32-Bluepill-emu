@@ -84,9 +84,14 @@ impl Channel {
             (self.par, self.mar, DmaDir::Read, true)
         };
         let size = self.data_size();
+        // Completion stream indices are GLOBAL across both DMAs (DMA1 ch0-6 ->
+        // streams 0-6, DMA2 ch0-4 -> streams 7-11): the completion bitspace
+        // and IRQ/flag tables in system.rs are shared, so local indices would
+        // collide (DMA1 CH4 and DMA2 CH4 both claiming stream 3).
+        let stream_idx = if name == "DMA2" { 7 + ch } else { ch };
         sys.queue_dma_transfer(DmaTransfer {
             direction,
-            stream_idx: ch,
+            stream_idx,
             dma_name: name.to_string(),
             src, dst, size,
             peri_addr: self.par,
@@ -112,10 +117,19 @@ impl Peripheral for Dma {
             }
         }
 
-        let bits = sys.dma_take_completions();
+        // Take only this DMA's streams; the other DMA's bits stay queued for
+        // its own tick (a plain global drain here would eat them).
+        let base = if self.name == "DMA2" { 7 } else { 0 };
+        let mut own_mask = 0u32;
+        for ch in 0..nc {
+            own_mask |= 1 << (base + ch);
+        }
+        let bits = sys.dma_take_completions_masked(own_mask);
         if bits != 0 {
+            // Global stream numbering (see do_xfer): this DMA owns streams
+            // [base, base+nc).
             for ch in 0..nc {
-                if bits & (1 << ch) != 0 {
+                if bits & (1 << (base + ch)) != 0 {
                     self.isr |= 1 << (ch * 4 + 1); // TCIF
                     self.channels[ch].cr &= !1;
                     self.channels[ch].ndtr = 0;
@@ -176,7 +190,8 @@ impl Peripheral for Dma {
                                     let htie = ((cr >> 3) & 1) as u8;
                                     let teie = ((cr >> 2) & 1) as u8;
                                     let flags = tcie | (htie << 1) | (teie << 2);
-                                    set_dma_intr_info(ch, irq, flags);
+                                    let stream = if self.name == "DMA2" { 7 + ch } else { ch };
+                                    set_dma_intr_info(stream, irq, flags);
                                 }
                             }
                             0x04 => self.channels[ch].ndtr = value & 0xFFFF,

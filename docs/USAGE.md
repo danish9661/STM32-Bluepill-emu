@@ -93,6 +93,7 @@ ext_devices: {
   touchscreen: [{ peripheral, touch_detected_pin, cs }],         // ADS7846 (cs on the GPIO pin driving CS)
   software_spi:[{ name, cs, clk, miso, mosi }],                  // bit-banged SPI via GPIO transitions
   fsmc:        [{ name, data }],                                 // FSMC NOR/PSRAM: 'FSMC.BANK1..4' (NE1–4), 'FSMC.BANK5..6' (NAND), 'FSMC.BANK7' (PC Card); byte image
+  sd_card:     [{ peripheral, data }],                           // SDHC card image (512 B sectors) for SDIO, e.g. {peripheral:'SDIO', data:sdBuf}
 }
 ```
 
