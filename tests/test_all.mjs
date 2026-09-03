@@ -7,7 +7,8 @@ const { init, init_svd, periph_read, periph_write, tick, step_batch, has_pending
         gpio_read_input, get_uart_output, uart_rx_byte, adc_set_sim_value,
         is_watchdog_reset_requested, can_inject_message, gpio_set_slew, raise_fault,
         add_fsmc_bank, gpio_set_analog, adc_set_rc_tau, register_js_peripheral,
-        add_sd_card, reset_ext_devices,
+        add_sd_card, reset_ext_devices, rcc_sysclk_hz,
+        drain_events, usb_inject_setup, usb_inject_out,
         gpio_take_pin_events } = periph;
 
 let passed = 0, failed = 0;
@@ -1177,11 +1178,11 @@ reset();
 // Enable RTC IRQ (3) in NVIC ISER0
 periph_write(0xE000E100, 4, 1 << 3);
 
-// Configure RTC: enable, set PRL=99, set ALR=5, enable ALRIE
+// Configure RTC: enable, set PRL=99, set ALR=5, enable ALRIE (CRH bit 1)
 periph_write(0x40002820, 4, 0);   // ALRH = 0
 periph_write(0x40002824, 4, 5);   // ALRL = 5 (alarm = 0x00000005)
 periph_write(0x4000280C, 4, 99);  // PRLL = 99 (count every 100 ticks)
-periph_write(0x40002800, 4, 1);   // CRH: ALRIE=1
+periph_write(0x40002800, 4, 2);   // CRH: ALRIE (bit 1, RM0008)
 periph_write(0x40002804, 4, 1 << 5);   // CRL: RTOFF=1 (enable)
 
 // No interrupt should be pending yet
@@ -1190,10 +1191,48 @@ assert_eq(has_pending_interrupt(), false, 'RTC no IRQ before alarm');
 // Run 600 ticks — RTC should count to 6, passing alarm at 5
 for (let i = 0; i < 600; i++) tick();
 
-// Alarm should have fired (IRQ 3)
+// Alarm should have fired (IRQ 3) with ALRF set and SECF clear (SECIE off)
+assert_eq(periph_read(0x40002804, 4) & 0x02, 0x02, 'RTC ALRF flag set on alarm');
+assert_eq(periph_read(0x40002804, 4) & 0x01, 0, 'RTC SECF clear (SECIE off)');
 assert_eq(has_pending_interrupt(), true, 'RTC alarm IRQ pending');
 let rtc_irq = get_next_pending_interrupt();
 assert_eq(rtc_irq, 3, 'RTC alarm IRQ number = 3');
+// Flags clear by writing 0
+periph_write(0x40002804, 4, 0);
+assert_eq(periph_read(0x40002804, 4) & 0x03, 0, 'RTC ALRF/SECF cleared by writing 0');
+
+// ============================================================
+// RTC second + overflow interrupts (SECIE=bit0, OWIE=bit2)
+// ============================================================
+group('RTC second/overflow');
+
+reset();
+periph_write(0xE000E100, 4, 1 << 3); // ISER0: enable IRQ 3
+periph_write(0x4000280C, 4, 99);     // PRLL = 99
+periph_write(0x4000281C, 4, 0);      // CNTL = 0
+periph_write(0x40002818, 4, 0);      // CNTH = 0
+periph_write(0x40002800, 4, 1);      // CRH: SECIE (bit 0) — alarm must NOT fire
+periph_write(0x40002804, 4, 1 << 5); // CRL: RTOFF
+for (let i = 0; i < 250; i++) tick(); // ~2.5 seconds
+assert_eq(periph_read(0x40002804, 4) & 0x01, 0x01, 'RTC SECF set after seconds elapse');
+assert_eq(periph_read(0x40002804, 4) & 0x02, 0, 'RTC ALRF clear (ALRIE off)');
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 3,
+    'RTC second IRQ pending (IRQ 3)');
+clear_current_interrupt();
+
+// Overflow: CNT wraps with OWIE set
+reset();
+periph_write(0xE000E100, 4, 1 << 3);
+periph_write(0x4000280C, 4, 0);        // PRLL = 0 -> prescaler 1
+periph_write(0x4000281C, 4, 0xFFFE);   // CNTL near wrap
+periph_write(0x40002818, 4, 0xFFFF);   // CNTH near wrap
+periph_write(0x40002800, 4, 4);        // CRH: OWIE (bit 2) only
+periph_write(0x40002804, 4, 1 << 5);
+for (let i = 0; i < 10; i++) tick();
+assert_eq(periph_read(0x40002804, 4) & 0x04, 0x04, 'RTC OWF set on wrap');
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 3,
+    'RTC overflow IRQ pending (IRQ 3)');
+clear_current_interrupt();
 
 // ============================================================
 // BKP Register Test
@@ -1215,9 +1254,9 @@ periph_write(0x40006C28, 4, 0xABCD);
 let bkp_dr10 = periph_read(0x40006C28, 4);
 assert_eq(bkp_dr10, 0xABCD, 'BKP DR10 write/read');
 
-// Write BKP RTCCR
-periph_write(0x40006C00, 4, 0x0100);
-let rtccr = periph_read(0x40006C00, 4);
+// Write BKP RTCCR (real offset 0x2C per RM0008/SVD)
+periph_write(0x40006C2C, 4, 0x0100);
+let rtccr = periph_read(0x40006C2C, 4);
 assert_eq(rtccr, 0x0100, 'BKP RTCCR write/read');
 
 // ============================================================
@@ -1648,6 +1687,244 @@ assert_eq(periph_read(SDIO + S_STA, 4) & F_CTIMEOUT, F_CTIMEOUT, 'SDIO no-card C
 assert_eq(periph_read(SDIO + S_RESP1, 4), 0, 'SDIO no-card CMD8 no response');
 sdCmd(0, 0, 0);
 assert_eq(periph_read(SDIO + S_STA, 4) & F_CMDSENT, F_CMDSENT, 'SDIO no-card CMD0 CMDSENT');
+
+// ============================================================
+// WWDG early-wakeup interrupt (EWI -> IRQ0 at counter 0x40)
+// ============================================================
+group('WWDG EWI');
+
+reset();
+const WWDG_BASE = 0x40002C00;
+periph_write(0xE000E100, 4, 1 << 0); // ISER0: enable IRQ 0
+periph_write(WWDG_BASE + 0x04, 4, (1 << 9) | 0x7F); // CFR: EWI + WDGTB=div1 + W=max
+periph_write(WWDG_BASE + 0x00, 4, 0xFF);           // CR: WDGA + T=0x7F
+step_batch(20000); // 256 instr/tick: 0x7F -> below 0x40
+assert_eq(periph_read(WWDG_BASE + 0x08, 4) & 1, 1, 'WWDG EWIF set at 0x40 crossing');
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 0,
+    'WWDG EWI pends IRQ 0');
+clear_current_interrupt();
+periph_write(WWDG_BASE + 0x08, 4, 1); // write-1-clears EWIF
+assert_eq(periph_read(WWDG_BASE + 0x08, 4) & 1, 0, 'WWDG EWIF cleared');
+
+// EWI masked: flag sets, no IRQ
+reset();
+periph_write(WWDG_BASE + 0x04, 4, 0x7F); // CFR: no EWI
+periph_write(WWDG_BASE + 0x00, 4, 0xFF);
+step_batch(20000);
+assert_eq(periph_read(WWDG_BASE + 0x08, 4) & 1, 1, 'WWDG EWIF sets without EWI');
+assert_eq(has_pending_interrupt(), false, 'WWDG no IRQ without EWI enable');
+
+// ============================================================
+// PVD voltage detector (fixed 3.3 V supply -> EXTI line 16)
+// ============================================================
+group('PVD');
+
+reset();
+const PWR_BASE = 0x40007000;
+periph_write(0x40010400, 4, 1 << 16); // EXTI IMR line 16
+periph_write(0x40010408, 4, 1 << 16); // EXTI RTSR line 16
+periph_write(0xE000E100, 4, 1 << 1);  // ISER0: enable IRQ 1 (PVD)
+assert_eq(periph_read(PWR_BASE + 0x04, 4) & 0x4, 0, 'PVD PVDO=0 with PVDE off');
+periph_write(PWR_BASE + 0x00, 4, 1 << 4);  // CR: PVDE -> rising edge (supply above threshold)
+assert_eq(periph_read(PWR_BASE + 0x04, 4) & 0x4, 0x4, 'PVD PVDO=1 with PVDE on');
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 1,
+    'PVD rising edge pends IRQ 1');
+clear_current_interrupt();
+// PVDO is read-only: writes cannot force it
+periph_write(PWR_BASE + 0x04, 4, 0);
+assert_eq(periph_read(PWR_BASE + 0x04, 4) & 0x4, 0x4, 'PVD PVDO read-only, write ignored');
+// Falling edge via PVDE off (FTSR armed)
+periph_write(0x40010408, 4, 0);             // RTSR clear
+periph_write(0x4001040C, 4, 1 << 16);       // EXTI FTSR line 16
+periph_write(PWR_BASE + 0x00, 4, 0);             // CR: PVDE off -> falling edge
+assert_eq(periph_read(PWR_BASE + 0x04, 4) & 0x4, 0, 'PVD PVDO=0 after PVDE off');
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 1,
+    'PVD falling edge pends IRQ 1');
+clear_current_interrupt();
+
+// ============================================================
+// RCC clock tree decode (CFGR -> SYSCLK; HSE assumed 8 MHz)
+// ============================================================
+group('RCC clocks');
+
+reset();
+const RCC_CLK = 0x40021000;
+assert_eq(rcc_sysclk_hz(), 8000000, 'RCC default SW=HSI -> 8 MHz');
+// PLL x9 from HSE, switched to PLL: 8M * 9 = 72M
+periph_write(RCC_CLK + 0x04, 4, (1 << 16) | (7 << 18) | 2);
+assert_eq((periph_read(RCC_CLK + 0x04, 4) >> 2) & 0x3, 2, 'RCC SWS echoes SW=PLL');
+assert_eq(rcc_sysclk_hz(), 72000000, 'RCC PLL HSE x9 -> 72 MHz');
+// PLL x9 from HSI/2: 4M * 9 = 36M
+periph_write(RCC_CLK + 0x04, 4, (7 << 18) | 2);
+assert_eq(rcc_sysclk_hz(), 36000000, 'RCC PLL HSI/2 x9 -> 36 MHz');
+// HSE direct
+periph_write(RCC_CLK + 0x04, 4, 1);
+assert_eq(rcc_sysclk_hz(), 8000000, 'RCC SW=HSE -> 8 MHz');
+
+// ============================================================
+// Tamper pin (PC13 -> BKP, IRQ2, backup regs cleared)
+// ============================================================
+group('Tamper');
+
+reset();
+const BKP = 0x40006C00;
+periph_write(0xE000E100, 4, 1 << 2); // ISER0: enable IRQ 2 (TAMPER)
+periph_write(BKP + 0x04, 4, 0x1234); // DR1 sentinel
+periph_write(BKP + 0x30, 4, 0x1);    // CR: TPE, TPAL=0 (active high)
+gpio_set_input(2, 13, false);        // PC13 low: no edge, no event
+assert_eq(periph_read(BKP + 0x34, 4) & 0x300, 0, 'Tamper: no flags while idle');
+gpio_set_input(2, 13, true);         // rising -> tamper event
+assert_eq(periph_read(BKP + 0x34, 4) & 0x300, 0x300, 'Tamper: TIF+TEF set');
+assert_eq(periph_read(BKP + 0x04, 4), 0, 'Tamper: backup registers cleared');
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 2,
+    'Tamper pends IRQ 2');
+clear_current_interrupt();
+periph_write(BKP + 0x34, 4, 0x3);    // CTEF + CTI
+assert_eq(periph_read(BKP + 0x34, 4) & 0x300, 0, 'Tamper: flags cleared by CTEF/CTI');
+// TPAL=1 (active low): rising is silent, falling fires
+periph_write(BKP + 0x30, 4, 0x3);    // TPE + TPAL
+gpio_set_input(2, 13, false);        // falling -> event
+assert_eq(periph_read(BKP + 0x34, 4) & 0x300, 0x300, 'Tamper: TPAL=1 fires on falling');
+periph_write(BKP + 0x34, 4, 0x3);
+gpio_set_input(2, 13, true);         // rising with TPAL=1: silent
+assert_eq(periph_read(BKP + 0x34, 4) & 0x300, 0, 'Tamper: TPAL=1 silent on rising');
+// TPE off: silent both ways
+periph_write(BKP + 0x30, 4, 0);
+gpio_set_input(2, 13, false);
+gpio_set_input(2, 13, true);
+assert_eq(periph_read(BKP + 0x34, 4) & 0x300, 0, 'Tamper: silent with TPE off');
+
+// ============================================================
+// USB FS device (endpoint toggle semantics, RESET, control + bulk)
+// ============================================================
+group('USB');
+
+reset();
+const USB = 0x40005C00;
+const U_EP0 = 0x00, U_CNTR = 0x40, U_ISTR = 0x44, U_DADDR = 0x4C, U_BTABLE = 0x50;
+const U_PMA = 0x40006000;
+const I_RESET = 1 << 10, I_CTR = 1 << 15, I_DIR = 1 << 4;
+const C_RESETM = 1 << 10, C_CTRM = 1 << 15;
+
+// Reset defaults: endpoints zero, CNTR FRES|PDWN
+assert_eq(periph_read(USB + U_EP0, 4), 0, 'USB EP0R reset 0');
+assert_eq(periph_read(USB + U_CNTR, 4), 3, 'USB CNTR reset FRES|PDWN');
+
+// FRES release -> RESET event + IRQ20 (RESETM), endpoints/DADDR cleared
+periph_write(0xE000E100, 4, 1 << 20); // ISER0: USB LP IRQ
+periph_write(USB + U_CNTR, 4, C_RESETM);
+assert_eq(periph_read(USB + U_ISTR, 4) & I_RESET, I_RESET, 'USB RESET flag on FRES release');
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 20,
+    'USB RESET pends IRQ 20');
+clear_current_interrupt();
+periph_write(USB + U_ISTR, 4, 0xFFFFFFFF & ~I_RESET);
+assert_eq(periph_read(USB + U_ISTR, 4) & I_RESET, 0, 'USB ISTR write-0 clears RESET');
+assert_eq(periph_read(USB + U_EP0, 4), 0, 'USB EP0R cleared by reset');
+assert_eq(periph_read(USB + U_DADDR, 4), 0, 'USB DADDR cleared by reset');
+
+// EP toggle semantics on EP2 (STAT_RX only: STAT_TX stays DISABLED so no
+// IN transfer can self-trigger mid-test)
+const U_EP2 = 0x08;
+periph_write(USB + U_EP2, 4, 0x3000); // STAT_RX: 00 -> 11
+assert_eq(periph_read(USB + U_EP2, 4), 0x3000, 'USB STAT_RX write-1 toggles to VALID');
+periph_write(USB + U_EP2, 4, 0x1000); // STAT_RX bit 12 only: 11 -> 10
+assert_eq(periph_read(USB + U_EP2, 4), 0x2000, 'USB STAT_RX single-bit toggle to NAK');
+periph_write(USB + U_EP2, 4, 0x3000); // 10 -> 01
+assert_eq(periph_read(USB + U_EP2, 4), 0x1000, 'USB STAT_RX toggle to STALL');
+periph_write(USB + U_EP2, 4, 0x0001); // EA direct (STAT untouched)
+assert_eq(periph_read(USB + U_EP2, 4), 0x1001, 'USB EA direct write');
+assert_eq(periph_read(USB + U_EP2, 4) & 0x4040, 0, 'USB DTOG bits untouched by writes');
+periph_write(USB + U_EP2, 4, 0x0000); // silent, EA direct-cleared
+assert_eq(periph_read(USB + U_EP2, 4), 0x1000, 'USB EP2 parked (no IN fired)');
+
+// Control endpoint setup: EP0 control/VALID, buffer table at PMA 0
+periph_write(USB + U_CNTR, 4, C_RESETM | C_CTRM);
+periph_write(USB + U_EP0, 4, 0x3200); // TYPE=control, STAT_RX VALID
+assert_eq(periph_read(USB + U_EP0, 4), 0x3200, 'USB EP0 control + RX VALID');
+periph_write(USB + U_BTABLE, 4, 0);
+assert_eq(periph_read(USB + U_BTABLE, 4), 0, 'USB BTABLE');
+periph_write(U_PMA + 0, 2, 0x40);   // ADDR0_TX = 0x40
+periph_write(U_PMA + 2, 2, 0);      // COUNT0_TX = 0
+periph_write(U_PMA + 4, 2, 0x80);   // ADDR0_RX = 0x80
+periph_write(U_PMA + 6, 2, 0);      // COUNT0_RX cfg
+periph_write(U_PMA + 12, 2, 0xC0);  // ADDR1_RX = 0xC0
+periph_write(U_PMA + 14, 2, 0);     // COUNT1_RX cfg
+
+// SETUP delivery (GET_DESCRIPTOR): PMA bytes, COUNT=8, CTR_RX+SETUP, IRQ20
+const setup = [0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x40, 0x00];
+assert_eq(usb_inject_setup(setup), true, 'USB SETUP accepted when armed');
+for (let i = 0; i < 8; i++) {
+    const b = periph_read(U_PMA + 0x80 + i, 1);
+    if (b !== setup[i]) { assert_eq(b, setup[i], `USB SETUP PMA byte ${i}`); break; }
+}
+assert_eq(periph_read(U_PMA + 6, 2) & 0x3FF, 8, 'USB COUNT0_RX = 8 after SETUP');
+const ep0 = periph_read(USB + U_EP0, 4);
+assert_eq(ep0 & 0x8800, 0x8800, 'USB EP0 CTR_RX + SETUP set');
+assert_eq(ep0 & 0x3000, 0x2000, 'USB EP0 STAT_RX back to NAK');
+assert_eq(ep0 & 0x4000, 0x4000, 'USB EP0 DTOG_RX toggled');
+const istr = periph_read(USB + U_ISTR, 4);
+assert_eq(istr & (I_CTR | I_DIR), I_CTR | I_DIR, 'USB ISTR CTR + DIR(rx)');
+assert_eq(istr & 0xF, 0, 'USB ISTR EP_ID = 0');
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 20,
+    'USB SETUP pends IRQ 20');
+clear_current_interrupt();
+// Clear CTR_RX (write CTR bit 0, no STAT toggles): SETUP retires too
+periph_write(USB + U_EP0, 4, 0x3200);
+assert_eq(periph_read(USB + U_EP0, 4) & 0x8800, 0, 'USB CTR_RX + SETUP cleared together');
+periph_write(USB + U_ISTR, 4, 0xFFFFFFFF & ~(I_CTR | I_DIR));
+
+// IN completion: 18-byte descriptor via PMA TX, STAT_TX -> VALID fires once
+const desc = [];
+for (let i = 0; i < 18; i++) desc.push((0x10 + i) & 0xFF);
+for (let i = 0; i < 18; i++) periph_write(U_PMA + 0x40 + i, 1, desc[i]);
+periph_write(U_PMA + 2, 2, 18); // COUNT0_TX = 18
+periph_write(USB + U_EP0, 4, 0x0030); // STAT_TX DISABLED -> VALID: transfer!
+const uev = drain_events();
+let usbIn = null;
+for (let i = 0; i < uev.length;) {
+    const t = uev[i++];
+    if (t === 18) {
+        const ep = uev[i++], len = uev[i++];
+        usbIn = [ep, len, uev.slice(i, i + len).join(',')];
+        i += len;
+    } else break;
+}
+assert_eq(usbIn !== null, true, 'USB IN completion emits UsbIn event');
+assert_eq(usbIn[0], 0, 'USB UsbIn ep = 0');
+assert_eq(usbIn[1], 18, 'USB UsbIn len = COUNT_TX');
+assert_eq(usbIn[2], desc.join(','), 'USB UsbIn bytes match PMA TX buffer');
+const ep0b = periph_read(USB + U_EP0, 4);
+assert_eq(ep0b & 0x0080, 0x0080, 'USB EP0 CTR_TX set after IN');
+assert_eq(ep0b & 0x0030, 0x0020, 'USB EP0 STAT_TX back to NAK');
+assert_eq(ep0b & 0x0040, 0x0040, 'USB EP0 DTOG_TX toggled');
+const istr2 = periph_read(USB + U_ISTR, 4);
+assert_eq(istr2 & I_CTR, I_CTR, 'USB ISTR CTR on IN');
+assert_eq(istr2 & (I_DIR | 0xF), 0, 'USB ISTR DIR=0 (IN), EP_ID=0');
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 20,
+    'USB IN pends IRQ 20');
+clear_current_interrupt();
+periph_write(USB + U_ISTR, 4, 0xFFFFFFFF & ~I_CTR);
+
+// Bulk OUT EP1: arm (EA + STAT_RX VALID), inject, NAK, re-arm
+const U_EP1 = 0x04;
+periph_write(USB + U_EP1, 4, 0x3001);
+assert_eq(periph_read(USB + U_EP1, 4), 0x3001, 'USB EP1 armed for OUT');
+assert_eq(usb_inject_out(1, [9, 8, 7]), true, 'USB bulk OUT accepted when armed');
+assert_eq(periph_read(U_PMA + 0xC0, 1), 9, 'USB OUT PMA byte 0');
+assert_eq(periph_read(U_PMA + 0xC0 + 2, 1), 7, 'USB OUT PMA byte 2');
+assert_eq(periph_read(U_PMA + 14, 2) & 0x3FF, 3, 'USB COUNT1_RX = 3');
+assert_eq(periph_read(USB + U_EP1, 4) & 0x8000, 0x8000, 'USB EP1 CTR_RX after OUT');
+assert_eq(usb_inject_out(1, [1]), false, 'USB OUT NAKed while not re-armed');
+periph_write(USB + U_EP1, 4, 0x1000); // STAT_RX NAK -> VALID (toggle bit 12 only)
+assert_eq(usb_inject_out(1, [5, 6]), true, 'USB OUT accepted after re-arm');
+assert_eq(periph_read(USB + U_EP1, 4) & 0x4000, 0, 'USB EP1 DTOG_RX toggled twice = 0');
+clear_current_interrupt();
+periph_write(USB + U_ISTR, 4, 0);
+
+// DADDR / FNR misc
+periph_write(USB + U_DADDR, 4, 0x8A);
+assert_eq(periph_read(USB + U_DADDR, 4), 0x8A, 'USB DADDR ADD+EF');
+assert_eq(periph_read(USB + 0x48, 4), 0, 'USB FNR reads 0 (no SOF engine)');
 
 // ============================================================
 // Summary

@@ -272,7 +272,7 @@ export async function createEmulator(opts = {}) {
     gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt, finish_interrupt,
     can_inject_message, adc_set_sim_value, gpio_set_analog, adc_set_rc_tau,
     touchscreen_set_touch, pwm_duty, raise_fault,
-     i2c_oled_fb, lcd_fb, gpio_take_pin_events, drain_events, spi_inject_miso, i2c_inject_rx } = periph;
+     i2c_oled_fb, lcd_fb, gpio_take_pin_events,     drain_events, spi_inject_miso, i2c_inject_rx, usb_inject_setup, usb_inject_out } = periph;
 
     // Register external devices BEFORE init()
     reset_ext_devices();
@@ -945,6 +945,12 @@ export async function createEmulator(opts = {}) {
 
         /** Queue injected RX bytes for an I2C channel (virtual device -> MCU). */
         i2cInjectRx(channel, bytes) { i2c_inject_rx(channel, bytes); },
+
+        /** Inject a USB SETUP packet (8 bytes) into EP0 (host -> device). Returns false when NAKed. */
+        usbInjectSetup(bytes) { return usb_inject_setup(bytes); },
+
+        /** Inject a USB OUT packet into an endpoint (host -> device). Returns false when NAKed. */
+        usbInjectOut(ep, bytes) { return usb_inject_out(ep, bytes); },
 
         /** Current I2C OLED framebuffer, page-major (page*width + col), 1 byte per column. */
         i2cOledFb(peripheral, address = 0x3C) {

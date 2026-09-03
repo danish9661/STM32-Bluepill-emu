@@ -184,6 +184,7 @@ mcu.onCanRx      = (can, id, len, data) => ...; // CAN frame received into a FIF
 ```js
 mcu.onTimCapture = (tim, ch, value) => ...; // input-capture latch (value = captured CNT)
 mcu.onFsmcAccess = (bank, offset, write, size, value) => ...; // FSMC memory transaction
+mcu.onUsbIn = (ep, data) => ...; // USB IN completion (device -> host bytes)
 ```
 
 - `onTimCapture(tim, ch, value)` fires when a TIM channel configured for **input
@@ -206,6 +207,19 @@ mcu.onFsmcAccess = (bank, offset, write, size, value) => ...; // FSMC memory tra
 
 These are encoded as flat `drain_events()` discriminants 16 (`TimCapture`) and
 17 (`FsmcAccess`).
+
+## USB device events
+
+```js
+mcu.onUsbIn = (ep, data) => ...; // IN transfer completed: `data` bytes for the host
+```
+
+- `onUsbIn(ep, data)` fires when firmware arms an IN transfer (STAT_TX → VALID)
+  and the packet moves to the host (`usb.rs` `complete_in`). Host → device
+  traffic goes the other way via injection: `mcu._emu` exposes
+  `usbInjectSetup(bytes8)` / `usbInjectOut(ep, bytes)` (queued through
+  `usb_inject_setup` / `usb_inject_out`; NAKed unless the endpoint is armed
+  VALID). Encoded as flat discriminant 18 (`UsbIn`: `[ep, len, bytes...]`).
 
 ## Complete worked examples
 
@@ -413,6 +427,7 @@ Full protocol reference, event-type field layout, and custom-client examples:
 | 15 | `CanRx` | `[can, id, len, d0..d7]` | `can.rs` inject_message |
 | 16 | `TimCapture` | `[tim, ch, value]` | `tim.rs` `sample_input_capture` |
 | 17 | `FsmcAccess` | `[bank, offset, write, size, value]` | `fsmc.rs` read_sized/write_sized |
+| 18 | `UsbIn` | `[ep, len, bytes...]` | `usb.rs` `complete_in` |
 
 ## Implementation notes
 

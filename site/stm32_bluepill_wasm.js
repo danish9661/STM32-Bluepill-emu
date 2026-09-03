@@ -288,6 +288,7 @@ export function dma_take_absorbed(offset, len) {
  *  15 CanRx        [15, can, id, len, d0..d7]
  *  16 TimCapture    [16, tim, ch, value]   (input-capture latch)
  *  17 FsmcAccess    [17, bank, offset, write, size, value]
+ *  18 UsbIn         [18, ep, len, bytes...]   (device->host IN completion)
  * @returns {Int32Array}
  */
 export function drain_events() {
@@ -636,6 +637,16 @@ export function raise_fault(kind, addr) {
 }
 
 /**
+ * Configured SYSCLK in Hz decoded from RCC CFGR (HSE assumed 8 MHz).
+ * Timing stays instruction-budget based; for drivers computing dividers.
+ * @returns {number}
+ */
+export function rcc_sysclk_hz() {
+    const ret = wasm.rcc_sysclk_hz();
+    return ret >>> 0;
+}
+
+/**
  * Register a peripheral implemented entirely in JS (rp2040js-style custom
  * chip). Callbacks are invoked with `(addr, size)` / `(addr, value, size)`
  * where addr is the ABSOLUTE access address. Requires init()/init_svd() first;
@@ -745,6 +756,33 @@ export function uart_rx_byte(addr, byte) {
 export function uart_rx_pending(addr) {
     const ret = wasm.uart_rx_pending(addr);
     return ret >>> 0;
+}
+
+/**
+ * Inject a USB OUT packet into an endpoint's RX buffer (host -> device).
+ * Returns false when NAKed (endpoint not armed VALID) or the address is bad.
+ * @param {number} ep
+ * @param {Uint8Array} data
+ * @returns {boolean}
+ */
+export function usb_inject_out(ep, data) {
+    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.usb_inject_out(ep, ptr0, len0);
+    return ret !== 0;
+}
+
+/**
+ * Inject a USB SETUP packet (8 bytes) into EP0's RX buffer (host -> device).
+ * Returns false when NAKed (endpoint not armed VALID) or the address is bad.
+ * @param {Uint8Array} data
+ * @returns {boolean}
+ */
+export function usb_inject_setup(data) {
+    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.usb_inject_setup(ptr0, len0);
+    return ret !== 0;
 }
 function __wbg_get_imports() {
     const import0 = {

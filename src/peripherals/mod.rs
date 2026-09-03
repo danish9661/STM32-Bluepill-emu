@@ -54,6 +54,15 @@ pub trait Peripheral {
     fn exti_port(&self, _line: u32) -> Option<char> { None }
     /// Called by GPIO when a pin changes state. Returns true if handled.
     fn gpio_pin_changed(&mut self, _sys: &System, _port: u8, _pin: u8, _rising: bool) -> bool { false }
+    /// Internal edge on an EXTI line (no GPIO port). Default: unhandled.
+    fn exti_line_edge(&mut self, _sys: &System, _line: u32, _rising: bool) -> bool { false }
+    /// Tamper-pin (PC13) level edge for the backup domain. Default: unhandled.
+    fn bkp_tamper(&mut self, _sys: &System, _rising: bool) -> bool { false }
+    /// Host-side USB OUT/SETUP delivery into endpoint `ep` (`is_setup` only
+    /// legal on EP0). Returns false when NAKed. Default: unhandled.
+    fn usb_inject(&mut self, _sys: &System, _ep: usize, _data: &[u8], _is_setup: bool) -> bool { false }
+    /// Configured (sysclk, hclk, pclk1, pclk2) in Hz, if this is RCC.
+    fn rcc_clocks(&self) -> Option<(u32, u32, u32, u32)> { None }
     /// Returns AFIO MAPR remap bits for this peripheral, if applicable.
     fn periph_remap(&self, _sys: &System) -> Option<u32> { None }
     /// Returns the MAPR remap bits for a named peripheral (only AFIO implements meaningfully).
@@ -200,6 +209,9 @@ impl Peripherals {
             let size = extract_svd_max_offset(resolved).max(0x10).min(0x400);
             let (start, end) = if name.as_str() == "FSMC" {
                 (0x6000_0000, 0xA000_1000)
+            } else if name.as_str() == "USB" {
+                // Registers + packet memory (SVD only sizes the registers).
+                (0x4000_5C00, 0x4000_6400)
             } else {
                 (p.base_address as u32, p.base_address as u32 + size)
             };
@@ -303,6 +315,8 @@ impl Peripherals {
             let size = regs.get(i + 1)
                 .map(|&(next, _)| (next - base).min(0x400))
                 .unwrap_or(0x100);
+            // USB needs registers + 512 B packet memory (ends at CAN1 start).
+            let size = if name == "USB" { 0x800 } else { size };
 
             let p: Option<Box<dyn Peripheral>> =
                 Self::build_peripheral(name, ext_devices, &mut peripherals.gpio.borrow_mut());
@@ -349,7 +363,12 @@ impl Peripherals {
         } else { None }
     }
 
-    fn is_register(addr: u32) -> bool { !(0x6000_0000..0xA000_0000).contains(&addr) }
+    fn is_register(addr: u32) -> bool {
+        // USB packet memory (0x40006000-0x40006400) is byte-addressable SRAM:
+        // exempt it from the word-lane shifting so PMA accesses stay exact.
+        !(0x6000_0000..0xA000_0000).contains(&addr)
+            && !(0x4000_6000..0x4000_6400).contains(&addr)
+    }
 
     fn align_addr_4(addr: u32) -> (u32, u8) {
         let byte_offset = (addr % 4) as u8;
@@ -556,6 +575,43 @@ impl Peripherals {
         if let Some(slot) = self.bus.borrow().get(0x4001_0400) {
             slot.peripheral.borrow_mut().gpio_pin_changed(sys, port, pin, rising);
         }
+    }
+
+    /// Internal-peripheral edge on an EXTI line (PVD line 16, RTC alarm line
+    /// 17, ...): same IMR/RTSR/FTSR gating as GPIO edges, without a port.
+    pub fn exti_line_edge(&self, sys: &System, line: u32, rising: bool) {
+        if let Some(slot) = self.bus.borrow().get(0x4001_0400) {
+            slot.peripheral.borrow_mut().exti_line_edge(sys, line, rising);
+        }
+    }
+
+    /// Tamper-pin (PC13) level edge into the backup domain (BKP CR.TPE/TPAL
+    /// decide whether it is an event). Called from GPIO external-input paths.
+    pub fn bkp_tamper(&self, sys: &System, rising: bool) {
+        if let Some(slot) = self.bus.borrow().get(0x4000_6C00) {
+            slot.peripheral.borrow_mut().bkp_tamper(sys, rising);
+        }
+    }
+
+    /// Host-side USB delivery into an endpoint's RX buffer (OUT/SETUP).
+    pub fn usb_inject(&self, sys: &System, ep: usize, data: &[u8], is_setup: bool) -> bool {
+        if let Some(slot) = self.bus.borrow().get(0x4000_5C00) {
+            slot.peripheral.borrow_mut().usb_inject(sys, ep, data, is_setup)
+        } else {
+            false
+        }
+    }
+
+    /// Configured clocks (sysclk, hclk, pclk1, pclk2) in Hz from the RCC
+    /// CFGR (HSE assumed 8 MHz). Timing stays instruction-budget based; this
+    /// is for drivers computing dividers from the clocks (e.g. USART BRR).
+    pub fn rcc_clocks(&self) -> (u32, u32, u32, u32) {
+        if let Some(slot) = self.bus.borrow().get(0x4002_1000) {
+            if let Some(c) = slot.peripheral.borrow().rcc_clocks() {
+                return c;
+            }
+        }
+        (8_000_000, 8_000_000, 8_000_000, 8_000_000)
     }
 
     /// Peripheral DMA request: fires the enabled DMA channel if configured.

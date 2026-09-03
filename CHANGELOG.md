@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.0] — 2026-09-03
+
+### Added
+- USB FS device peripheral (`src/peripherals/usb.rs`): EP0-7R with hardware toggle semantics, CNTR masks, ISTR (W0C flags; CTR/DIR/EP_ID derived), DADDR, BTABLE, 512 B packet memory with byte-exact access, RESET on FRES release + IRQ20, SETUP/OUT injection (`usb_inject_setup/out`, NAK unless armed, DTOG sequencing), IN completion as `UsbIn` event (discriminant 18) + `onUsbIn` in `STM32F1` + `usbInjectSetup/Out` on the emulator
+- RCC clock query API (`rcc_clocks()` trait method, `rcc_sysclk_hz()` export): decoded SYSCLK/HCLK/PCLK1/PCLK2 from CFGR (HSE assumed 8 MHz); timing stays instruction-budget based by decision
+- PVD voltage detector (fixed-supply model → EXTI line 16) via new `exti_line_edge()` fan-out; BKP tamper pin (TPE/TPAL on PC13 → IRQ2, DR clear); RTC second/overflow IRQs + CRL flags
+- Coverage audit (`docs/COVERAGE.md`): 67-block SVD census vs the emulator (38 Full, 1 Partial, 0 stubs)
+
+### Fixed
+- Mirrored RTC CRH bit order (code and test firmware both had ALRIE/SECIE swapped vs RM0008); CRH mask widened so OWIE is writable; test firmware fixed (`CRH = 2`, handler clears ALRF) and rebuilt
+- BKP register map corrected to RM0008 (DR1-10 @ 0x04-0x28, RTCCR @ 0x2C, CR @ 0x30, CSR @ 0x34); stale RTCCR unit test fixed
+- PVD PVDO bit made read-only
+
+### Tests
+- 77 new unit tests (354/354 total): WWDG EWI, PVD edges, RTC second/overflow + flags, RCC decode, tamper, USB end-to-end control + bulk flows
+
 ## [1.2.0] — 2026-09-03
 
 ### Added

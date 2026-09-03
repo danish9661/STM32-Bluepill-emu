@@ -14,6 +14,11 @@ pub struct Rcc {
     csr: u32,
 }
 
+/// Fixed crystal assumption for HSE configurations (Blue Pill boards ship an
+/// 8 MHz crystal). HSI is 8 MHz by definition.
+const HSI_HZ: u32 = 8_000_000;
+const HSE_HZ: u32 = 8_000_000;
+
 impl Rcc {
     pub fn new(name: &str) -> Option<Box<dyn Peripheral>> {
         if name == "RCC" {
@@ -33,6 +38,47 @@ impl Rcc {
             None
         }
     }
+
+    /// SYSCLK in Hz decoded from CFGR (SW/PLLSRC/PLLMUL). Deliberately
+    /// read-only w.r.t. emulation timing: the instruction budget stays fixed
+    /// (1 instr = 1 SYSCLK cycle), so this is for drivers that compute
+    /// dividers/frequencies from the configured clocks (e.g. USART BRR).
+    pub fn sysclk_hz(&self) -> u32 {
+        match self.cfgr & 3 {
+            0 => HSI_HZ,
+            1 => HSE_HZ,
+            _ => {
+                let fin = if self.cfgr & (1 << 16) != 0 {
+                    if self.cfgr & (1 << 17) != 0 { HSE_HZ / 2 } else { HSE_HZ }
+                } else {
+                    HSI_HZ / 2
+                };
+                let bits = (self.cfgr >> 18) & 0xF;
+                let mul = if bits >= 14 { 16 } else { bits + 2 };
+                fin.saturating_mul(mul)
+            }
+        }
+    }
+
+    fn ahb_div(&self) -> u32 {
+        match (self.cfgr >> 4) & 0xF {
+            0..=7 => 1, 8 => 2, 9 => 4, 10 => 8, 11 => 16,
+            12 => 64, 13 => 128, 14 => 256, _ => 512,
+        }
+    }
+
+    fn apb_div(&self, shift: u32) -> u32 {
+        match (self.cfgr >> shift) & 7 {
+            0..=3 => 1, 4 => 2, 5 => 4, 6 => 8, _ => 16,
+        }
+    }
+
+    /// (sysclk, hclk, pclk1, pclk2) in Hz after HPRE/PPRE dividers.
+    pub fn clocks_hz(&self) -> (u32, u32, u32, u32) {
+        let sys = self.sysclk_hz();
+        let hclk = sys / self.ahb_div();
+        (sys, hclk, hclk / self.apb_div(8), hclk / self.apb_div(11))
+    }
 }
 
 impl Default for Rcc {
@@ -42,6 +88,8 @@ impl Default for Rcc {
 }
 
 impl Peripheral for Rcc {
+    fn rcc_clocks(&self) -> Option<(u32, u32, u32, u32)> { Some(self.clocks_hz()) }
+
     fn read(&mut self, _sys: &System, offset: u32) -> u32 {
         match offset {
             0x00 => self.cr,

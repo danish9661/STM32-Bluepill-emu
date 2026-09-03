@@ -82,13 +82,24 @@ impl Peripheral for Rtc {
             self.sync_cnt_regs();
             self.sync_div_regs();
 
+            // CRH interrupt enables (RM0008 §18.4.1): bit 0 SECIE, bit 1
+            // ALRIE, bit 2 OWIE. CRL status flags SECF/ALRF/OWF (bits 0-2)
+            // are set here and cleared by writing 0 (see write path).
             let alarm = ((self.alrh as u32) << 16) | self.alrl as u32;
-            if self.crh & 1 != 0 && self.last_cnt < alarm && self.cnt >= alarm {
+            if self.crh & 2 != 0 && self.last_cnt < alarm && self.cnt >= alarm {
+                self.crl |= 1 << 1; // ALRF
                 sys.push_event(crate::system::VmEvent::RtcAlarm { alarm });
                 sys.p.nvic.borrow_mut().set_intr_pending(RTC_IRQ);
             }
-            if self.cnt < self.last_cnt && self.crh & 2 != 0 {
+            if self.crh & 1 != 0 {
+                self.crl |= 1 << 0; // SECF: a second elapsed
                 sys.p.nvic.borrow_mut().set_intr_pending(RTC_IRQ);
+            }
+            if self.cnt < self.last_cnt {
+                self.crl |= 1 << 2; // OWF: counter wrapped
+                if self.crh & 4 != 0 {
+                    sys.p.nvic.borrow_mut().set_intr_pending(RTC_IRQ);
+                }
             }
             self.last_cnt = self.cnt;
         }
@@ -112,18 +123,24 @@ impl Peripheral for Rtc {
 
     fn write(&mut self, _sys: &System, offset: u32, value: u32) {
         match offset {
-            0x00 => self.crh = value & 0x03,
+            0x00 => self.crh = value & 0x07, // SECIE/ALRIE/OWIE
             0x04 => {
+                // Status flags SECF/ALRF/OWF (bits 0-2): hardware-set here,
+                // cleared by writing 0 (writing 1 leaves them).
+                self.crl &= value | !0x07;
+                // RSF (bit 3): set by hardware after register sync; writing
+                // 0 clears (writing 1 has no effect).
+                if value & (1 << 3) == 0 {
+                    self.crl &= !(1 << 3);
+                }
                 if value & (1 << 4) != 0 {
-                    self.crl = (self.crl & !(1 << 4)) | (value & (1 << 4));
+                    self.crl |= 1 << 4;
                 }
                 let rtoff = value & (1 << 5);
                 if rtoff != 0 {
                     self.crl = (self.crl & !(1 << 5) & !(1 << 4)) | (value & (1 << 5));
                 }
-                if value & (1 << 3) != 0 { self.crl |= 1 << 3; }
                 let was_enabled = self.crl & (1 << 5);
-                self.crl = (self.crl & !0x07) | (value & 0x07);
                 if (self.crl & (1 << 5)) != 0 && was_enabled == 0 {
                     self.last_tick = instruction_count();
                     self.div_counter = 0;

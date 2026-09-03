@@ -26,6 +26,18 @@ impl Exti {
         self.pr |= mask;
         sys.p.nvic.borrow_mut().set_intr_pending(exti_irq(line));
     }
+
+    fn fire_line(&mut self, sys: &System, line: u32, rising: bool) -> bool {
+        let mask = 1 << line;
+        self.pr |= mask;
+        sys.p.nvic.borrow_mut().set_intr_pending(exti_irq(line));
+        sys.push_event(crate::system::VmEvent::ExtiEdge { line: line as u8 });
+        // Lines 11/15 are the ADC external trigger inputs (regular/injected)
+        if rising {
+            sys.p.adc_exti_trigger(sys, line);
+        }
+        true
+    }
 }
 
 fn exti_irq(line: u32) -> i32 {
@@ -65,14 +77,17 @@ impl Peripheral for Exti {
                 if (b'A' + port) as char != expected { return false; }
             }
         }
-        self.pr |= mask;
-        sys.p.nvic.borrow_mut().set_intr_pending(exti_irq(line));
-        sys.push_event(crate::system::VmEvent::ExtiEdge { line: line as u8 });
-        // Lines 11/15 are the ADC external trigger inputs (regular/injected)
-        if rising {
-            sys.p.adc_exti_trigger(sys, line);
-        }
-        true
+        self.fire_line(sys, line, rising)
+    }
+
+    /// Internal-peripheral edge (PVD/RTC/…): same gating, no GPIO port check.
+    fn exti_line_edge(&mut self, sys: &System, line: u32, rising: bool) -> bool {
+        let mask = 1 << line;
+        if line > 31 { return false; }
+        if self.imr & mask == 0 { return false; }
+        let edge_ok = if rising { self.rtsr & mask != 0 } else { self.ftsr & mask != 0 };
+        if !edge_ok { return false; }
+        self.fire_line(sys, line, rising)
     }
 
     fn write(&mut self, sys: &System, offset: u32, value: u32) {

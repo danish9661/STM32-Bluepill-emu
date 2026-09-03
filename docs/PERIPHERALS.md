@@ -48,7 +48,7 @@ including interrupt generation, status flags, and timing. Support levels:
 | I2C1–2 | Full | Master state machine (START, address 7-bit, TX/RX, STOP, repeated START), SR1/SR2 status flags, error handling (AF, BER), interrupts (EV/ER). 10-bit addressing and slave mode are **not** implemented. |
 | CAN1 | Full | Mailboxes (TIR/TDTR/TDLR/TDHR), filters (ID-list and mask modes), TX request + TX-complete IRQ, RX FIFO + RX IRQ, `can_inject_message()` to inject a received frame from JS. |
 | SDIO | Full | SD host @ 0x40018000, IRQ 49, SDHC only (CCS=1): CMD0/2/3/6/7/8/9/12/13/16/17/18/24/25/55 + ACMD41 (busy-first power-up), 32-word FIFO, DATAEND/DBCKEND/CMDREND/CMDSENT/CTIMEOUT + MASK-gated IRQ, DMA2 CH4 requests. Backed by an `SdCard` image (`add_sd_card('SDIO', data)`); CSD capacity derived from image size. |
-| USB | **Stub** | Registers read 0; USB firmware will not work. |
+| USB | Full | FS device @ 0x40005C00 + 512 B packet memory @ 0x40006000 (byte-exact sub-word access): EP0-7R with real toggle semantics (STAT toggle-on-1, CTR clear-on-0, DTOG read-only), CNTR masks, ISTR (event flags W0C; CTR/DIR/EP_ID derived like hardware), DADDR, BTABLE. USB RESET on FRES release, SETUP/OUT injection (`usb_inject_setup/out`, NAK unless armed, DTOG sequencing), IN completion drained as `UsbIn` event + IRQ20. No SOF engine (FNR=0), suspend/resume, wakeup IRQ42, or double-buffered endpoints. |
 
 ## Timers
 
@@ -82,7 +82,6 @@ These are *extra* peripherals the STM32 talks to over SPI/I2C — the "rest of t
 
 ## What is NOT emulated
 
-- **USB** (stub).
 - **Real analog input model** — ADC converts with real timing/flags. By default
   it samples the injected `adc_set_sim_value()` exactly, but wiring a pin with
   `gpioSetAnalog(port, pin, level)` engages an RC sample-and-hold: the sampling
@@ -101,7 +100,7 @@ These are *extra* peripherals the STM32 talks to over SPI/I2C — the "rest of t
 
 ## Verification coverage
 
-- **277 unit tests** (`node tests/test_all.mjs`) — GPIO (incl. electrical model: pull-ups,
+- **354 unit tests** (`node tests/test_all.mjs`) — GPIO (incl. electrical model: pull-ups,
   open-drain, external-driver precedence, slew readback, pin-change events), USART, ADC (real conversion
   timing, RC sample-and-hold via gpioSetAnalog, DAC→ADC loopback, AWD IRQ, TIM1 TRGO /
   TIM1_CC1 / EXTI 11 external triggers), RCC, SysTick, TIM, IWDG, NVIC, CRC, SPI, I2C,

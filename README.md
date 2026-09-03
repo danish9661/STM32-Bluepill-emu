@@ -428,7 +428,7 @@ GPIO (A–D) with electrical model, USART1–3, SPI1–2, I2C1–2, TIM1–14
 DAC1–2, DMA1 (7ch) + DMA2 (5ch), CAN1 (RX injection + filters), RTC (alarm),
 CRC, NVIC (priority dispatch + 64-IRQ budget), SysTick, SCB (deep sleep, SHPR
 routing, fault escalation), EXTI, AFIO (pin remap), BKP, WWDG, IWDG, PWR, FLASH,
-FSMC (NOR/NAND/PC-Card), SDIO (SDHC card image, CMD engine, DMA2 CH4), **USB is a stub**.
+FSMC (NOR/NAND/PC-Card), SDIO (SDHC card image, CMD engine, DMA2 CH4), USB FS device (endpoints, packet memory, enumeration events).
 
 ---
 

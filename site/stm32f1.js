@@ -196,6 +196,8 @@ export class STM32F1 {
         this.onTimCapture = null;
         /** FSMC memory transaction callback: onFsmcAccess(bank, offset, write, size, value) */
         this.onFsmcAccess = null;
+        /** USB IN completion callback: onUsbIn(ep, data[]) (device -> host) */
+        this.onUsbIn = null;
         this._pinUnsub = null;
         this._wire();
     }
@@ -277,6 +279,10 @@ export class STM32F1 {
                 const bank = flat[i++]; const offset = flat[i++]; const write = flat[i++] !== 0;
                 const size = flat[i++]; const value = flat[i++];
                 if (this.onFsmcAccess) this.onFsmcAccess(bank, offset, write, size, value);
+            } else if (type === 18) { // UsbIn [ep, len, bytes...]
+                const ep = flat[i++]; const len = flat[i++];
+                const data = []; for (let k = 0; k < len; k++) data.push(flat[i++] & 0xFF);
+                if (this.onUsbIn) this.onUsbIn(ep, data);
             } else {
                 console.warn('STM32F1: unknown event discriminant', type, 'at index', i - 1);
                 break; // unknown length: stop to avoid desync

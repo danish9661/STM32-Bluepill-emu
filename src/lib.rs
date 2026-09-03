@@ -401,6 +401,7 @@ pub fn gpio_take_pin_events() -> Vec<u32> {
 ///  15 CanRx        [15, can, id, len, d0..d7]
 ///  16 TimCapture    [16, tim, ch, value]   (input-capture latch)
 ///  17 FsmcAccess    [17, bank, offset, write, size, value]
+///  18 UsbIn         [18, ep, len, bytes...]   (device->host IN completion)
 #[wasm_bindgen]
 pub fn drain_events() -> Vec<i32> {
     match try_sys() {
@@ -441,11 +442,40 @@ pub fn drain_events() -> Vec<i32> {
                     VmEvent::FsmcAccess { bank, offset, write, size, value } => {
                         out.push(17); out.push(*bank as i32); out.push(*offset as i32); out.push(if *write { 1 } else { 0 }); out.push(*size as i32); out.push(*value as i32);
                     }
+                    VmEvent::UsbIn { ep, data } => {
+                        out.push(18);
+                        out.push(*ep as i32);
+                        out.push(data.len() as i32);
+                        for &b in data { out.push(b as i32); }
+                    }
                 }
             }
             out
         }
         None => Vec::new(),
+    }
+}
+
+/// Inject a USB SETUP packet (8 bytes) into EP0's RX buffer (host -> device).
+/// Returns false when NAKed (endpoint not armed VALID) or the address is bad.
+#[wasm_bindgen]
+pub fn usb_inject_setup(data: &[u8]) -> bool {
+    if data.len() != 8 {
+        return false;
+    }
+    match try_sys() {
+        Some(sys) => sys.p.usb_inject(sys, 0, data, true),
+        None => false,
+    }
+}
+
+/// Inject a USB OUT packet into an endpoint's RX buffer (host -> device).
+/// Returns false when NAKed (endpoint not armed VALID) or the address is bad.
+#[wasm_bindgen]
+pub fn usb_inject_out(ep: u8, data: &[u8]) -> bool {
+    match try_sys() {
+        Some(sys) => sys.p.usb_inject(sys, ep as usize, data, false),
+        None => false,
     }
 }
 
@@ -473,6 +503,16 @@ pub fn gpio_set_analog(port: u32, pin: u32, level: u32) {
 #[wasm_bindgen]
 pub fn adc_set_rc_tau(cycles: u32) {
     peripherals::adc::set_adc_rc_tau(cycles.min(0xFFFF) as u16);
+}
+
+/// Configured SYSCLK in Hz decoded from RCC CFGR (HSE assumed 8 MHz).
+/// Timing stays instruction-budget based; for drivers computing dividers.
+#[wasm_bindgen]
+pub fn rcc_sysclk_hz() -> u32 {
+    match try_sys() {
+        Some(sys) => sys.p.rcc_clocks().0,
+        None => 8_000_000,
+    }
 }
 
 /// Current PWM duty (0-100) of a timer channel; 0 if addr is not a timer.

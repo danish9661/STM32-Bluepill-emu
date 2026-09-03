@@ -432,8 +432,7 @@ void testTIM3_PWM() {
 
 extern "C" void RTC_IRQHandler(void) {
     rtcAlarmCount++;
-    uint32_t crl = reg(RTC_B + 0x04);          /* read CRL (clears ALRF in HW) */
-    (void)crl;
+    reg(RTC_B + 0x04) = 0;                 /* CRL: write-0 clears ALRF */
 }
 
 void testRTCAlarmIRQ() {
@@ -748,7 +747,7 @@ void loopAsyncChecks() {
             reg(RTC_B + 0x1C) = 0;             /* CNTL = 0 */
             reg(RTC_B + 0x20) = 0;             /* ALRH */
             reg(RTC_B + 0x24) = 5;             /* ALRL = 5 */
-            reg(RTC_B + 0x00) = 1;             /* CRH: ALRIE */
+            reg(RTC_B + 0x00) = 2;             /* CRH: ALRIE (bit 1, RM0008) */
             reg(RTC_B + 0x04) = (1 << 5);      /* CRL: RTOFF */
             rtcAlarmArmed = 1;
         }

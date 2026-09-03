@@ -228,6 +228,11 @@ impl GpioPorts {
         if prev != value {
             let rising = value && !prev;
             sys.p.gpio_exti_trigger(sys, port, pin, rising);
+            // PC13 doubles as the TAMPER pin: route its level edges into the
+            // backup domain too (BKP decides by TPE/TPAL whether it is an event).
+            if port == 2 && pin == 13 {
+                sys.p.bkp_tamper(sys, rising);
+            }
         }
     }
 
