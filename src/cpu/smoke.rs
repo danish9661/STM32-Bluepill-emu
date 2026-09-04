@@ -193,9 +193,10 @@ fn periph39_full_run_native() {
     let _held = crate::test_util::lock();
     use crate::{
         add_i2c_eeprom, add_spi_flash, add_i2c_oled, add_lcd, add_touchscreen,
-        uart_rx_pending, dma_get_pending_count, can_inject_message,
+        uart_rx_pending, dma_get_pending_count, can_inject_message, reset_ext_devices,
     };
     let rb = |p: &str| std::fs::read(p).unwrap();
+    reset_ext_devices();
     add_i2c_eeprom("I2C1", 0x50, &rb("tests/arduino_periph_test/build/eeprom.bin"));
     add_i2c_eeprom("I2C2", 0x51, &rb("tests/arduino_periph_test/build/eeprom2.bin"));
     add_i2c_oled("I2C1", 0x3C, 128, 64);
@@ -246,4 +247,110 @@ fn tail(s: &str, n: usize) -> String {
     } else {
         format!("...{}", &s[s.len() - n..])
     }
+}
+
+/// True when `out` contains `key=` followed by a live decimal digit (rules
+/// out banner echoes like "adc=<0..4095>" which contain the bare key).
+fn has_live_value(out: &str, key: &str) -> bool {
+    let needle = format!("{key}=");
+    out.match_indices(&needle).any(|(i, _)| {
+        out[i + needle.len()..].chars().next().is_some_and(|c| c.is_ascii_digit())
+    })
+}
+/// Boot a raw .bin image at flash base with a fresh model (caller adds ext
+/// devices first, after reset_ext_devices()).
+fn boot_image(path: &str) -> (Cpu, FlatMemory) {
+    init();
+    let fw = std::fs::read(path).unwrap();
+    assert!(fw.len() >= 8, "firmware too small: {path}");
+    let sp = u32::from_le_bytes([fw[0], fw[1], fw[2], fw[3]]);
+    let pc = u32::from_le_bytes([fw[4], fw[5], fw[6], fw[7]]);
+    assert!(sp != 0 && pc != 0, "bad vector table: {path}");
+    let mut mem = FlatMemory::new(64 * 1024, 20 * 1024);
+    mem.load(&fw, 0x08000000);
+    let mut cpu = Cpu::new(sp, pc | 1);
+    cpu.dsp = false; // Cortex-M3
+    cpu.deliver_irqs = false; // lazy batch-boundary dispatch (product parity)
+    (cpu, mem)
+}
+
+/// Run until every marker appears in UART output (but always at least `min`
+/// instructions, so banner-echoing markers can't stop the run before live
+/// values print) or `max` instructions. Returns (instructions, full output).
+/// Faults stop the run (asserted after).
+fn run_until(cpu: &mut Cpu, mem: &mut FlatMemory, max: u64, min: u64, markers: &[&str]) -> (u64, String) {
+    let mut out = String::new();
+    let mut done = 0u64;
+    const SLICE: u32 = 20000;
+    while done < max {
+        if !step_slice(cpu, mem, SLICE) {
+            break;
+        }
+        done += SLICE as u64;
+        out.push_str(&get_uart_output());
+        if done >= min && markers.iter().all(|m| out.contains(m)) {
+            break;
+        }
+    }
+    out.push_str(&get_uart_output());
+    (done, out)
+}
+
+/// Firmware gallery: every other shipped demo boots fault-free natively and
+/// prints its banner + first live values (same bar as the browser presets).
+#[test]
+fn firmware_gallery_native() {
+    let _held = crate::test_util::lock();
+    use crate::{add_i2c_eeprom, add_spi_flash, add_i2c_oled, add_lcd, reset_ext_devices};
+    let rb = |p: &str| std::fs::read(p).unwrap();
+
+    // ADC on UART (PA0 sim value, prints every second).
+    reset_ext_devices();
+    let (mut cpu, mut mem) = boot_image("tests/arduino_adc_uart/build/arduino_adc_uart.ino.bin");
+    let (done, out) = run_until(&mut cpu, &mut mem, 120_000_000, 90_000_000, &["ADC on UART demo"]);
+    assert!(cpu.fault.is_none(), "adc_uart faulted: {:?}", cpu.fault);
+    assert!(has_live_value(&out, "adc"), "adc_uart no live readings after {done}:\n{}", tail(&out, 500));
+
+    // TIM2 timer on UART (1s lines).
+    reset_ext_devices();
+    let (mut cpu, mut mem) = boot_image("tests/arduino_timer_uart/build/arduino_timer_uart.ino.bin");
+    let (done, out) = run_until(&mut cpu, &mut mem, 120_000_000, 90_000_000, &["TIM2 timer on UART demo"]);
+    assert!(cpu.fault.is_none(), "timer_uart faulted: {:?}", cpu.fault);
+    assert!(has_live_value(&out, "cnt"), "timer_uart no live lines after {done}:\n{}", tail(&out, 500));
+
+    // TIM2 PWM fade (4 duty lines, then silent breathing).
+    reset_ext_devices();
+    let (mut cpu, mut mem) = boot_image("tests/arduino_fade/build/arduino_fade.ino.bin");
+    let (done, out) = run_until(&mut cpu, &mut mem, 40_000_000, 10_000_000, &["TIM2 PWM fade demo"]);
+    assert!(cpu.fault.is_none(), "fade faulted: {:?}", cpu.fault);
+    assert!(has_live_value(&out, "duty"), "fade no duty lines after {done}:\n{}", tail(&out, 500));
+
+    // SPI flash + I2C EEPROM + OLED probe (setup-only prints).
+    reset_ext_devices();
+    add_i2c_eeprom("I2C1", 0x50, &rb("tests/arduino_periph_test/build/eeprom.bin"));
+    add_i2c_oled("I2C1", 0x3C, 128, 64);
+    add_spi_flash("SPI1", 0xEF4016, &rb("tests/arduino_periph_test/build/spi_flash.bin"), Some("PA4".to_string()));
+    let (mut cpu, mut mem) = boot_image("tests/arduino_flash_demo/build/arduino_flash_demo.ino.bin");
+    let (done, out) = run_until(&mut cpu, &mut mem, 40_000_000, 0, &["JEDEC=EF4016", "OLED=found", "EEPROM wr=1 rd=42"]);
+    assert!(cpu.fault.is_none(), "flash_demo faulted: {:?}", cpu.fault);
+    assert!(
+        out.contains("JEDEC=EF4016") && out.contains("OLED=found") && out.contains("EEPROM wr=1 rd=42"),
+        "flash_demo mismatch after {done}:\n{}", tail(&out, 800)
+    );
+
+    // 7-peripheral showcase (OLED + LCD; 7-seg/RGB/buzzer/button need no images).
+    reset_ext_devices();
+    add_i2c_oled("I2C1", 0x3C, 128, 64);
+    add_lcd("SPI1", Some("PA8".to_string()));
+    let (mut cpu, mut mem) = boot_image("tests/arduino_hw_showcase/build/arduino_hw_showcase.ino.bin");
+    let (done, out) = run_until(&mut cpu, &mut mem, 150_000_000, 100_000_000, &["Peripheral showcase", "BTN=armed"]);
+    assert!(cpu.fault.is_none(), "showcase faulted: {:?}", cpu.fault);
+    assert!(out.contains("BTN=armed") && has_live_value(&out, "t"), "showcase not live after {done}:\n{}", tail(&out, 500));
+
+    // WS2812 strip over SPI1+DMA (frames print ~2s in).
+    reset_ext_devices();
+    let (mut cpu, mut mem) = boot_image("tests/arduino_ws2812/build/arduino_ws2812.ino.bin");
+    let (done, out) = run_until(&mut cpu, &mut mem, 200_000_000, 170_000_000, &["WS2812=ok"]);
+    assert!(cpu.fault.is_none(), "ws2812 faulted: {:?}", cpu.fault);
+    assert!(has_live_value(&out, "frames"), "ws2812 no frames after {done}:\n{}", tail(&out, 500));
 }
