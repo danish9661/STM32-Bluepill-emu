@@ -635,8 +635,8 @@ export function rustcpu_dispatch() {
 }
 
 /**
- * Whole DMA pump against Rust RAM: build the op plan and execute it with no
- * JS RAM crossings (the Unicorn driver's mem_read/mem_write per op).
+ * Whole DMA pump against Rust RAM with no JS crossings: build the op plan
+ * and execute it in one call.
  */
 export function rustcpu_dma_pump() {
     wasm.rustcpu_dma_pump();
@@ -645,7 +645,7 @@ export function rustcpu_dma_pump() {
 /**
  * Pending CPU fault, if the last run/dispatch stopped on one: empty when
  * clean, else [pc, op1, op2, len]. (Periph39 runs fault-free; anything here
- * is a loud decoder gap, like the Unicorn path's unmapped faults.)
+ * is a loud decoder gap.)
  * @returns {Uint32Array}
  */
 export function rustcpu_fault() {
@@ -661,8 +661,8 @@ export function rustcpu_fault_clear() {
 
 /**
  * Fires when I2C1 DR was written with the R-bit set (HAL I2C1 ISR needs
- * hi2c->Mode == 0x22 before reading DR). Same condition as the Unicorn
- * memWriteHook; the driver then patches RAM *(0x200002d8)+0x3D.
+ * hi2c->Mode == 0x22 before reading DR). The driver drains the model flag
+ * per batch, then patches RAM *(0x200002d8)+0x3D.
  * @returns {boolean}
  */
 export function rustcpu_i2c_hook_fired() {
@@ -684,7 +684,7 @@ export function rustcpu_init(sp, pc, flash_size, ram_size) {
 
 /**
  * Load firmware bytes at a guest physical address (bypasses flash
- * protection, like the Unicorn driver's mem_write at load time).
+ * protection, like a debugger memory write at load time).
  * @param {Uint8Array} data
  * @param {number} base
  */
@@ -771,7 +771,7 @@ export function rustcpu_write_tap(on) {
 }
 
 /**
- * Set PRIMASK and BASEPRI values from Unicorn CPU state.
+ * Set PRIMASK and BASEPRI values from CPU state.
  * @param {number} primask
  * @param {number} basepri
  */

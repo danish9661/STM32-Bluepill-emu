@@ -6,8 +6,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="google-site-verification" content="yH2SxaqtVuBYjoe79B_58FLHgpKmMXsgBzzNdM7ACTk" />
 <meta name="google-site-verification" content="15oUGn7tDY5qFKh0oX7q0zWcuUJ_nFIIjjZk6ixculo" />
-<meta name="description" content="STM32F103C8 Bluepill microcontroller emulator that runs real Arduino firmware in the browser — GPIO, UART, SPI, I2C, TIM, ADC, DMA, CAN and more, powered by WASM + Unicorn ARM.">
-<meta name="keywords" content="STM32 emulator, Bluepill emulator, STM32F103 emulator, STM32F103C8, ARM Cortex-M3 emulator, Arduino emulator, WASM, WebAssembly, Unicorn, run Arduino in browser, embedded systems emulator">
+<meta name="description" content="STM32F103C8 Bluepill microcontroller emulator that runs real Arduino firmware in the browser — GPIO, UART, SPI, I2C, TIM, ADC, DMA, CAN and more, powered by WASM + a native Rust ARM core.">
+<meta name="keywords" content="STM32 emulator, Bluepill emulator, STM32F103 emulator, STM32F103C8, ARM Cortex-M3 emulator, Arduino emulator, WASM, WebAssembly, run Arduino in browser, embedded systems emulator">
 <meta property="og:title" content="STM32 Bluepill Emulator — run Arduino firmware in your browser">
 <meta property="og:description" content="Full-system emulation of an STM32F103C8 (Bluepill) running real Arduino firmware — GPIO, UART, SPI, I2C, TIM, ADC, DMA, CAN. Live demo in the browser.">
 <meta property="og:type" content="website">
@@ -33,7 +33,7 @@ if (!crossOriginIsolated && 'serviceWorker' in navigator) {
   "@type": "SoftwareApplication",
   "name": "STM32 Bluepill Emulator",
   "alternateName": "STM32F103C8 Emulator",
-  "description": "Full-system emulator for the STM32F103C8 Blue Pill microcontroller that runs real Arduino firmware in the browser and Node.js via WebAssembly (WASM) and the Unicorn ARM Cortex-M3 CPU emulator.",
+  "description": "Full-system emulator for the STM32F103C8 Blue Pill microcontroller that runs real Arduino firmware in the browser and Node.js via WebAssembly (WASM) and a native Rust ARM Cortex-M3 CPU emulator.",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Web, Node.js",
   "url": "https://danish9661.github.io/STM32-Bluepill-emu/",
@@ -1319,7 +1319,7 @@ renderBoard(false);
 log('Pick a preset firmware, or load a .bin/.hex/.elf firmware and a .map for symbol names. Upload .map after the firmware for PC → symbol resolution.');
 </script>
 <footer>
-    STM32 Bluepill Emulator &middot; full-system emulation via WebAssembly + Unicorn ARM Cortex-M3 &middot;
+    STM32 Bluepill Emulator &middot; full-system emulation via WebAssembly + native Rust ARM Cortex-M3 &middot;
     <a href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">Source</a> &middot;
     <a href="about.html">About</a>
     <span style="margin-left:12px; color:#1e293b;">|</span>
