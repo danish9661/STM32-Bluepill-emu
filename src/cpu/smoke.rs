@@ -193,7 +193,7 @@ fn periph39_full_run_native() {
     let _held = crate::test_util::lock();
     use crate::{
         add_i2c_eeprom, add_spi_flash, add_i2c_oled, add_lcd, add_touchscreen,
-        uart_rx_pending, dma_get_pending_count, can_inject_message, reset_ext_devices,
+        reset_ext_devices,
     };
     let rb = |p: &str| std::fs::read(p).unwrap();
     reset_ext_devices();
@@ -212,9 +212,21 @@ fn periph39_full_run_native() {
     mem.load(&fw, 0x08000000);
     let mut cpu = Cpu::new(sp, pc | 1);
     cpu.dsp = false;
+    cpu.deliver_irqs = false; // lazy batch-boundary dispatch (product parity)
     let can_flag = parse_can_flag(&String::from_utf8_lossy(&rb(
         "tests/arduino_periph_test/build/arduino_periph_test.ino.map",
     )));
+    let (done, can_done) = pump_periph39_loop(&mut cpu, &mut mem, can_flag);
+    let out = get_uart_output();
+    assert!(cpu.fault.is_none(), "cpu faulted: {:?}", cpu.fault);
+    assert!(out.contains("SUMMARY pass=39 fail=0"), "39/39 missing after {done} instr, can={can_done}:\n{}", tail(&out, 6000));
+}
+
+/// Shared periph39 emulation loop (200M cap, AB stdin, CAN autopilot).
+/// Honors `cpu.deliver_irqs` (inline when true, lazy only when false).
+/// Returns (instructions, can_injected).
+fn pump_periph39_loop(cpu: &mut Cpu, mem: &mut FlatMemory, can_flag: u32) -> (u64, bool) {
+    use crate::{uart_rx_pending, dma_get_pending_count, can_inject_message, uart_rx_byte};
     let uart = 0x40013800u32;
     let mut stdin_q: Vec<u8> = vec![0x41, 0x42];
     let mut can_done = false;
@@ -228,7 +240,7 @@ fn periph39_full_run_native() {
         {
             uart_rx_byte(uart, stdin_q.remove(0));
         }
-        if !step_slice(&mut cpu, &mut mem, SLICE) {
+        if !step_slice(&mut *cpu, &mut *mem, SLICE) {
             break;
         }
         done += SLICE as u64;
@@ -236,9 +248,71 @@ fn periph39_full_run_native() {
             can_done = can_inject_message(0x40006400, 0 << 21, 2, 0xDEAD, 0);
         }
     }
+    (done, can_done)
+}
+
+/// Same 39-check suite with inline interrupt delivery (deliver_irqs=true):
+/// exceptions (incl. SVC) are taken mid-slice instead of at batch boundaries.
+///
+/// NOTE this cannot be 39/39: three checks assume lazy (batch-boundary)
+/// dispatch latency and race against prompt delivery —
+/// - "[EXTI reg]": SWIER pends IRQ6, the handler runs + clears PR0 before the
+///   test reads it (on real HW the preemption would do the same; the async
+///   "[EXTI IRQ]" check below proves the handler ran).
+/// - "[DMA RX]"/"[UART RX]": the AB-stdin timing shifts, so 'A' lands in the
+///   wrong consumer.
+/// What this proves instead: every interrupt source in the system (SVC,
+/// EXTI0/1/13, CAN RX, SysTick, PendSV, DMA TX, TIM2/3/4, RTC Alarm) is
+/// delivered inline with no faults or hangs over 200M instructions.
+#[test]
+fn periph39_inline_irqs_native() {
+    let _held = crate::test_util::lock();
+    use crate::{
+        add_i2c_eeprom, add_spi_flash, add_i2c_oled, add_lcd, add_touchscreen, reset_ext_devices,
+    };
+    let rb = |p: &str| std::fs::read(p).unwrap();
+    reset_ext_devices();
+    add_i2c_eeprom("I2C1", 0x50, &rb("tests/arduino_periph_test/build/eeprom.bin"));
+    add_i2c_eeprom("I2C2", 0x51, &rb("tests/arduino_periph_test/build/eeprom2.bin"));
+    add_i2c_oled("I2C1", 0x3C, 128, 64);
+    add_spi_flash("SPI1", 0xEF4016, &rb("tests/arduino_periph_test/build/spi_flash.bin"), Some("PA4".to_string()));
+    add_spi_flash("SPI2", 0xEF4017, &rb("tests/arduino_periph_test/build/spi_flash2.bin"), Some("PB12".to_string()));
+    add_lcd("SPI1", Some("PA1".to_string()));
+    add_touchscreen("SPI1", Some("PA3".to_string()), Some("PA2".to_string()));
+    init();
+    let fw = rb("tests/arduino_periph_test/build/arduino_periph_test.ino.bin");
+    let sp = u32::from_le_bytes([fw[0], fw[1], fw[2], fw[3]]);
+    let pc = u32::from_le_bytes([fw[4], fw[5], fw[6], fw[7]]);
+    let mut mem = FlatMemory::new(64 * 1024, 20 * 1024);
+    mem.load(&fw, 0x08000000);
+    let mut cpu = Cpu::new(sp, pc | 1);
+    cpu.dsp = false;
+    cpu.deliver_irqs = true; // inline mid-slice delivery under test
+    let can_flag = parse_can_flag(&String::from_utf8_lossy(&rb(
+        "tests/arduino_periph_test/build/arduino_periph_test.ino.map",
+    )));
+    let (done, can_done) = pump_periph39_loop(&mut cpu, &mut mem, can_flag);
     let out = get_uart_output();
     assert!(cpu.fault.is_none(), "cpu faulted: {:?}", cpu.fault);
-    assert!(out.contains("SUMMARY pass=39 fail=0"), "39/39 missing after {done} instr, can={can_done}:\n{}", tail(&out, 6000));
+    // Delivery proof: every IRQ vector + SVC served (see test doc for why
+    // the full 39/39 can't hold under prompt delivery).
+    for line in [
+        "[SVC] PASS",
+        "[EXTI IRQ] PASS",
+        "[EXTI1 IRQ] PASS",
+        "[EXTI13 IRQ] PASS",
+        "[CAN RX] PASS",
+        "[SysTick] PASS",
+        "[PendSV] PASS",
+        "[DMA TX] PASS",
+        "[TIM2 (NVIC)] PASS",
+        "[TIM3 PWM] PASS",
+        "[TIM4] PASS",
+        "[RTC Alarm IRQ] PASS",
+    ] {
+        assert!(out.contains(line), "{line} missing after {done} instr, can={can_done}:\n{}", tail(&out, 6000));
+    }
+    assert!(out.contains("SUMMARY"), "no SUMMARY after {done} instr:\n{}", tail(&out, 6000));
 }
 
 fn tail(s: &str, n: usize) -> String {

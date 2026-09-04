@@ -8,6 +8,8 @@ pub(crate) mod thumb;
 // mod tests;
 #[cfg(test)]
 mod smoke;
+#[cfg(test)]
+mod core_tests;
 pub use regs::Regs;
 pub use mem::Memory;
 use crate::system::WasmSystem;
@@ -160,6 +162,9 @@ impl Cpu {
     /// unmodified, including FreeRTOS SVC/PendSV/SysTick handlers.
     pub fn take_exception(&mut self, sys: &WasmSystem, mem: &mut dyn Memory, irq: i32) {
         let vector = (16 + irq) as u32;
+        // Exception entry wakes the core (WFI sleeps until an interrupt is
+        // delivered; without this a sleeping core never resumes, since the
+        // driver pumps take_exception for every dispatch).
         // Save IT state; the handler starts with a clean ITSTATE.
         self.it_stack.push(SavedIt {
             cond: self.it_cond,
@@ -169,6 +174,7 @@ impl Cpu {
         });
         self.it_n = 0;
         self.it_idx = 0;
+        self.sleeping = false;
         self.exc_stack.push(irq);
         // Bank the thread stack, then run the handler on MSP. The frame
         // goes onto the CURRENT stack (PSP if thread+PSP, else MSP) — this
