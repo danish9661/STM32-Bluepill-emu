@@ -1,3 +1,10 @@
+// SPDX-License-Identifier: MIT
+//
+// ARMv7-M Thumb-2 interpreter core + guest memory.
+// Provenance: extracted from danish9661/stm32F4-emulator
+// (stm32-periph-wasm/src/cpu/, GPL-3.0) and ported M4→M3 here. The author
+// confirms this vendored portion is released under MIT for this project
+// (2026-09-04) — see docs/PATH_B.md "License note".
 pub mod regs;
 pub mod mem;
 pub(crate) mod thumb;

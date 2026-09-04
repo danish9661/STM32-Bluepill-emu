@@ -106,19 +106,15 @@ handler dispatch is single-stepped — that overhead is *included* above.)
 - Soak: any latent decoder gap now faults loudly via `rustcpu_fault()` +
   UNDEFINSTR escalation instead of hanging silently.
 
-## License note (vendored CPU core — needs author sign-off)
+## License note (vendored CPU core — resolved MIT)
 
 - Provenance: `src/cpu/` was extracted verbatim from
   `danish9661/stm32F4-emulator`, path `stm32-periph-wasm/src/cpu/`, commit
-  `3df073e` (`feature/wasm-cpu`) — see `cortex-m3/README.md` §1 — then ported
-  M4→M3 on this branch (DSP gates, IT-suppress flag rule, register-shift
-  fixes, TST-as-AND, WFI wake).
+  `3df073e` (`feature/wasm-cpu`) — then ported M4→M3 on this branch (DSP
+  gates, IT-suppress flag rule, register-shift fixes, TST-as-AND, WFI wake).
 - That repo's `LICENSE` is the full **GPL-3.0** text (verified 2026-09-04).
-  This repo ships MIT (`package.json`, `LICENSE`), including the compiled
-  core inside `stm32_bluepill_wasm_bg.wasm` and the `stm32f1-emu` npm files.
-- Same GitHub user owns both repos, so relicensing/dual-licensing the
-  vendored part is presumably theirs to grant — but that grant is not
-  recorded anywhere. Before publishing an npm release or merging to master,
-  record it explicitly (e.g. a license header in `src/cpu/` naming terms, or
-  a note from the author), or replace the core. This note is a flag, not a
-  legal determination.
+- **Resolution (2026-09-04): the author confirms the vendored portion is
+  released under MIT for this project** (recorded in the `src/cpu/mod.rs`
+  header). Shipped artifacts (`stm32_bluepill_wasm_bg.wasm`, npm files)
+  stay MIT like the rest of the repo. This note is a record, not a legal
+  determination.

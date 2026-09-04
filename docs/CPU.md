@@ -3,7 +3,8 @@
 Pure-Rust ARMv7-M Thumb-2 interpreter (extracted from the F407 emulator tree,
 ported M4→M3 on the `rust_cpu` branch) plus guest memory. One WASM module holds
 the whole machine: this core calls the peripheral model directly, zero JS
-crossings per instruction. provenance + license flag: [`docs/PATH_B.md`](PATH_B.md).
+crossings per instruction. License: MIT per author grant (vendored from a
+GPL-3.0 tree — see [`docs/PATH_B.md`](PATH_B.md) "License note").
 
 Provenance note: every encoding here was verified against
 `arm-none-eabi-as`/`objdump` output for the repo's own firmware.
