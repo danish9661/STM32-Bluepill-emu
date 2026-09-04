@@ -673,6 +673,152 @@ export function reset_ext_devices() {
 }
 
 /**
+ * Dispatch all pending interrupts within the shared per-batch budget.
+ * Returns the number of IRQs dispatched.
+ * @returns {number}
+ */
+export function rustcpu_dispatch() {
+    const ret = wasm.rustcpu_dispatch();
+    return ret >>> 0;
+}
+
+/**
+ * Whole DMA pump against Rust RAM: build the op plan and execute it with no
+ * JS RAM crossings (the Unicorn driver's mem_read/mem_write per op).
+ */
+export function rustcpu_dma_pump() {
+    wasm.rustcpu_dma_pump();
+}
+
+/**
+ * Pending CPU fault, if the last run/dispatch stopped on one: empty when
+ * clean, else [pc, op1, op2, len]. (Periph39 runs fault-free; anything here
+ * is a loud decoder gap, like the Unicorn path's unmapped faults.)
+ * @returns {Uint32Array}
+ */
+export function rustcpu_fault() {
+    const ret = wasm.rustcpu_fault();
+    var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
+}
+
+export function rustcpu_fault_clear() {
+    wasm.rustcpu_fault_clear();
+}
+
+/**
+ * Fires when I2C1 DR was written with the R-bit set (HAL I2C1 ISR needs
+ * hi2c->Mode == 0x22 before reading DR). Same condition as the Unicorn
+ * memWriteHook; the driver then patches RAM *(0x200002d8)+0x3D.
+ * @returns {boolean}
+ */
+export function rustcpu_i2c_hook_fired() {
+    const ret = wasm.rustcpu_i2c_hook_fired();
+    return ret !== 0;
+}
+
+/**
+ * Create the CPU + guest RAM. Call after init()/init_svd() and before load.
+ * `dsp` is always false here (Cortex-M3 has no DSP extension).
+ * @param {number} sp
+ * @param {number} pc
+ * @param {number} flash_size
+ * @param {number} ram_size
+ */
+export function rustcpu_init(sp, pc, flash_size, ram_size) {
+    wasm.rustcpu_init(sp, pc, flash_size, ram_size);
+}
+
+/**
+ * Load firmware bytes at a guest physical address (bypasses flash
+ * protection, like the Unicorn driver's mem_write at load time).
+ * @param {Uint8Array} data
+ * @param {number} base
+ */
+export function rustcpu_load(data, base) {
+    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    wasm.rustcpu_load(ptr0, len0, base);
+}
+
+/**
+ * Raw guest-memory access (RAM + flash; flash writes stay protected, use
+ * rustcpu_load for firmware). Backs memRead32 + the hi2c Mode RAM patch.
+ * @param {number} addr
+ * @param {number} len
+ * @returns {Uint8Array}
+ */
+export function rustcpu_mem_read(addr, len) {
+    const ret = wasm.rustcpu_mem_read(addr, len);
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
+}
+
+/**
+ * @param {number} addr
+ * @param {Uint8Array} data
+ */
+export function rustcpu_mem_write(addr, data) {
+    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    wasm.rustcpu_mem_write(addr, ptr0, len0);
+}
+
+/**
+ * Registers for getRegisters/getPc/getSp parity + debugging:
+ * [r0..r12, sp, lr, pc, xpsr, primask, control, ipsr] (20 words).
+ * @returns {Uint32Array}
+ */
+export function rustcpu_regs() {
+    const ret = wasm.rustcpu_regs();
+    var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
+}
+
+/**
+ * Run the CPU for up to `slice` instructions. SVC is dispatched inline onto
+ * the real stack (no mirror needed); any other fault stops the run and is
+ * reported via rustcpu_fault(). Returns instructions actually executed
+ * (thread + handler), for exact accounting.
+ * @param {number} slice
+ * @returns {number}
+ */
+export function rustcpu_run(slice) {
+    const ret = wasm.rustcpu_run(slice);
+    return ret >>> 0;
+}
+
+/**
+ * @param {number} pc
+ */
+export function rustcpu_set_pc(pc) {
+    wasm.rustcpu_set_pc(pc);
+}
+
+/**
+ * Drain recorded writes as flat [addr, size, value, ...]. Clears the log.
+ * @returns {Uint32Array}
+ */
+export function rustcpu_take_writes() {
+    const ret = wasm.rustcpu_take_writes();
+    var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
+}
+
+/**
+ * Enable/disable recording of peripheral writes (driver enables when a
+ * write watcher subscribes, disables when the last one leaves).
+ * @param {boolean} on
+ */
+export function rustcpu_write_tap(on) {
+    wasm.rustcpu_write_tap(on);
+}
+
+/**
  * Set PRIMASK and BASEPRI values from Unicorn CPU state.
  * @param {number} primask
  * @param {number} basepri
