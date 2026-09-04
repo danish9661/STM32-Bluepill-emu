@@ -342,9 +342,8 @@ export async function createEmulator(opts = {}) {
 
 
     // ---- backend primitives: run()/step() bodies below are shared ----
-    // Unicorn path: emu_start + hooks + JS DMA RAM moves + JS IRQ dispatch.
-    // Rust path: rustcpu_* exports (DMA pump + dispatch run fully in Rust
-    // against Rust RAM; no Unicorn instance, hooks, or RAM crossings).
+    // Single backend (native Rust CPU): DMA pump + IRQ dispatch run fully
+    // in Rust against Rust RAM; no JS crossings per instruction or access.
     const pumpDma = () => rustcpu_dma_pump();
     // Execute one CPU batch; returns exact executed instructions (incl.
     // handlers) for accounting.
@@ -643,7 +642,7 @@ export async function createEmulator(opts = {}) {
 
 
         close() {
-            // No Unicorn instance to tear down; model state resets on init().
+            // Nothing to tear down; model state resets on init().
         },
     };
 }

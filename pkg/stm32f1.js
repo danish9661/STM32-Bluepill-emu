@@ -2,7 +2,7 @@
 // pkg/emulator.js WASM bridge.
 //
 // This is a THIN layer: it adds no emulation logic and no hot-path overhead.
-// Every method delegates to the underlying emulator (Unicorn TCG + Rust
+// Every method delegates to the underlying emulator (native Rust CPU + Rust
 // peripherals run inside run()/step(); this class only translates calls at the
 // API boundary).
 //
