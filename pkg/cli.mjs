@@ -8,14 +8,21 @@ const { periph_read, periph_write, tick, step, step_batch, process_batch, get_ne
 dma_set_completed_many, dma_absorb_periph, dma_push_periph, is_watchdog_reset_requested, add_spi_flash, add_i2c_eeprom, add_touchscreen, add_sd_card,
 add_lcd, add_i2c_oled, reset_ext_devices, register_js_peripheral, can_inject_message, raise_fault,
 init, init_svd, has_pending_interrupt, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
-set_intr_masks, clear_current_interrupt, finish_interrupt } = periph;
+set_intr_masks, clear_current_interrupt, finish_interrupt,
+rustcpu_init, rustcpu_load, rustcpu_run, rustcpu_fault, rustcpu_fault_clear, rustcpu_dispatch,
+rustcpu_regs, rustcpu_set_pc, rustcpu_mem_read, rustcpu_mem_write, rustcpu_dma_pump, rustcpu_i2c_hook_fired } = periph;
 
 periph.initSync({ module: readFileSync(new URL('./stm32_bluepill_wasm_bg.wasm', import.meta.url)) });
 
 const parseHex = (v) => typeof v === 'number' ? v : parseInt(v, 16);
 
-// Unicorn ARM cannot decode `mrs rX, msp` (used by newlib _sbrk). In thread
-// mode MSP == SP, so rewrite to `mov rX, sp` + nop (same 4-byte footprint).
+// CPU backend selection: 'unicorn' (default, TCG) or 'rust' (native Path B
+// interpreter in WASM — benchmarking hook, shares the peripheral model).
+// The Rust core decodes `mrs` itself, so the patch below is Unicorn-only.
+let skipMrsPatch = false;
+function maybePatchMrsMsp(data) {
+    return skipMrsPatch ? data : patchMrsMsp(data);
+}
 function patchMrsMsp(data) {
     let patched = 0;
     for (let i = 0; i + 3 < data.length; i++) {
@@ -45,7 +52,7 @@ function loadFirmware(buf) {
         }
         console.log(`Parsed ELF: ${elf.regions.length} load segments, ${elf.symbols.length} symbols`);
         for (const r of elf.regions) {
-            r.data = patchMrsMsp(r.data);
+            r.data = maybePatchMrsMsp(r.data);
         }
         return { data: new Uint8Array(0), base: null, regions: elf.regions, symbols: elf.symbols };
     }
@@ -55,10 +62,10 @@ function loadFirmware(buf) {
             throw new Error('Intel HEX parsed to 0 bytes — check the file format');
         }
         console.log(`Parsed Intel HEX: base=0x${parsed.base.toString(16)} (${parsed.data.length} bytes)`);
-        return { data: patchMrsMsp(parsed.data), base: parsed.base, regions: null, symbols: null };
+        return { data: maybePatchMrsMsp(parsed.data), base: parsed.base, regions: null, symbols: null };
     }
     console.warn(`Warning: unrecognized firmware format (first bytes: ${Array.from(buf.slice(0, 8)).map(b => '0x' + b.toString(16)).join(' ')}). Loading as raw binary at 0x08000000.`);
-    return { data: patchMrsMsp(buf), base: null, regions: null, symbols: null };
+    return { data: maybePatchMrsMsp(buf), base: null, regions: null, symbols: null };
 }
 
 function makeResolver(symbols) {
@@ -85,6 +92,154 @@ async function getMUnicorn() {
     return require('./unicorn_arm.cjs');
 }
 
+/**
+ * Native Rust-CPU backend loop (Path B). Same firmware loading, ext devices,
+ * peripheral model, DMA plan, batch tick and lazy IRQ dispatch as the Unicorn
+ * path — only the CPU differs (no Unicorn instance, hooks, or JS patches:
+ * the Rust core decodes `mrs` and runs the real `bl HAL_NVIC_EnableIRQ`).
+ * Accounting is exact (executed counts, handlers included).
+ */
+async function runRustBackend({ firmware, fwBase, fwRegions, fwSymbols, vector_table, memRegions, uartAddr, maxInst, showRegs, verbose, mapPath }) {
+    if (mapPath) {
+        const { readFileSync: rfs } = await import('fs');
+        fwSymbols = parseSymbolMap(rfs(path.resolve(mapPath), 'utf8'));
+        console.log(`Loaded ${fwSymbols.length} symbols from map: ${mapPath}`);
+    }
+    const flashRegion = memRegions.find(r => vector_table >= r.start && vector_table < r.start + r.size) || memRegions[0];
+    const ramRegion = memRegions.find(r => 0x20000000 >= r.start && 0x20000000 < r.start + r.size);
+    const flashSize = flashRegion ? flashRegion.size : 0x10000;
+    const ramSize = ramRegion ? ramRegion.size : 0x5000;
+
+    // Vector table bytes straight from the loaded image (no backend needed).
+    const vecAt = (off) => {
+        if (fwRegions && fwRegions.length) {
+            for (const r of fwRegions) {
+                const a = vector_table + off;
+                if (a >= r.start && a + 1 <= r.start + r.data.length) {
+                    const o = a - r.start;
+                    return r.data[o] | (r.data[o + 1] << 8) | (r.data[o + 2] << 16) | (r.data[o + 3] << 24);
+                }
+            }
+            return 0;
+        }
+        const base = fwBase != null ? fwBase : (flashRegion ? flashRegion.start : 0x08000000);
+        const o = vector_table + off - base;
+        if (!firmware || o < 0 || o + 4 > firmware.length) return 0;
+        return firmware[o] | (firmware[o + 1] << 8) | (firmware[o + 2] << 16) | (firmware[o + 3] << 24);
+    };
+    const sp_init = vecAt(0) >>> 0;
+    const pc_init = vecAt(4) >>> 0;
+    if (sp_init === 0 || sp_init === 0xFFFFFFFF || pc_init === 0 || pc_init === 0xFFFFFFFF || (pc_init & 1) === 0) {
+        console.error(`Error: invalid vector table at 0x${vector_table.toString(16)} (SP=0x${sp_init.toString(16)} PC=0x${pc_init.toString(16)})`);
+        process.exit(1);
+    }
+    rustcpu_init(sp_init, pc_init, flashSize, ramSize);
+
+    const loadOne = (start, data) => rustcpu_load(data, start >>> 0);
+    if (fwRegions && fwRegions.length) {
+        for (const r of fwRegions) loadOne(r.start, r.data);
+    } else if (firmware && fwBase != null) {
+        loadOne(fwBase, firmware);
+    } else if (firmware) {
+        const romStart = flashRegion ? flashRegion.start : 0x08000000;
+        loadOne(romStart, firmware);
+        if (romStart !== vector_table) loadOne(vector_table, firmware);
+    }
+    console.log(`SP=0x${sp_init.toString(16)} PC=0x${(pc_init | 1).toString(16)} (Rust CPU, no Unicorn)`);
+
+    const read32rc = (addr) => {
+        const b = rustcpu_mem_read(addr >>> 0, 4);
+        return new DataView(b.buffer, b.byteOffset, b.byteLength).getUint32(0, true);
+    };
+    const traceResolve = makeResolver(fwSymbols);
+    const canArmedSym = fwSymbols?.find(s => s.name === 'canRxArmed');
+
+    const stdinQueue = [];
+    if (process.stdin.isTTY) process.stdin.setRawMode(true);
+    process.stdin.on('data', (chunk) => { for (const b of chunk) stdinQueue.push(b); });
+    process.stdin.resume();
+    if (process.stdin.isTTY) process.on('SIGINT', () => { process.stdin.setRawMode(false); process.exit(0); });
+
+    let instCount = 0, batchInstCount = 0, totalSteps = 0;
+    let stopRequested = false, anyPending = false, canInjected = false;
+    const startTime = Date.now();
+    const maxBatch = parseInt(process.env.EMU_BATCH || '20000', 10);
+    const SMALL_BATCH = 20000, LARGE_BATCH = 50000;
+    while (!stopRequested) {
+        const dmaBusy = dma_get_pending_count() > 0;
+        while (stdinQueue.length > 0 && uart_rx_pending(uartAddr) === 0 && !dmaBusy) uart_rx_byte(uartAddr, stdinQueue.shift());
+        // No hook-based poll detector on this path (no mem hooks by design);
+        // keep the pending/DMA/RX adaptive sizes (fixed 20K/50K otherwise).
+        const curBatch = process.env.EMU_BATCH ? maxBatch
+            : ((anyPending || dmaBusy || uart_rx_pending(uartAddr) !== 0) ? SMALL_BATCH : LARGE_BATCH);
+        rustcpu_dma_pump();
+        const n = rustcpu_run(curBatch);
+        const fault = rustcpu_fault();
+        if (fault.length) {
+            const [fpc, op1] = fault;
+            const sym = traceResolve ? (traceResolve(fpc) || fpc.toString(16)) : fpc.toString(16);
+            console.log(`FAULT @${sym} op=0x${op1.toString(16)} (Rust CPU decode gap — no Unicorn artifact skip applies)`);
+            if (traceResolve && fwSymbols?.length) {
+                raise_fault(3, fpc); // UNDEFINSTR; handler runs via dispatch below
+            }
+            rustcpu_set_pc((fpc + 2) | 1);
+            rustcpu_fault_clear();
+        }
+        instCount += n;
+        batchInstCount += n;
+        if (batchInstCount > 0) {
+            const status = process_batch(batchInstCount);
+            batchInstCount = 0;
+            if (status & 0x80000000) { stopRequested = true; break; }
+            anyPending = (status & 0x40000000) !== 0;
+        }
+        rustcpu_dma_pump();
+        rustcpu_dispatch();
+        if (rustcpu_fault().length) {
+            const [fpc] = rustcpu_fault();
+            console.error(`Emulation error: handler fault at 0x${fpc.toString(16)}`);
+            break;
+        }
+        // hi2c->Mode RAM patch parity (Unicorn memWriteHook equivalent).
+        if (rustcpu_i2c_hook_fired()) {
+            try {
+                const hi2c1Ptr = read32rc(0x200002d8);
+                if (hi2c1Ptr && hi2c1Ptr !== 0xFFFFFFFF) rustcpu_mem_write((hi2c1Ptr + 0x3D) >>> 0, new Uint8Array([0x22]));
+            } catch (_) {}
+        }
+        if (canArmedSym && !canInjected) {
+            const armedBytes = rustcpu_mem_read(canArmedSym.addr >>> 0, 4);
+            if (armedBytes && armedBytes[0] !== 0) {
+                canInjected = can_inject_message(0x40006400, 0 << 21, 2, 0xDEAD, 0);
+            }
+        }
+        totalSteps++;
+        try { if (stopRequested || is_watchdog_reset_requested()) break; } catch (e) { break; }
+        if (instCount >= maxInst) break;
+        await new Promise(r => setImmediate(r));
+    }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+    const regs = rustcpu_regs();
+    const finalSp = regs[13], finalPc = regs[15];
+    const uartOut = get_uart_output();
+    if (uartOut) console.log(`\n=== UART Output ===\n${uartOut}`);
+    try { if (process.stdin.isTTY) process.stdin.setRawMode(false); } catch (_) {}
+    console.log(`\nDone: ${totalSteps} steps, ${instCount} instructions in ${elapsed}s (rust cpu)`);
+    const resolve = makeResolver(fwSymbols);
+    const pcName = resolve && resolve(finalPc);
+    const spName = resolve && resolve(finalSp);
+    console.log(`PC=0x${finalPc.toString(16)}${pcName ? `  → ${pcName}` : ''} SP=0x${finalSp.toString(16)}${spName ? `  → ${spName}` : ''}`);
+    if (showRegs) {
+        for (let i = 0; i <= 12; i++) {
+            process.stdout.write(`R${i}=0x${regs[i].toString(16).padStart(8, '0')} `);
+            if (i % 4 === 3) console.log();
+        }
+        console.log(`LR=0x${regs[14].toString(16).padStart(8, '0')}`);
+        console.log(`xPSR=0x${regs[16].toString(16).padStart(8, '0')}`);
+    }
+}
+
 async function main() {
     await null;
     const args = process.argv.slice(2);
@@ -105,6 +260,9 @@ Firmware formats:
 Options:
   --config=<path>      Load YAML config file (can be repeated)
   --max=<N>            Max instructions to execute (default: 1000000, or env MAX_INST)
+  --cpu=<backend>      CPU backend: unicorn (default) or rust (native Path B,
+                       benchmarking hook — same peripherals/DMA/IRQ, shares
+                       nothing with Unicorn; skips the mrs/i2c_init patches)
   --map=<file.map>     Load symbol map for PC → name resolution
   --uart=<addr>        UART peripheral address (default: 0x40013800, or env UART_ADDR)
   --regs               Dump registers every batch
@@ -137,6 +295,12 @@ Examples:
     const mapPath = args.find(a => a.startsWith('--map='))?.split('=')[1];
     const periphPlugin = args.find(a => a.startsWith('--periph-plugin='))?.split('=')[1];
     let uartAddr = parseInt(args.find(a => a.startsWith('--uart='))?.split('=')[1] || process.env.UART_ADDR || '0x40013800', 16);
+    const cpuBackend = (args.find(a => a.startsWith('--cpu='))?.split('=')[1] || process.env.EMU_CPU || 'unicorn').toLowerCase();
+    if (cpuBackend !== 'unicorn' && cpuBackend !== 'rust') {
+        console.error(`Error: unknown --cpu backend: ${cpuBackend} (expected unicorn or rust)`);
+        process.exit(1);
+    }
+    skipMrsPatch = cpuBackend === 'rust';
 
     let config = {};
     if (configPaths.length > 0) {
@@ -162,17 +326,17 @@ Examples:
         console.log(`Using config(s): ${configPaths.join(', ')}`);
     }
 
-    const MUnicorn = await getMUnicorn();
-    const Module = await MUnicorn({});
+    const MUnicorn = cpuBackend === 'rust' ? null : await getMUnicorn();
+    const Module = MUnicorn ? await MUnicorn({}) : null;
 
     // unicorn_arm exposes the raw uc_reg_read_batch/write_batch C functions but
     // no marshalling wrapper — allocate the id/pointer/value arrays so a whole
     // register set crosses the boundary once instead of once per register
-    // (IRQ dispatch used ~17 individual crossings; now 2).
+    // (IRQ dispatch used ~17 individual crossings; now 2). Unicorn-only.
     const REG_POOL = 16;
-    const regIdsPtr = Module._malloc(REG_POOL * 4);
-    const regValsPtr = Module._malloc(REG_POOL * 4);
-    const regPtrsPtr = Module._malloc(REG_POOL * 4);
+    const regIdsPtr = Module ? Module._malloc(REG_POOL * 4) : 0;
+    const regValsPtr = Module ? Module._malloc(REG_POOL * 4) : 0;
+    const regPtrsPtr = Module ? Module._malloc(REG_POOL * 4) : 0;
     const regsRead = (uc, regIds) => {
         const n = regIds.length;
         const handle = Module.getValue(uc.handle_ptr, '*');
@@ -350,6 +514,15 @@ Examples:
     }
 
     console.log(`Max instructions: ${maxInst}`);
+    console.log(`CPU backend: ${cpuBackend}`);
+
+    if (cpuBackend === 'rust') {
+        await runRustBackend({
+            firmware, fwBase, fwRegions, fwSymbols, vector_table, memRegions,
+            uartAddr, maxInst, showRegs, verbose, mapPath,
+        });
+        return;
+    }
     console.log('Initializing Unicorn...');
 
     const uc = new Module.Unicorn(
