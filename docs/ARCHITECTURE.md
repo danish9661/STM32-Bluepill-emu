@@ -235,7 +235,9 @@ byte/16/32-bit accesses. NAND/PC-Card banks are always enabled.
 | Metric | Value |
 |---|---|
 | Headless (Node CLI, periph39) | **~23 MIPS** — 50M in ~2.1s; pure compute 26.5 MIPS (`pkg/cli.mjs:632`) |
+| Headless Rust CPU (`--cpu=rust`, periph39) | **72–75 MIPS** — 200M in ~2.7s, 39/39 (`docs/PATH_B.md`) |
 | Emulator.js path (Node, periph39) | **~24 MIPS** — 200M in 8.2s (`tests/test_emulator_js.mjs`) |
+| Emulator.js Rust CPU (`cpu:'rust'`) | **~70 MIPS** — 200M in ~2.8s, 39/39 (`tests/test_rustcpu.mjs`) |
 | Browser direct run (headless Chromium) | **~21.5 MIPS** — 200M in 9.3s, SAB OFF (`tests/test_browser.mjs`) — parity with Node since the CAN-autopilot fix below |
 | Browser interactive loop | **8.6 MIPS** headed (frame-budgeted rAF/worker loop, `site/worker.js:130`); headless rAF throttled |
 | SAB ON vs OFF (browser loop) | 9.22 MIPS (ON) vs 8.65 MIPS (OFF) = **+6.6%** (`site/_headers:1`, `site/worker.js:163`) |

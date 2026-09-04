@@ -112,6 +112,10 @@ jobs:
         run: echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml --max=200000000
       - name: Emulator.js path (browser run loop) 200M firmware run
         run: node tests/test_emulator_js.mjs
+      - name: Rust CPU backend (Path B) 200M firmware runs
+        run: |
+          echo -n "AB" | node pkg/cli.mjs --cpu=rust --config=tests/arduino_periph_test/config.yaml --max=200000000
+          node tests/test_rustcpu.mjs
       - name: WebSocket bridge (headless server + WS client round-trip)
         run: node tests/test_ws_bridge.mjs
       - name: WS2812 strip (SPI1 + DMA1 CH3) regression
