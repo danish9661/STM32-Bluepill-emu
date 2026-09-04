@@ -193,6 +193,12 @@ export function parseElf(buffer) {
  * @param {Array}     [opts.js_peripherals=[]]  rp2040js-style custom peripherals:
  *                                              [{ base, size, read(addr,size), write(addr,value,size) }]
  * @param {number}    [opts.uart_addr=0x40013800] USART used for uartRx()
+ * @param {string}    [opts.cpu='unicorn']        CPU backend: 'unicorn' (TCG,
+ *                                              default) or 'rust' (native Path B
+ *                                              interpreter in WASM — benchmarking
+ *                                              hook; same peripherals/DMA/IRQ.
+ *                                              Skips Unicorn, mrs/i2c patches;
+ *                                              no hook poll-shrink on this path)
  * @param {object}    [opts.ext_devices={}]     External devices (see below)
  * @param {boolean}   [opts.verbose=false]      Print init info to console
  *
@@ -225,19 +231,25 @@ export async function createEmulator(opts = {}) {
         ext_devices = {},
         verbose = false,
         batch_size = DEFAULT_MAX_BATCH,
+        cpu = 'unicorn',
     } = opts;
     const maxBatch = batch_size;
+    const cpuBackend = String(cpu || 'unicorn').toLowerCase();
+    if (cpuBackend !== 'unicorn' && cpuBackend !== 'rust') {
+        throw new Error(`createEmulator: unknown cpu backend "${cpu}" (expected 'unicorn' or 'rust')`);
+    }
+    const useRust = cpuBackend === 'rust';
 
-    const MUnicorn = await getMUnicorn();
-    const Module = await MUnicorn({});
+    const MUnicorn = useRust ? null : await getMUnicorn();
+    const Module = MUnicorn ? await MUnicorn({}) : null;
     const periph = await getPeriph();
 
     // Pool the 3 mallocs for regsRead/regsWrite — up to 64 IRQs/batch ×2 calls each
     // used to do 3×malloc+free per IRQ (6×64=384 allocs/40M). Pool once, reuse.
     const REG_POOL = 16;
-    const regIdsPtr = Module._malloc(REG_POOL * 4);
-    const regValsPtr = Module._malloc(REG_POOL * 4);
-    const regPtrsPtr = Module._malloc(REG_POOL * 4);
+    const regIdsPtr = Module ? Module._malloc(REG_POOL * 4) : 0;
+    const regValsPtr = Module ? Module._malloc(REG_POOL * 4) : 0;
+    const regPtrsPtr = Module ? Module._malloc(REG_POOL * 4) : 0;
     const regsRead = (uc, regIds) => {
         const n = regIds.length;
         const handle = Module.getValue(uc.handle_ptr, '*');
@@ -272,7 +284,10 @@ export async function createEmulator(opts = {}) {
     gpio_set_input, gpio_read_input, set_intr_masks, clear_current_interrupt, finish_interrupt,
     can_inject_message, adc_set_sim_value, gpio_set_analog, adc_set_rc_tau,
     touchscreen_set_touch, pwm_duty, raise_fault,
-     i2c_oled_fb, lcd_fb, gpio_take_pin_events,     drain_events, spi_inject_miso, i2c_inject_rx, usb_inject_setup, usb_inject_out } = periph;
+     i2c_oled_fb, lcd_fb, gpio_take_pin_events,     drain_events, spi_inject_miso, i2c_inject_rx, usb_inject_setup, usb_inject_out,
+    rustcpu_init, rustcpu_load, rustcpu_run, rustcpu_fault, rustcpu_fault_clear, rustcpu_dispatch,
+    rustcpu_regs, rustcpu_set_pc, rustcpu_mem_read, rustcpu_mem_write, rustcpu_dma_pump, rustcpu_i2c_hook_fired,
+    rustcpu_write_tap, rustcpu_take_writes } = periph;
 
     // Register external devices BEFORE init()
     reset_ext_devices();
@@ -316,13 +331,13 @@ export async function createEmulator(opts = {}) {
         register_js_peripheral(jp.base, jp.size, jp.read, jp.write);
     }
 
-    const uc = new Module.Unicorn(
+    const uc = useRust ? null : new Module.Unicorn(
         Module.ARCH_ARM,
         Module.MODE_THUMB | Module.MODE_LITTLE_ENDIAN
     );
 
     const flash_addr = vector_table & ~0x1FFFF;
-    uc.mem_map(flash_addr, flash_size, Module.PROT_ALL);
+    if (uc) uc.mem_map(flash_addr, flash_size, Module.PROT_ALL);
     if (firmware instanceof ArrayBuffer) firmware = new Uint8Array(firmware);
     let fwBytes = firmware;
     let fwAddr = flash_addr;
@@ -362,12 +377,16 @@ export async function createEmulator(opts = {}) {
         symbolList = elf.symbols;
         if (verbose) console.log(`ELF: ${elf.regions.length} load segments, ${elf.symbols.length} symbols`);
     }
-    // fwBytes written after RAM is mapped below
+    // fwBytes written after RAM is mapped below (unicorn) or loaded via
+    // rustcpu_load (rust backend; the Rust core decodes `mrs` itself, so no
+    // patchMrsMsp rewrite there).
+    const maybePatch = useRust ? (d) => d : patchMrsMsp;
 
-    // TEMP WORKAROUND: Unicorn skips the two `bl HAL_NVIC_EnableIRQ` in
-    // i2c_init(). Replace 0x8001bbc..0x8001bdb with inline NVIC ISER0/ISER1
-    // writes (SetPriority calls preserved). Probe guards against other builds.
-    try {
+    // TEMP WORKAROUND (Unicorn-only; the Rust core runs the real `bl`s fine):
+    // Unicorn skips the two `bl HAL_NVIC_EnableIRQ` in i2c_init(). Replace
+    // 0x8001bbc..0x8001bdb with inline NVIC ISER0/ISER1 writes (SetPriority
+    // calls preserved). Probe guards against other builds.
+    if (uc) try {
         const patchAddr = 0x8001BBCn;
         const probe = uc.mem_read(patchAddr, 4);
         if (probe[0] === 0x00 && probe[1] === 0xF0 && probe[2] === 0x92 && probe[3] === 0xFD) {
@@ -389,42 +408,87 @@ export async function createEmulator(opts = {}) {
         if (verbose) console.error('i2c_init patch failed:', e.message);
     }
 
-    uc.mem_map(0x20000000, ram_size, Module.PROT_ALL);
+    if (uc) uc.mem_map(0x20000000, ram_size, Module.PROT_ALL);
+
+    if (!uc) {
+        // Rust backend inits BEFORE loading (load needs the CPU/RAM pair);
+        // SP/PC come straight from the image bytes.
+        const vecAt = (off) => {
+            const a = vector_table + off;
+            if (elfRegions) {
+                for (const reg of elfRegions) {
+                    if (a >= reg.start && a + 4 <= reg.start + reg.data.length) {
+                        const o = a - reg.start;
+                        return (reg.data[o] | (reg.data[o + 1] << 8) | (reg.data[o + 2] << 16) | (reg.data[o + 3] << 24)) >>> 0;
+                    }
+                }
+                return 0;
+            }
+            const o = a - fwAddr;
+            if (!fwBytes.length || o < 0 || o + 4 > fwBytes.length) return 0;
+            return (fwBytes[o] | (fwBytes[o + 1] << 8) | (fwBytes[o + 2] << 16) | (fwBytes[o + 3] << 24)) >>> 0;
+        };
+        rustcpu_init(vecAt(0), vecAt(4), flash_size, ram_size);
+    }
 
     if (elfRegions) {
         let wrote = 0;
         for (const reg of elfRegions) {
             const inFlash = reg.start >= flash_addr && reg.start < flash_addr + flash_size;
             const inRam = reg.start >= 0x20000000 && reg.start < 0x20000000 + ram_size;
-            if (inFlash || inRam) { uc.mem_write(BigInt(reg.start), patchMrsMsp(reg.data)); wrote++; }
+            if (inFlash || inRam) {
+                if (uc) uc.mem_write(BigInt(reg.start), maybePatch(reg.data));
+                else rustcpu_load(reg.data, reg.start >>> 0);
+                wrote++;
+            }
         }
         if (verbose) console.log(`ELF: ${wrote} load segments written`);
     }
-    if (fwBytes.length > 0) uc.mem_write(BigInt(fwAddr), patchMrsMsp(fwBytes));
+    if (fwBytes.length > 0) {
+        const bytes = maybePatch(fwBytes);
+        if (uc) uc.mem_write(BigInt(fwAddr), bytes);
+        else rustcpu_load(bytes, fwAddr >>> 0);
+    }
 
-    for (const [start, end] of PERIPH_RANGES) {
+    if (uc) for (const [start, end] of PERIPH_RANGES) {
         uc.mem_map(start, end - start, Module.PROT_READ | Module.PROT_WRITE);
     }
 
     const read32 = (addr) => {
-        const b = uc.mem_read(BigInt(addr), 4);
+        if (uc) {
+            const b = uc.mem_read(BigInt(addr), 4);
+            return new DataView(b.buffer, b.byteOffset, b.byteLength).getUint32(0, true);
+        }
+        const b = rustcpu_mem_read(addr >>> 0, 4);
         return new DataView(b.buffer, b.byteOffset, b.byteLength).getUint32(0, true);
     };
     const write32 = (addr, val) => {
+        if (uc) {
+            const b = new Uint8Array(4);
+            new DataView(b.buffer).setUint32(0, val >>> 0, true);
+            uc.mem_write(BigInt(addr), b);
+            return;
+        }
         const b = new Uint8Array(4);
         new DataView(b.buffer).setUint32(0, val >>> 0, true);
-        uc.mem_write(BigInt(addr), b);
+        rustcpu_mem_write(addr >>> 0, b);
     };
 
-    const sp_init = read32(vector_table);
-    const pc_init = read32(vector_table + 4);
-    uc.reg_write_i32(Module.ARM_REG_SP, sp_init);
-    uc.reg_write_i32(Module.ARM_REG_PC, pc_init | 1);
+    const sp_init = read32(vector_table) >>> 0;
+    const pc_init = read32(vector_table + 4) >>> 0;
+    if (uc) {
+        uc.reg_write_i32(Module.ARM_REG_SP, sp_init);
+        uc.reg_write_i32(Module.ARM_REG_PC, pc_init | 1);
+    }
+    // (rust backend already inited above; read32 here just re-reads the image)
 
     if (verbose) {
         console.log(`SP=0x${sp_init.toString(16)} PC=0x${(pc_init | 1).toString(16)}`);
     }
 
+    // Unicorn-only: peripheral bus hooks (the Rust backend executes model
+    // writes in-Rust; write watchers are fed from rustcpu_take_writes instead).
+    if (uc) {
     const memReadHook = (handle, type, address, size, value, user_data) => {
         const addr32 = Number(address);
         // Poll detector: consecutive reads of one address = firmware spinning
@@ -481,6 +545,7 @@ export async function createEmulator(opts = {}) {
         uc.hook_add(Module.HOOK_MEM_READ, memReadHook, null, start, end);
         uc.hook_add(Module.HOOK_MEM_WRITE, memWriteHook, null, start, end);
     }
+    } // end Unicorn-only hooks
 
     let stopRequested = false;
     let instCount = 0;
@@ -516,7 +581,8 @@ export async function createEmulator(opts = {}) {
     // SVC frames live in Rust (src/interrupts.rs, shared with cli.mjs — the
     // same mirror used to be duplicated here and in cli.mjs and they kept
     // drifting). The frame is also written to the real stack so handler code
-    // can inspect it (Cortex-M ABI).
+    // can inspect it (Cortex-M ABI). Unicorn-only (Rust dispatches inline).
+    if (uc) {
     const intrHook = (handle, intno, user_data) => {
         if (intno === 8) {
             // BX LR with EXC_RETURN: pop the interrupt frame
@@ -560,6 +626,70 @@ export async function createEmulator(opts = {}) {
         }
     };
     uc.hook_add(Module.HOOK_INTR, intrHook, null);
+    } // end Unicorn-only intrHook
+
+    // ---- backend primitives: run()/step() bodies below are shared ----
+    // Unicorn path: emu_start + hooks + JS DMA RAM moves + JS IRQ dispatch.
+    // Rust path: rustcpu_* exports (DMA pump + dispatch run fully in Rust
+    // against Rust RAM; no Unicorn instance, hooks, or RAM crossings).
+    const pumpDma = () => {
+        if (uc) processDma();
+        else rustcpu_dma_pump();
+    };
+    // Execute one CPU batch; returns credited instructions (unicorn: full
+    // batch credit; rust: exact executed count incl. handlers).
+    const execBatch = (n) => {
+        if (uc) {
+            const curPc = uc.reg_read_i32(Module.ARM_REG_PC);
+            try {
+                uc.emu_start(curPc | 1, 0, 0, n);
+            } catch (e) {
+                if (!handleFault(String(e))) throw e;
+            }
+            return n;
+        }
+        const done = rustcpu_run(n);
+        const fault = rustcpu_fault();
+        if (fault.length) {
+            const fpc = fault[0] >>> 0, op1 = fault[1] >>> 0;
+            const sym = resolveSym(fpc);
+            if (verbose) console.log(`FAULT @${sym || ('0x' + fpc.toString(16))} op=0x${op1.toString(16)} (rust cpu decode gap)`);
+            if (symbolList.length) raise_fault(3, fpc); // UNDEFINSTR; runs via dispatch
+            rustcpu_set_pc((fpc + 2) | 1);
+            rustcpu_fault_clear();
+        }
+        return done;
+    };
+    // Feed write watchers from the Rust write tap (unicorn path is hook-fed).
+    const feedWriteTap = () => {
+        if (uc || !writeWatchers.length) return;
+        const w = rustcpu_take_writes();
+        for (let i = 0; i + 2 < w.length; i += 3) {
+            const a = w[i], s = w[i + 1], v = w[i + 2];
+            for (let wi = 0; wi < writeWatchers.length; wi++) {
+                try { writeWatchers[wi](a, s, v); } catch (e) {}
+            }
+        }
+    };
+    const dispatchBatch = (anyPending) => {
+        if (uc) {
+            processInterrupts(anyPending);
+            return;
+        }
+        // hi2c->Mode RAM patch BEFORE dispatch (the ISR reads Mode): same
+        // condition as the Unicorn memWriteHook, drained per batch.
+        if (rustcpu_i2c_hook_fired()) {
+            try {
+                const p = read32(0x200002d8);
+                if (p && p !== 0xFFFFFFFF) rustcpu_mem_write((p + 0x3D) >>> 0, new Uint8Array([0x22]));
+            } catch (_) {}
+        }
+        if (anyPending) {
+            rustcpu_dispatch();
+            const hf = rustcpu_fault();
+            if (hf.length) throw new Error(`rust CPU fault in IRQ handler at 0x${(hf[0] >>> 0).toString(16)}`);
+        }
+    };
 
     const processDma = () => {
         if (dma_get_pending_count() === 0) return;
@@ -743,19 +873,13 @@ export async function createEmulator(opts = {}) {
                 }
                 let t;
                 if (profile) t=performance.now();
-                processDma();
+                pumpDma();
                 if (profile) t_dma+=performance.now()-t;
-                const curPc = uc.reg_read_i32(Module.ARM_REG_PC);
                 if (profile) t=performance.now();
-                try {
-                    uc.emu_start(curPc | 1, 0, 0, curBatch);
-                } catch (e) {
-                    const msg = String(e);
-                    if (!handleFault(msg)) throw e;
-                }
+                const credited = execBatch(curBatch);
                 if (profile) t_emu+=performance.now()-t;
-                instCount += curBatch;
-                batchInstCount += curBatch;
+                instCount += credited;
+                batchInstCount += credited;
                 if (batchInstCount > 0) {
                     if (profile) t=performance.now();
                     const status = process_batch(batchInstCount);
@@ -765,13 +889,14 @@ export async function createEmulator(opts = {}) {
                     anyPending = (status & 0x40000000) !== 0;
                 }
                 if (profile) t=performance.now();
-                processDma();
+                pumpDma();
                 if (profile) t_dma+=performance.now()-t;
                 if (profile) t=performance.now();
-                processInterrupts(anyPending);
+                dispatchBatch(anyPending);
                 if (profile) t_irq+=performance.now()-t;
                 if (profile) t=performance.now();
                 drainPinEvents();
+                feedWriteTap();
                 if (profile) t_pin+=performance.now()-t;
                 totalSteps++;
                 if (is_watchdog_reset_requested()) break;
@@ -809,15 +934,10 @@ export async function createEmulator(opts = {}) {
                     if (pollBackoff > 0) pollBackoff--;
                 }
             }
-            processDma();
-            const curPc = uc.reg_read_i32(Module.ARM_REG_PC);
-            try {
-                uc.emu_start(curPc | 1, 0, 0, n);
-            } catch (e) {
-                if (!handleFault(String(e))) throw e;
-            }
-            instCount += n;
-            batchInstCount += n;
+            pumpDma();
+            const credited = execBatch(n);
+            instCount += credited;
+            batchInstCount += credited;
             let anyPending = false;
             if (batchInstCount > 0) {
                 const status = process_batch(batchInstCount);
@@ -825,9 +945,10 @@ export async function createEmulator(opts = {}) {
                 if (status & 0x80000000) stopRequested = true;
                 anyPending = (status & 0x40000000) !== 0;
             }
-            processDma();
-            processInterrupts(anyPending);
+            pumpDma();
+            dispatchBatch(anyPending);
             drainPinEvents();
+            feedWriteTap();
             return {
                 pc: uc.reg_read_i32(Module.ARM_REG_PC),
                 instCount,
@@ -837,22 +958,33 @@ export async function createEmulator(opts = {}) {
 
         stop() {
             stopRequested = true;
-            try { uc.emu_stop(); } catch (e) { /* ignore */ }
+            if (uc) try { uc.emu_stop(); } catch (e) { /* ignore */ }
         },
 
         getRegisters() {
+            if (uc) {
+                const regs = {};
+                for (let i = 0; i <= 12; i++) regs[`R${i}`] = uc[`reg_read_i32`](Module[`ARM_REG_R${i}`]);
+                regs.SP = uc.reg_read_i32(Module.ARM_REG_SP);
+                regs.LR = uc.reg_read_i32(Module.ARM_REG_LR);
+                regs.PC = uc.reg_read_i32(Module.ARM_REG_PC);
+                regs.xPSR = uc.reg_read_i32(Module.ARM_REG_XPSR);
+                return regs;
+            }
+            // rustcpu_regs(): [r0..r12, sp, lr, pc, xpsr, primask, control, ipsr]
+            const r = rustcpu_regs();
             const regs = {};
-            for (let i = 0; i <= 12; i++) regs[`R${i}`] = uc[`reg_read_i32`](Module[`ARM_REG_R${i}`]);
-            regs.SP = uc.reg_read_i32(Module.ARM_REG_SP);
-            regs.LR = uc.reg_read_i32(Module.ARM_REG_LR);
-            regs.PC = uc.reg_read_i32(Module.ARM_REG_PC);
-            regs.xPSR = uc.reg_read_i32(Module.ARM_REG_XPSR);
+            for (let i = 0; i <= 12; i++) regs[`R${i}`] = r[i] >>> 0;
+            regs.SP = r[13] >>> 0;
+            regs.LR = r[14] >>> 0;
+            regs.PC = r[15] >>> 0;
+            regs.xPSR = r[16] >>> 0;
             return regs;
         },
 
-        getPc() { return uc.reg_read_i32(Module.ARM_REG_PC); },
-        getSp() { return uc.reg_read_i32(Module.ARM_REG_SP); },
-        setPc(pc) { uc.reg_write_i32(Module.ARM_REG_PC, pc | 1); },
+        getPc() { return uc ? uc.reg_read_i32(Module.ARM_REG_PC) : (rustcpu_regs()[15] >>> 0); },
+        getSp() { return uc ? uc.reg_read_i32(Module.ARM_REG_SP) : (rustcpu_regs()[13] >>> 0); },
+        setPc(pc) { if (uc) uc.reg_write_i32(Module.ARM_REG_PC, pc | 1); else rustcpu_set_pc(pc | 1); },
 
         /** Set symbol table (from .elf or .map) for resolveSymbol(). */
         setSymbols(list) {
@@ -892,9 +1024,12 @@ export async function createEmulator(opts = {}) {
 
         /** Read a 32-bit word from emulated memory (e.g. a RAM flag). */
         memRead32(addr) {
-            const b = uc.mem_read(BigInt(addr), 4);
-            const dt = new DataView(b.buffer, b.byteOffset, b.byteLength);
-            return dt.getUint32(0, true);
+            if (uc) {
+                const b = uc.mem_read(BigInt(addr), 4);
+                const dt = new DataView(b.buffer, b.byteOffset, b.byteLength);
+                return dt.getUint32(0, true);
+            }
+            return read32(addr) >>> 0;
         },
 
         canInjectMessage(addr, tir, tdtr, tdlr, tdhr) {
@@ -916,9 +1051,12 @@ export async function createEmulator(opts = {}) {
         /** Watch every peripheral register write: fn(addr, width, value). Returns unsubscribe. */
         onPeriphWrite(fn) {
             writeWatchers.push(fn);
+            // Rust backend has no mem hooks: enable the in-model write tap.
+            if (!uc) rustcpu_write_tap(true);
             return () => {
                 const i = writeWatchers.indexOf(fn);
                 if (i >= 0) writeWatchers.splice(i, 1);
+                if (!uc && writeWatchers.length === 0) rustcpu_write_tap(false);
             };
         },
 
@@ -989,7 +1127,7 @@ export async function createEmulator(opts = {}) {
         setIntrMasks(primask, basepri) { set_intr_masks(primask, basepri); },
 
         close() {
-            try { uc.close(); } catch (e) { /* ignore */ }
+            if (uc) try { uc.close(); } catch (e) { /* ignore */ }
         },
     };
 }
