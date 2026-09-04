@@ -1,10 +1,11 @@
-//! Core-level proofs the firmware suite can't cover: WFI sleep/wake and
-//! PSP task switching (the FreeRTOS primitives), plus inline IRQ delivery.
-//! Synthetic programs in a small FlatMemory; no firmware image needed.
+//! Core-level proofs the firmware suite can't cover: WFI sleep/wake,
+//! PSP task switching (the FreeRTOS primitives), MPU configuration and
+//! enforcement, plus inline IRQ delivery. Synthetic programs in a small
+//! FlatMemory; no firmware image needed.
 
 use super::{
     mem::{FlatMemory, Memory},
-    Cpu,
+    sync_privilege, Cpu,
 };
 use crate::{init, set_intr_masks, sys};
 
@@ -270,4 +271,84 @@ fn psp_task_switch_roundtrip() {
     // Landing pad runs on task B.
     cpu.run(sys, &mut mem, 1);
     assert_eq!(cpu.regs.r[2], 9);
+}
+
+/// MPU register file over the bus (TYPE/CTRL/RNR/RBAR/RASR + A-aliases,
+/// VALID-latches-RNR) plus enforcement: allow/deny on data, XN exec fault,
+/// fault escalation choice, and W1C clearing.
+#[test]
+fn mpu_register_file_and_enforcement() {
+    let _held = crate::test_util::lock();
+    init();
+    let sys = sys();
+    set_intr_masks(0, 0);
+    let mut mem = FlatMemory::new(0x1000, 0x10000);
+    let mut cpu = Cpu::new(0x20008000, 0x20002001);
+    cpu.dsp = false;
+    let r = |addr: u32| sys.p.read(sys, addr, 4);
+    let w = |sys: &crate::system::WasmSystem, addr: u32, val: u32| sys.p.write(sys, addr, 4, val);
+
+    assert_eq!(r(0xE000ED90), 0x0800, "TYPE: 8 regions, unified");
+    // Region 0: RAM 128 B, full access.
+    w(sys, 0xE000ED94, 1); // CTRL ENABLE
+    w(sys, 0xE000ED98, 0); // RNR 0
+    w(sys, 0xE000ED9C, 0x20000000); // RBAR
+    w(sys, 0xE000EDA0, (3 << 24) | (6 << 1) | 1); // RASR AP=3, 128 B
+    assert_eq!(r(0xE000ED9C), 0x20000000, "RBAR readback");
+    assert_eq!(r(0xE000EDA0), 0x0300000D, "RASR readback");
+    // Out-of-order program via VALID: RBAR latches RNR=5 first.
+    w(sys, 0xE000ED9C, 0x20000400 | (1 << 4) | 5);
+    w(sys, 0xE000EDA0, (3 << 24) | (5 << 1) | 1); // 64 B
+    assert_eq!(r(0xE000ED98), 5, "VALID latched RNR");
+    assert_eq!(r(0xE000ED9C), 0x20000415, "region 5 RBAR");
+    // A1 alias pair programs region 1 directly.
+    w(sys, 0xE000EDA4, 0x20000800);
+    w(sys, 0xE000EDA8, (3 << 24) | (5 << 1) | 1);
+    w(sys, 0xE000ED98, 1);
+    assert_eq!(r(0xE000ED9C), 0x20000800, "alias RBAR visible via RNR");
+    assert_eq!(r(0xE000EDA0), 0x0300000B, "alias RASR visible via RNR");
+
+    // Privileged passthrough when allowed.
+    mem.write8(0x20000010, 0xAA);
+    assert_eq!(mem.read8(0x20000010), 0xAA);
+    // Unprivileged denied on a priv-only region: region 1 covers 0x20000040?
+    // Reprogram region 1 as 64 B priv-only at 0x20000040 via RNR select.
+    w(sys, 0xE000ED98, 1);
+    w(sys, 0xE000ED9C, 0x20000040);
+    w(sys, 0xE000EDA0, (1 << 24) | (5 << 1) | 1); // AP=1
+    mem.write8_raw(0x20000040, 0xBB); // seed via raw path
+    cpu.regs.control |= 1; // thread unprivileged
+    sync_privilege(&cpu, sys);
+    mem.write8(0x20000040, 0xCC);
+    assert_eq!(mem.read8_raw(0x20000040), 0xBB, "denied write dropped");
+    assert_eq!(mem.read8(0x20000040), 0, "denied read returns 0");
+    assert_eq!(r(0xE000ED28) & 0xFF, 0x80 | 0x02, "DACCVIOL + MMARVALID");
+    assert_eq!(r(0xE000ED34), 0x20000040, "MMFAR holds address");
+    // SHCSR MEMFAULTENA clear -> escalates to HardFault (-13).
+    assert_eq!(sys.p.nvic.borrow_mut().get_next_pending_intr(), Some(-13));
+    sys.p.nvic.borrow_mut().clear_current_interrupt();
+    // W1C clears the mirror.
+    w(sys, 0xE000ED28, 0xFF);
+    assert_eq!(r(0xE000ED28) & 0xFF, 0, "mirror cleared");
+    // With MEMFAULTENA, the same deny pends MemManage (-12).
+    w(sys, 0xE000ED24, 1 << 16);
+    assert_eq!(mem.read8(0x20000040), 0);
+    assert_eq!(sys.p.nvic.borrow_mut().get_next_pending_intr(), Some(-12));
+    sys.p.nvic.borrow_mut().clear_current_interrupt();
+    w(sys, 0xE000ED28, 0xFF);
+    w(sys, 0xE000ED24, 0);
+
+    // XN over executable RAM faults the fetch loudly (region 2 > region 0).
+    mem.write8_raw(0x20002000, 0x00);
+    mem.write8_raw(0x20002001, 0xBF); // nop (never executes)
+    w(sys, 0xE000ED98, 2);
+    w(sys, 0xE000ED9C, 0x20002000);
+    w(sys, 0xE000EDA0, (1 << 28) | (3 << 24) | (4 << 1) | 1); // XN, 32 B
+    cpu.regs.control &= !1; // back to privileged (data allowed, exec not)
+    sync_privilege(&cpu, sys);
+    cpu.regs.r[15] = 0x20002001;
+    cpu.run(sys, &mut mem, 10);
+    assert!(cpu.fault.is_some(), "XN fetch must fault");
+    assert_eq!(r(0xE000ED28) & 0xFF, 0x01, "IACCVIOL, no MMARVALID");
+    assert!(cpu.fault.as_ref().unwrap().pc == 0x20002000);
 }

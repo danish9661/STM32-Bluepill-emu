@@ -111,9 +111,142 @@ pub enum VmEvent {
     UsbIn { ep: u8, data: Vec<u8> },
 }
 
+/// ARMv7-M MPU region (RBAR + RASR shadows). Plain Copy data behind one
+/// Cell on WasmSystem: config writes are rare, checks are hot.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MpuRegion {
+    pub rbar: u32,
+    pub rasr: u32,
+}
+
+/// ARMv7-M MPU state: 8 regions + control + fault mirrors + the CPU's
+/// current privilege (maintained by the core on MSR CONTROL and exception
+/// transitions — FlatMemory has no CPU context of its own).
+/// Semantics: docs/CPU.md "Memory protection"; AP table verified against
+/// the ARMv7-M ARM (v7-M 0b111 == 0b110: RO/RO) and CMSIS core_cm3.h.
+#[derive(Debug, Clone, Copy)]
+pub struct MpuState {
+    pub ctrl: u32,
+    pub rnr: u8,
+    pub privileged: bool,
+    pub mmfsr: u8,
+    pub mmfar: u32,
+    pub mmfar_valid: bool,
+    pub regions: [MpuRegion; 8],
+}
+
+impl Default for MpuState {
+    fn default() -> Self {
+        Self {
+            ctrl: 0,
+            rnr: 0,
+            privileged: true,
+            mmfsr: 0,
+            mmfar: 0,
+            mmfar_valid: false,
+            regions: [MpuRegion::default(); 8],
+        }
+    }
+}
+
+/// Private Peripheral Bus: always privileged-accessible, unprivileged-
+/// inaccessible and non-executable, regardless of MPU configuration.
+fn in_ppb(addr: u32) -> bool {
+    (0xE000_0000..0xE001_0000).contains(&addr)
+}
+
+impl MpuState {
+    pub fn enabled(&self) -> bool {
+        self.ctrl & 1 != 0
+    }
+
+    pub(crate) fn sel(&self) -> usize {
+        (self.rnr & 7) as usize
+    }
+
+    /// Highest-numbered enabled region containing `addr`: (base, size,
+    /// rasr). A subregion disabled via SRD does not match (falls through to
+    /// lower regions). Sizes < 32 B (SIZE field 0/1, reserved) never match.
+    fn match_region(&self, addr: u64) -> Option<(u64, u64, u32)> {
+        for r in self.regions.iter().rev() {
+            if r.rasr & 1 == 0 {
+                continue;
+            }
+            let size_field = (r.rasr >> 1) & 0x1F;
+            if size_field < 2 {
+                continue;
+            }
+            let size: u64 = 1u64 << (size_field + 1);
+            let base: u64 = (r.rbar as u64) & !(size - 1);
+            if addr.wrapping_sub(base) >= size {
+                continue;
+            }
+            if size >= 256 {
+                let sub = ((addr - base) / (size / 8)) as u32;
+                if (r.rasr >> (8 + sub)) & 1 != 0 {
+                    continue;
+                }
+            }
+            return Some((base, size, r.rasr));
+        }
+        None
+    }
+
+    /// AP[2:0] gate for the current privilege. Table (ARMv7-M):
+    /// 000 none; 001 priv-RW; 010 priv-RW/user-RO; 011 full; 100 reserved
+    /// (deny); 101 priv-RO; 110/111 RO/RO.
+    fn ap_allows(&self, ap: u32, write: bool) -> bool {
+        if write {
+            // Writable: full(3), or any priv-RW bit with privilege.
+            ap == 3 || (self.privileged && (ap == 1 || ap == 2))
+        } else {
+            // Readable: everything except none(0)/reserved(4); 1 and 5 need priv.
+            match ap {
+                0 | 4 => false,
+                1 | 5 => self.privileged,
+                _ => true,
+            }
+        }
+    }
+
+    fn region_allows(&self, rasr: u32, write: bool) -> bool {
+        self.ap_allows((rasr >> 24) & 7, write)
+    }
+
+    /// Data access gate. Unmatched addresses use the background map, which
+    /// needs PRIVDEFENA + privilege.
+    pub fn data_allow(&self, addr: u32, write: bool) -> bool {
+        if !self.enabled() {
+            return true;
+        }
+        if in_ppb(addr) {
+            return self.privileged;
+        }
+        match self.match_region(addr as u64) {
+            Some((_, _, rasr)) => self.region_allows(rasr, write),
+            None => self.privileged && (self.ctrl & 4 != 0),
+        }
+    }
+
+    /// Instruction-fetch gate: needs read permission for the current
+    /// privilege plus XN clear (executable implies readable on v7-M).
+    /// PPB is never executable.
+    pub fn exec_allow(&self, addr: u32) -> bool {
+        if !self.enabled() {
+            return true;
+        }
+        if in_ppb(addr) {
+            return false;
+        }
+        match self.match_region(addr as u64) {
+            Some((_, _, rasr)) => self.region_allows(rasr, false) && (rasr & (1 << 28)) == 0,
+            None => self.privileged && (self.ctrl & 4 != 0),
+        }
+    }
+}
+
 pub struct WasmSystem {
-    pub p: Rc<Peripherals>,
-    pending_dma: RefCell<Vec<DmaTransfer>>,
+    pub p: Rc<Peripherals>,    pending_dma: RefCell<Vec<DmaTransfer>>,
     absorb_buf: RefCell<Vec<u8>>,
     /// Virtual-peripheral transaction event queue (SPI/I2C/USART), drained by JS.
     pub event_queue: RefCell<Vec<VmEvent>>,
@@ -121,9 +254,11 @@ pub struct WasmSystem {
     pub spi_miso: RefCell<HashMap<u8, Vec<u8>>>,
     /// Injected RX bytes per I2C channel (virtual device -> MCU).
     pub i2c_rx: RefCell<HashMap<u8, Vec<u8>>>,
-    /// Interrupt-dispatch policy state (batch budget, SVC mirror) — shared by
-    /// cli.mjs and emulator.js so both use one implementation.
+    /// Interrupt-dispatch policy state (batch budget) — shared by every
+    /// driver loop so dispatch stays identical.
     pub intr: RefCell<crate::interrupts::IntrDispatch>,
+    /// ARMv7-M MPU state (registers live in the SCB delegate to this).
+    pub mpu: Cell<MpuState>,
     /// Set when I2C1 DR is written with the R-bit set; the native driver
     /// drains it per batch for the hi2c Mode RAM patch (same condition as
     /// the former JS mem hook). Taken (cleared) on read.
@@ -141,7 +276,7 @@ impl WasmSystem {
         WasmSystem { p, pending_dma: RefCell::new(Vec::new()), absorb_buf: RefCell::new(Vec::new()),
             event_queue: RefCell::new(Vec::new()), spi_miso: RefCell::new(HashMap::new()),
             i2c_rx: RefCell::new(HashMap::new()), intr: RefCell::new(crate::interrupts::IntrDispatch::default()),
-            i2c_dr_hook: Cell::new(false) }
+            i2c_dr_hook: Cell::new(false), mpu: Cell::new(MpuState::default()) }
     }
 
     pub fn new_svd(svd_xml: &str) -> Self {
@@ -154,11 +289,63 @@ impl WasmSystem {
         WasmSystem { p, pending_dma: RefCell::new(Vec::new()), absorb_buf: RefCell::new(Vec::new()),
             event_queue: RefCell::new(Vec::new()), spi_miso: RefCell::new(HashMap::new()),
             i2c_rx: RefCell::new(HashMap::new()), intr: RefCell::new(crate::interrupts::IntrDispatch::default()),
-            i2c_dr_hook: Cell::new(false) }
+            i2c_dr_hook: Cell::new(false), mpu: Cell::new(MpuState::default()) }
     }
 
-    fn register_software_spis(p: &Peripherals) {
-        use crate::peripherals::sw_spi::{SoftwareSpi, SoftwareSpiConfig};
+    /// Record the CPU's current privilege for MPU checks (FlatMemory has no
+    /// CPU context of its own). Called on MSR CONTROL, exception entry
+    /// (always privileged) and exception return.
+    pub fn set_privileged(&self, priv_: bool) {
+        let mut m = self.mpu.get();
+        m.privileged = priv_;
+        self.mpu.set(m);
+    }
+
+    /// MPU-gated CPU data access. Fast no-op unless the MPU is enabled.
+    /// Denials record MMFSR/MMFAR + pend MemManage (escalating to HardFault
+    /// without MEMFAULTENA) and report false (readers return 0, writers drop).
+    pub fn mpu_check_data(&self, addr: u32, write: bool) -> bool {
+        if !self.mpu.get().enabled() {
+            return true;
+        }
+        if self.mpu.get().data_allow(addr, write) {
+            return true;
+        }
+        self.report_memmanage(addr, false);
+        false
+    }
+
+    /// MPU-gated instruction fetch. Denials report like data faults (IACCVIOL,
+    /// no MMFAR) and report false; the core then halts loudly via CpuFault
+    /// instead of silently running forbidden code.
+    pub fn mpu_check_exec(&self, addr: u32) -> bool {
+        if !self.mpu.get().enabled() {
+            return true;
+        }
+        if self.mpu.get().exec_allow(addr) {
+            return true;
+        }
+        self.report_memmanage(addr, true);
+        false
+    }
+
+    fn report_memmanage(&self, addr: u32, exec: bool) {
+        let mut m = self.mpu.get();
+        if exec {
+            m.mmfsr |= 1 << 0; // IACCVIOL
+        } else {
+            m.mmfsr |= (1 << 1) | (1 << 7); // DACCVIOL + MMARVALID
+            m.mmfar = addr;
+            m.mmfar_valid = true;
+        }
+        self.mpu.set(m);
+        // Escalate to HardFault unless the MemManage handler is enabled.
+        let shcsr = self.p.read(self, 0xE000ED24, 4);
+        let irq = if shcsr & (1 << 16) != 0 { -12 } else { -13 };
+        self.p.nvic.borrow_mut().set_intr_pending(irq);
+    }
+
+    fn register_software_spis(p: &Peripherals) {        use crate::peripherals::sw_spi::{SoftwareSpi, SoftwareSpiConfig};
         let configs = get_software_spi_configs().lock().unwrap();
         let ext_devices = get_ext_devices().lock().unwrap();
         for (name, cs, clk, miso, mosi) in configs.iter() {
@@ -276,7 +463,8 @@ impl WasmSystem {
     }
 
     /// Execute a plan from dma_build_plan() against Rust guest memory
-    /// (what processDma in cli.mjs/emulator.js drives via rustcpu_dma_pump).
+    /// (what the drivers pump via rustcpu_dma_pump). Raw access: DMA is a
+    /// trusted bus master here, not subject to MPU checks (documented).
     pub fn dma_exec_plan(&self, mem: &mut dyn crate::cpu::mem::Memory, plan: &[u32]) {
         let mut i = 0;
         while i + 4 <= plan.len() {
@@ -284,13 +472,13 @@ impl WasmSystem {
             match op {
                 0 => {
                     for k in 0..c {
-                        let v = mem.read8(a.wrapping_add(k));
-                        mem.write8(b.wrapping_add(k), v);
+                        let v = mem.read8_raw(a.wrapping_add(k));
+                        mem.write8_raw(b.wrapping_add(k), v);
                     }
                 }
                 1 => {
                     for (k, v) in self.dma_absorb_take(c as usize, b as usize).into_iter().enumerate() {
-                        mem.write8(a.wrapping_add(k as u32), v);
+                        mem.write8_raw(a.wrapping_add(k as u32), v);
                     }
                 }
                 2 => {
@@ -303,7 +491,7 @@ impl WasmSystem {
                         let chunk = std::cmp::min(4, n - k);
                         let mut val = 0u32;
                         for j in 0..chunk {
-                            val |= (mem.read8(a.wrapping_add((k + j) as u32)) as u32) << (j * 8);
+                            val |= (mem.read8_raw(a.wrapping_add((k + j) as u32)) as u32) << (j * 8);
                         }
                         self.p.write(self, c, chunk as u8, val);
                         k += chunk;
@@ -425,6 +613,7 @@ unsafe impl Send for WasmSystem {}
 
 #[cfg(test)]
 mod tests {
+    use super::MpuState;
     use crate::test_util::with_sys;
 
     /// DMA1 channel 1 CMAR — a plain 32-bit register to absorb known bytes from.
@@ -470,5 +659,111 @@ mod tests {
             assert!(sys.dma_absorb_take(8, 4).is_empty(), "offset past the end");
             assert_eq!(sys.dma_absorb_take(2, 99).len(), 2, "length past the end");
         });
+    }
+
+    /// AP[2:0] matrix (ARMv7-M): 000 none; 001 priv-RW; 010 priv-RW/user-RO;
+    /// 011 full; 100 reserved (deny); 101 priv-RO; 110/111 RO/RO.
+    #[test]
+    fn mpu_ap_matrix() {
+        // (ap, priv, read_ok, write_ok)
+        let rows = [
+            (0, true, false, false),
+            (0, false, false, false),
+            (1, true, true, true),
+            (1, false, false, false),
+            (2, true, true, true),
+            (2, false, true, false),
+            (3, true, true, true),
+            (3, false, true, true),
+            (4, true, false, false),
+            (4, false, false, false),
+            (5, true, true, false),
+            (5, false, false, false),
+            (6, true, true, false),
+            (6, false, true, false),
+            (7, true, true, false),
+            (7, false, true, false),
+        ];
+        for (ap, priv_, r, w) in rows {
+            let mut m = MpuState::default();
+            m.ctrl = 1; // enabled, no background
+            m.privileged = priv_;
+            // Region 0: RAM 128 B, given AP, enabled.
+            m.regions[0].rbar = 0x20000000;
+            m.regions[0].rasr = (ap << 24) | (6 << 1) | 1;
+            assert_eq!(m.data_allow(0x20000010, false), r, "ap={ap} priv={priv_} read");
+            assert_eq!(m.data_allow(0x20000010, true), w, "ap={ap} priv={priv_} write");
+            // Exec needs read permission plus XN clear.
+            assert_eq!(m.exec_allow(0x20000010), r, "ap={ap} priv={priv_} exec");
+            m.regions[0].rasr |= 1 << 28; // XN
+            assert!(!m.exec_allow(0x20000010), "ap={ap} XN must deny exec");
+            assert_eq!(m.data_allow(0x20000010, false), r, "XN keeps data perms");
+        }
+    }
+
+    /// Overlap priority (highest region number wins), subregion disable,
+    /// reserved sizes, RBAR base masking.
+    #[test]
+    fn mpu_match_priority_subregions() {
+        let mut m = MpuState::default();
+        m.ctrl = 1;
+        m.privileged = true;
+        // Regions 0 (allow) and 2 (deny) both cover 0x20000000/256: 2 wins.
+        m.regions[0].rbar = 0x20000000;
+        m.regions[0].rasr = (3 << 24) | (7 << 1) | 1;
+        m.regions[2].rbar = 0x20000000;
+        m.regions[2].rasr = (0 << 24) | (7 << 1) | 1;
+        assert!(!m.data_allow(0x20000010, false));
+        // Disabling region 2 falls back to region 0.
+        m.regions[2].rasr = 0;
+        assert!(m.data_allow(0x20000010, false));
+        // Subregion 0 (0x100-0x11F of a 256 B region) disabled; region 0 is
+        // switched off so only region 3 can match here.
+        m.regions[0].rasr = 0;
+        m.regions[3].rbar = 0x20000100;
+        m.regions[3].rasr = (3 << 24) | (1 << 8) | (7 << 1) | 1;
+        assert!(!m.data_allow(0x20000100, false), "disabled subregion denies");
+        assert!(!m.data_allow(0x2000011F, false));
+        assert!(m.data_allow(0x20000120, false), "next subregion allows");
+        // Reserved SIZE fields (0/1) never match.
+        m.regions[4].rbar = 0x20000200;
+        m.regions[4].rasr = (3 << 24) | (1 << 1) | 1;
+        // (region 0 covers 0x20000000/256 only, so 0x20000200 is unmatched)
+        assert!(!m.data_allow(0x20000200, false), "no background without PRIVDEFENA");
+        // Misaligned RBAR base masks to size (region 3 off: no overlap).
+        m.regions[3].rasr = 0;
+        m.regions[4].rbar = 0x20000213;
+        m.regions[4].rasr = (3 << 24) | (7 << 1) | 1;
+        assert!(m.data_allow(0x20000200, false), "base masks to 0x20000200");
+        assert!(m.data_allow(0x200002FF, false));
+        assert!(!m.data_allow(0x200001FF, false), "below masked base");
+    }
+
+    /// Background map + PPB rules: unmatched needs PRIVDEFENA + privilege;
+    /// PPB is always priv-only and never executable.
+    #[test]
+    fn mpu_background_and_ppb() {
+        let mut m = MpuState::default();
+        m.ctrl = 1; // enabled, no PRIVDEFENA
+        m.privileged = true;
+        assert!(!m.data_allow(0x20000000, false), "no background without PRIVDEFENA");
+        m.ctrl = 1 | 4; // + PRIVDEFENA
+        assert!(m.data_allow(0x20000000, false), "priv background allows");
+        assert!(m.data_allow(0x40010000, true), "priv background allows periph");
+        assert!(m.exec_allow(0x08000000), "priv background executes");
+        m.privileged = false;
+        assert!(!m.data_allow(0x20000000, false), "unpriv background denies");
+        assert!(!m.exec_allow(0x08000000), "unpriv background denies exec");
+        // PPB overrides everything, even with background on.
+        m.privileged = true;
+        assert!(m.data_allow(0xE000E100, false), "priv PPB reads");
+        assert!(!m.exec_allow(0xE000E100), "PPB never executes");
+        m.privileged = false;
+        assert!(!m.data_allow(0xE000E100, false), "unpriv PPB denies");
+        // A region claiming unpriv PPB access still loses.
+        m.regions[7].rbar = 0xE000E000;
+        m.regions[7].rasr = (3 << 24) | (11 << 1) | 1; // 4K, full
+        assert!(!m.data_allow(0xE000E100, false), "PPB override beats regions");
+        assert!(!m.exec_allow(0xE000E100), "PPB XN beats regions");
     }
 }

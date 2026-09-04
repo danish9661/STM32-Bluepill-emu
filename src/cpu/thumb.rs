@@ -1084,6 +1084,9 @@ pub fn exec32(
                         }
                     }
                     cpu.regs.control = v;
+                    // CONTROL.nPRIV gates MPU checks (FlatMemory has no CPU
+                    // context); publish it. Rare event, negligible cost.
+                    super::sync_privilege(cpu, sys);
                 }
                 _ => return fault(cpu, pc, op1, op2, 4),
             }

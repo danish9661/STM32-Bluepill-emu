@@ -7,6 +7,18 @@ pub trait Memory {
     fn write8(&mut self, addr: u32, v: u8);
     fn write16(&mut self, addr: u32, v: u16);
     fn write32(&mut self, addr: u32, v: u32);
+    /// Raw access bypassing MPU checks (firmware install, DMA as trusted bus
+    /// master, driver/debugger reads). Defaults honor checks; FlatMemory
+    /// overrides to go straight to the backing bytes.
+    fn read8_raw(&self, addr: u32) -> u8 {
+        self.read8(addr)
+    }
+    fn write8_raw(&mut self, addr: u32, v: u8) {
+        self.write8(addr, v)
+    }
+    fn read16_raw(&self, addr: u32) -> u16 {
+        self.read16(addr)
+    }
 }
 
 pub struct MemRegion {
@@ -115,6 +127,14 @@ impl FlatMemory {
 
 impl Memory for FlatMemory {
     fn read8(&self, addr: u32) -> u8 {
+        // MPU data-read gate (single branch when disabled; debugger, DMA and
+        // firmware-install paths use the raw variants instead).
+        if !crate::sys().mpu_check_data(addr, false) {
+            return 0;
+        }
+        self.read8_raw(addr)
+    }
+    fn read8_raw(&self, addr: u32) -> u8 {
         if is_periph(addr) {
             // Single width-1 model read (mirrors the JS memReadHook, which
             // takes the low byte). The model aligns internally.
@@ -140,6 +160,16 @@ impl Memory for FlatMemory {
         let hi = self.read8(addr + 1) as u16;
         lo | (hi << 8)
     }
+    fn read16_raw(&self, addr: u32) -> u16 {
+        // Raw fetch decoration (MPU fault records); periph window still
+        // routes to the model (a fetch there is diagnosed, not executed).
+        if is_periph(addr) {
+            return crate::sys().p.read(crate::sys(), addr, 2) as u16;
+        }
+        let lo = self.read8_raw(addr) as u16;
+        let hi = self.read8_raw(addr + 1) as u16;
+        lo | (hi << 8)
+    }
     fn read32(&self, addr: u32) -> u32 {
         if is_periph(addr) {
             return crate::sys().p.read(crate::sys(), addr, 4);
@@ -151,6 +181,13 @@ impl Memory for FlatMemory {
         b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
     }
     fn write8(&mut self, addr: u32, v: u8) {
+        // MPU data-write gate (denials drop the store).
+        if !crate::sys().mpu_check_data(addr, true) {
+            return;
+        }
+        self.write8_raw(addr, v)
+    }
+    fn write8_raw(&mut self, addr: u32, v: u8) {
         if is_periph(addr) {
             // Single width-1 model write. Never split a wider guest store
             // into byte RMWs here: each model write can have side effects

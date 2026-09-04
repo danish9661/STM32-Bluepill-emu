@@ -87,6 +87,19 @@ pub struct Cpu {
     pub it_suppress: bool,
 }
 
+/// Effective privilege for MPU checks: handlers always run privileged;
+// thread mode follows CONTROL.nPRIV (bit 0 set = unprivileged).
+pub(crate) fn current_privileged(cpu: &Cpu) -> bool {
+    cpu.ipsr != 0 || (cpu.regs.control & 1) == 0
+}
+
+/// Publish the CPU's privilege to the model (FlatMemory has no CPU context
+/// of its own). Called on MSR CONTROL, exception entry and return — the only
+/// events that can change it.
+pub(crate) fn sync_privilege(cpu: &Cpu, sys: &WasmSystem) {
+    sys.set_privileged(current_privileged(cpu));
+}
+
 impl Cpu {
     pub fn new(sp: u32, pc: u32) -> Self {
         Self {
@@ -146,8 +159,7 @@ impl Cpu {
         }
     }
     /// Write the MSP (banked): updates r13 too when MSP is current.
-    pub fn write_msp(&mut self, v: u32) {
-        self.regs.msp = v;
+    pub fn write_msp(&mut self, v: u32) {        self.regs.msp = v;
         if self.ipsr != 0 || self.regs.control & 2 == 0 {
             self.regs.r[13] = v;
         }
@@ -234,6 +246,8 @@ impl Cpu {
             self.regs.psp = sp;
         }
         self.ipsr = vector;
+        // Entering handler mode is always privileged (MPU).
+        sync_privilege(self, sys);
         // NVIC active-priority accounting: whoever pops a pending IRQ pushes
         // here. `get_next_pending_intr()` pops + pushes for dispatched IRQs;
         // synchronous takes (SVC) push explicitly at their call sites via
@@ -317,6 +331,7 @@ impl Cpu {
             Some(&outer) => (16 + outer) as u32,
             None => 0,
         };
+        sync_privilege(self, sys);
         // Balance the active-priority push for this entry: get_next's push
         // for dispatched IRQs, the caller's push_active for synchronous
         // takes (SVC). A standalone SVC on an empty stack is a safe no-op.
@@ -346,6 +361,16 @@ impl Cpu {
                 break;
             }
             let pc = self.regs.r[15] & !1;
+            // MPU execute-never (no-op unless enabled): fault loudly instead
+            // of silently running forbidden code. The model records MMFSR and
+            // pends MemManage (escalating without MEMFAULTENA) inside the
+            // check; the halt here makes it diagnosable.
+            if !sys.mpu_check_exec(pc) {
+                if self.fault.is_none() {
+                    self.fault = Some(CpuFault { pc, op1: mem.read16_raw(pc), op2: 0, len: 2 });
+                }
+                break;
+            }
             let op = mem.read16(pc);
             let l = thumb::len(op);
             let ok = if l == 2 {

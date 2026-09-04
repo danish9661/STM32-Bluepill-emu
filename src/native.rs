@@ -171,13 +171,14 @@ pub fn rustcpu_set_pc(pc: u32) {
 }
 
 /// Raw guest-memory access (RAM + flash; flash writes stay protected, use
-/// rustcpu_load for firmware). Backs memRead32 + the hi2c Mode RAM patch.
+/// rustcpu_load for firmware). Bypasses MPU checks like a debugger would.
+/// Backs memRead32 + the hi2c Mode RAM patch.
 #[wasm_bindgen]
 pub fn rustcpu_mem_read(addr: u32, len: u32) -> Vec<u8> {
     let emu = native_mut();
     let mut out = Vec::with_capacity(len as usize);
     for k in 0..len {
-        out.push(emu.mem.read8(addr.wrapping_add(k)));
+        out.push(emu.mem.read8_raw(addr.wrapping_add(k)));
     }
     out
 }
@@ -186,7 +187,7 @@ pub fn rustcpu_mem_read(addr: u32, len: u32) -> Vec<u8> {
 pub fn rustcpu_mem_write(addr: u32, data: &[u8]) {
     let emu = native_mut();
     for (k, &b) in data.iter().enumerate() {
-        emu.mem.write8(addr.wrapping_add(k as u32), b);
+        emu.mem.write8_raw(addr.wrapping_add(k as u32), b);
     }
 }
 
