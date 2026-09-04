@@ -260,9 +260,8 @@ Firmware formats:
 Options:
   --config=<path>      Load YAML config file (can be repeated)
   --max=<N>            Max instructions to execute (default: 1000000, or env MAX_INST)
-  --cpu=<backend>      CPU backend: unicorn (default) or rust (native Path B,
-                       benchmarking hook — same peripherals/DMA/IRQ, shares
-                       nothing with Unicorn; skips the mrs/i2c_init patches)
+  --cpu=<backend>      CPU backend: rust (default, native Path B) or unicorn
+                       (legacy TCG fallback; needs the mrs/i2c_init patches)
   --map=<file.map>     Load symbol map for PC → name resolution
   --uart=<addr>        UART peripheral address (default: 0x40013800, or env UART_ADDR)
   --regs               Dump registers every batch
@@ -295,7 +294,7 @@ Examples:
     const mapPath = args.find(a => a.startsWith('--map='))?.split('=')[1];
     const periphPlugin = args.find(a => a.startsWith('--periph-plugin='))?.split('=')[1];
     let uartAddr = parseInt(args.find(a => a.startsWith('--uart='))?.split('=')[1] || process.env.UART_ADDR || '0x40013800', 16);
-    const cpuBackend = (args.find(a => a.startsWith('--cpu='))?.split('=')[1] || process.env.EMU_CPU || 'unicorn').toLowerCase();
+    const cpuBackend = (args.find(a => a.startsWith('--cpu='))?.split('=')[1] || process.env.EMU_CPU || 'rust').toLowerCase();
     if (cpuBackend !== 'unicorn' && cpuBackend !== 'rust') {
         console.error(`Error: unknown --cpu backend: ${cpuBackend} (expected unicorn or rust)`);
         process.exit(1);

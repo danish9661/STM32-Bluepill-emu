@@ -71,7 +71,7 @@ async function handleMessage(e) {
       // addresses go stale on rebuild); fall back for hex/bin firmware.
       canFlagAddr = msg.canFlagAddr || CAN_RAM_FLAG;
       pinBuf = [];
-      if ((msg.cpu || 'unicorn') !== 'rust' && !globalThis.MUnicorn) {
+      if ((msg.cpu || 'rust') !== 'rust' && !globalThis.MUnicorn) {
         post('error', { message: 'MUnicorn not loaded in worker (needed for cpu:unicorn)' });
         break;
       }
@@ -87,7 +87,7 @@ async function handleMessage(e) {
           ext_devices: msg.ext_devices || {},
           // CPU backend passthrough ('unicorn' default, 'rust' = native Path B
           // interpreter: no unicorn_arm.js needed in this worker).
-          cpu: msg.cpu || 'unicorn',
+          cpu: msg.cpu || 'rust',
         });
         try { self.postMessage({ type: 'debug', msg: 'createEmulator done' }); } catch {}
         emu.onPinChange((port, pin, level) => pinBuf.push(port, pin, level));

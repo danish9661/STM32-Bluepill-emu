@@ -431,7 +431,7 @@ let useWorker = false;
 // the worker and main-thread paths.
 const cpuBackend = (() => {
   try {
-    return new URLSearchParams(location.search).get('cpu') === 'rust' ? 'rust' : 'unicorn';
+    return new URLSearchParams(location.search).get('cpu') === 'unicorn' ? 'unicorn' : 'rust';
   } catch { return 'unicorn'; }
 })();
 let firmwareData = null;

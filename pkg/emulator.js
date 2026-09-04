@@ -193,12 +193,11 @@ export function parseElf(buffer) {
  * @param {Array}     [opts.js_peripherals=[]]  rp2040js-style custom peripherals:
  *                                              [{ base, size, read(addr,size), write(addr,value,size) }]
  * @param {number}    [opts.uart_addr=0x40013800] USART used for uartRx()
- * @param {string}    [opts.cpu='unicorn']        CPU backend: 'unicorn' (TCG,
- *                                              default) or 'rust' (native Path B
- *                                              interpreter in WASM — benchmarking
- *                                              hook; same peripherals/DMA/IRQ.
+ * @param {string}    [opts.cpu='rust']           CPU backend: 'rust' (native Path B
+ *                                              interpreter in WASM, default) or
+ *                                              'unicorn' (legacy TCG fallback).
  *                                              Skips Unicorn, mrs/i2c patches;
- *                                              no hook poll-shrink on this path)
+ *                                              no hook poll-shrink on rust path)
  * @param {object}    [opts.ext_devices={}]     External devices (see below)
  * @param {boolean}   [opts.verbose=false]      Print init info to console
  *
@@ -231,7 +230,7 @@ export async function createEmulator(opts = {}) {
         ext_devices = {},
         verbose = false,
         batch_size = DEFAULT_MAX_BATCH,
-        cpu = 'unicorn',
+        cpu = 'rust',
     } = opts;
     const maxBatch = batch_size;
     const cpuBackend = String(cpu || 'unicorn').toLowerCase();
