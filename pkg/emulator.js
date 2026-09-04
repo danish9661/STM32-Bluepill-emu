@@ -950,7 +950,7 @@ export async function createEmulator(opts = {}) {
             drainPinEvents();
             feedWriteTap();
             return {
-                pc: uc.reg_read_i32(Module.ARM_REG_PC),
+                pc: uc ? uc.reg_read_i32(Module.ARM_REG_PC) : (rustcpu_regs()[15] >>> 0),
                 instCount,
                 stopped: stopRequested || is_watchdog_reset_requested(),
             };
