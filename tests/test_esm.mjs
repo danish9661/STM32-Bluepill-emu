@@ -1,6 +1,5 @@
-// ESM smoke: the Rust peripheral wasm module must load through its wasm-pack
-// ESM glue and Unicorn must boot through the native addon (same shape the
-// browser page uses, minus the fetch path).
+// ESM smoke: the Rust peripheral+CPU wasm module must load through its
+// wasm-pack ESM glue and expose the native backend API.
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
@@ -11,13 +10,14 @@ async function main() {
     const periph = await import('../pkg/stm32_bluepill_wasm.js');
     ok(!!periph && typeof periph.initSync === 'function', `periph ESM glue loads (initSync present, keys: ${Object.keys(periph).length})`);
 
-    const MUnicorn = require('../pkg/unicorn_arm.cjs');
-    ok(typeof MUnicorn === 'function', `unicorn_arm.cjs loads (typeof ${typeof MUnicorn})`);
-    const Module = await MUnicorn({});
-    ok(typeof Module.Unicorn === 'function', 'MUnicorn() resolves a Module');
-    const uc = new Module.Unicorn(Module.ARCH_ARM, Module.MODE_MCLASS | Module.MODE_LITTLE_ENDIAN);
-    ok(!!uc && typeof uc.emu_start === 'function', 'Unicorn instance created (cortex-m, little-endian)');
-    uc.close();
+    const { readFileSync } = await import('fs');
+    periph.initSync({ module: readFileSync(new URL('../pkg/stm32_bluepill_wasm_bg.wasm', import.meta.url)) });
+    periph.init();
+    periph.rustcpu_init(0x20005000, 0x08000000, 0x10000, 0x5000);
+    const regs = periph.rustcpu_regs();
+    ok(regs.length === 20, `rustcpu regs vector has 20 words (${regs.length})`);
+    ok((regs[13] >>> 0) === 0x20005000, `initial SP visible (${(regs[13] >>> 0).toString(16)})`);
+    ok(periph.rustcpu_fault().length === 0, 'no fault on fresh backend');
 
     console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
     process.exit(failed === 0 ? 0 : 1);

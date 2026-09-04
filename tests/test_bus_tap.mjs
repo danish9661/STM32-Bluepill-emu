@@ -1,10 +1,7 @@
-// Write-tap parity: the rust backend has no mem hooks, so onPeriphWrite is
-// fed from the in-model tap. Run showcase (CPU-driven SPI, 7-seg latch) +
-// ws2812 (DMA-driven SPI strip) on BOTH backends and assert the DECODED
-// content matches — this is exactly what the page 7-seg/strip decoders eat.
-// (Raw write streams differ by batch-phase slop: adaptive 20K/50K decisions
-// shift per-batch TX progress, so counts can't match tick-for-tick.)
-process.env.POLL_SHRINK = '0';
+// Bus-tap smoke: onPeriphWrite is fed from the in-model write tap
+// (peripheral writes never cross JS). Run showcase (CPU-driven SPI, 7-seg
+// latch) + ws2812 (DMA-driven SPI strip) and assert the DECODED content —
+// exactly what the page 7-seg/strip decoders eat.
 import { readFileSync } from 'fs';
 import { createEmulator } from '../pkg/emulator.js';
 
@@ -21,8 +18,8 @@ function expandBytes(size, value) {
     return out;
 }
 
-async function runTap({ cpu, firmware, ext_devices, instr }) {
-    const emu = await createEmulator({ cpu, firmware, ext_devices });
+async function runTap({ firmware, ext_devices, instr, until }) {
+    const emu = await createEmulator({ firmware, ext_devices });
     const pa4low = { level: false };
     const segLatches = [];
     let segBuf = [];
@@ -42,50 +39,50 @@ async function runTap({ cpu, firmware, ext_devices, instr }) {
             }
         }
     });
-    await emu.run(instr);
-    const out = String(emu.getUartOutput() || '');
+    const CHUNK = 10000000;
+    let done = 0, out = '';
+    while (done < instr) {
+        const n = Math.min(CHUNK, instr - done);
+        await emu.run(n);
+        done += n;
+        out += String(emu.getUartOutput() || '');
+        if (until && until({ segLatches, spiBytes, out })) break;
+    }
+    out += String(emu.getUartOutput() || '');
     emu.close();
-    return { segLatches, spiBytes, out };
+    return { segLatches, spiBytes, out, done };
 }
 
-// Showcase 7-seg: PA4-CS latched 4-byte digits must match on both backends.
+// Showcase 7-seg: PA4-CS latched 4-byte digits decode (page-decoder shape).
 {
     const firmware = readFileSync('site/arduino_hw_showcase.elf');
     const ext_devices = {
         i2c_oled: [{ peripheral: 'I2C1', address: 0x3C }],
         lcd: [{ peripheral: 'SPI1', cs: 'PA8' }],
     };
-    const u = await runTap({ cpu: 'unicorn', firmware, ext_devices, instr: 150000000 });
-    const r = await runTap({ cpu: 'rust', firmware, ext_devices, instr: 150000000 });
-    ok(u.segLatches.length > 0, `showcase unicorn latched 7-seg digits (${u.segLatches.length} latches)`);
-    ok(JSON.stringify(u.segLatches) === JSON.stringify(r.segLatches),
-        `showcase 7-seg digits identical (${u.segLatches.length} vs ${r.segLatches.length} latches)`);
-    ok(u.out.includes('BTN=armed') && r.out.includes('BTN=armed'), 'showcase armed on both');
+    const { segLatches, out, done } = await runTap({ firmware, ext_devices, instr: 300000000,
+        until: ({ segLatches: l }) => l.length >= 2 && new Set(l.map(d => d[3])).size > 1 });
+    ok(segLatches.length > 0, `showcase latched 7-seg digits (${segLatches.length} latches)`);
+    ok(out.includes('BTN=armed'), 'showcase armed');
+    // Seconds counter advances across 1Hz latches (last digit changes).
+    ok(new Set(segLatches.map(d => d[3])).size > 1, `7-seg counter advances (${JSON.stringify(segLatches[0])})`);
 }
 
-// WS2812: raw SPI1 DR byte stream (fire-and-forget, no CS) must match —
-// frame decode (72B GRB) then follows identically on both.
+// WS2812: raw SPI1 DR byte stream (fire-and-forget, no CS) decodes to
+// full 72B GRB frames.
 {
     const firmware = readFileSync('site/arduino_ws2812.elf');
-    const u = await runTap({ cpu: 'unicorn', firmware, ext_devices: {}, instr: 40000000 });
-    const r = await runTap({ cpu: 'rust', firmware, ext_devices: {}, instr: 40000000 });
-    ok(u.spiBytes.length > 70, `ws2812 unicorn saw strip bytes (${u.spiBytes.length})`);
-    ok(JSON.stringify(u.spiBytes) === JSON.stringify(r.spiBytes),
-        `ws2812 SPI bytes identical (${u.spiBytes.length} vs ${r.spiBytes.length})`);
-    // Decode first complete frames to GRB LEDs on both (proves frame alignment).
-    const frames = (bytes) => {
-        const out = [];
-        for (let f = 0; f + 72 <= bytes.length; f += 72) {
-            const leds = [];
-            for (let i = 0; i < 8; i++) {
-                leds.push([bytes[f + i * 3], bytes[f + i * 3 + 1], bytes[f + i * 3 + 2]]);
-            }
-            out.push(leds);
+    const { spiBytes } = await runTap({ firmware, ext_devices: {}, instr: 40000000 });
+    ok(spiBytes.length > 70, `ws2812 saw strip bytes (${spiBytes.length})`);
+    const frames = [];
+    for (let f = 0; f + 72 <= spiBytes.length; f += 72) {
+        const leds = [];
+        for (let i = 0; i < 8; i++) {
+            leds.push([spiBytes[f + i * 3], spiBytes[f + i * 3 + 1], spiBytes[f + i * 3 + 2]]);
         }
-        return out;
-    };
-    const uf = frames(u.spiBytes), rf = frames(r.spiBytes);
-    ok(uf.length > 0 && JSON.stringify(uf) === JSON.stringify(rf), `ws2812 decoded frames identical (${uf.length})`);
+        frames.push(leds);
+    }
+    ok(frames.length > 0, `ws2812 decoded ${frames.length} complete frames`);
 }
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);

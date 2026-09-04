@@ -2,34 +2,15 @@ use wasm_bindgen::prelude::*;
 
 use crate::system::WasmSystem;
 
-/// Interrupt-dispatch policy state that lives in Rust so cli.mjs and
-/// emulator.js share ONE implementation (they kept drifting apart — e.g. the
-/// xPSR-restore bug was cli-only). Unicorn register/memory transport stays in
-/// JS (CPU not reachable from Rust); this module owns everything else:
-/// batch budget, the SVC frame mirror, and the Cortex-M frame layout.
+/// Interrupt-dispatch policy state: the per-batch 64-IRQ budget shared by
+/// every driver loop (cli.mjs, emulator.js, the native backend). SVC needs
+/// no mirror anymore: the native core stacks_take/returns on the real stack
+/// inline (there is no second CPU that can't do Cortex-M entry/return).
 #[derive(Default)]
 pub struct IntrDispatch {
-    /// Mirrored SVC frames (Cortex-M ABI). Depth-capped like the old JS
-    /// `svcStack`. Each frame is written to the real stack too, so handler
-    /// code can inspect it — this mirror is what the JS catch pops on
-    /// `bx lr` to EXC_RETURN (Unicorn faults fetching 0xFFFFFFFx).
-    svc_stack: Vec<SvcFrame>,
     /// IRQs served so far this batch (reset by step/step_batch). Caps the
-    /// dispatch loop at 64 per batch, matching the old JS for-loop.
+    /// dispatch loop at 64 per batch so one hot IRQ can't starve others.
     budget: u32,
-}
-
-#[derive(Clone, Copy)]
-struct SvcFrame {
-    sp: u32,
-    r0: u32,
-    r1: u32,
-    r2: u32,
-    r3: u32,
-    r12: u32,
-    lr: u32,
-    pc: u32,
-    xpsr: u32,
 }
 
 impl IntrDispatch {
@@ -56,48 +37,4 @@ impl IntrDispatch {
 pub fn intr_next() -> i32 {
     let sys = crate::sys();
     sys.intr.borrow_mut().next(sys)
-}
-
-/// Enter an SVC: push a mirror of the interrupted context (depth-capped at 8)
-/// and return the 32-byte Cortex-M exception frame to write to the real stack.
-/// Empty vec when the cap is hit (SVC ignored, like the old JS guard).
-/// Frame layout: [xpsr, pc, lr, r12, r3, r2, r1, r0] little-endian.
-#[wasm_bindgen]
-pub fn intr_svc_enter(
-    r0: u32, r1: u32, r2: u32, r3: u32, r12: u32,
-    lr: u32, pc: u32, xpsr: u32, sp: u32,
-) -> Vec<u8> {
-    let mut intr = crate::sys().intr.borrow_mut();
-    if intr.svc_stack.len() >= 8 {
-        return Vec::new();
-    }
-    intr.svc_stack.push(SvcFrame {
-        sp, r0, r1, r2, r3, r12, lr, pc, xpsr,
-    });
-    let mut frame = Vec::with_capacity(32);
-    for v in [xpsr, pc, lr, r12, r3, r2, r1, r0] {
-        frame.extend_from_slice(&v.to_le_bytes());
-    }
-    frame
-}
-
-/// Pop the top SVC mirror: [r0, r1, r2, r3, r12, lr, pc, sp, xpsr]. Empty vec
-/// when the stack is empty (no SVC in flight).
-///
-/// xPSR is part of the restore for the same reason it is on the IRQ path: the
-/// handler's own emu_start clobbers APSR, so a cmp/beq pair split across the
-/// SVC would otherwise evaluate with the handler's flags.
-#[wasm_bindgen]
-pub fn intr_svc_leave() -> Vec<u32> {
-    let mut intr = crate::sys().intr.borrow_mut();
-    match intr.svc_stack.pop() {
-        Some(f) => vec![f.r0, f.r1, f.r2, f.r3, f.r12, f.lr, f.pc, f.sp, f.xpsr],
-        None => Vec::new(),
-    }
-}
-
-/// Number of SVC frames currently in flight (guard for the JS catch).
-#[wasm_bindgen]
-pub fn intr_svc_depth() -> u32 {
-    crate::sys().intr.borrow().svc_stack.len() as u32
 }
