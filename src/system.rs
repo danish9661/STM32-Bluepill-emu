@@ -241,6 +241,80 @@ impl WasmSystem {
         self.absorb_buf.borrow_mut().clear();
     }
 
+    /// Build the flat DMA op plan (see dma_pump_all in lib.rs): pops ALL
+    /// pending transfers, absorbs periph->mem bytes internally, and returns
+    /// [op,a,b,c] quadruples. Moved here from lib.rs so native (non-JS)
+    /// drivers can build the same plan.
+    pub fn dma_build_plan(&self) -> Vec<u32> {
+        self.dma_absorb_reset();
+        let mut plan: Vec<u32> = Vec::new();
+        let mut done_bits = 0u32;
+        for t in self.take_pending_dma_transfers() {
+            done_bits |= 1 << t.stream_idx;
+            if t.direction == DmaDir::MemCopy || !t.peripheral {
+                plan.extend([0, t.src, t.dst, t.size as u32]);
+            } else if t.direction == DmaDir::Read {
+                // periph -> mem: absorb now, executor writes the bytes to RAM
+                let off = self.dma_absorb_store(t.peri_addr, t.size);
+                plan.extend([1, t.dst, t.size as u32, off as u32]);
+            } else {
+                // mem -> periph: executor reads RAM, then pushes via dma_push_periph
+                plan.extend([2, t.src, t.size as u32, t.peri_addr]);
+            }
+        }
+        if done_bits != 0 {
+            plan.extend([3, done_bits, 0, 0]);
+        }
+        plan
+    }
+
+    /// Execute a plan from dma_build_plan() against a Rust memory (the
+    /// native equivalent of processDma in cli.mjs/emulator.js, which uses
+    /// Unicorn mem_read/mem_write for the same ops).
+    pub fn dma_exec_plan(&self, mem: &mut dyn crate::cpu::mem::Memory, plan: &[u32]) {
+        let mut i = 0;
+        while i + 4 <= plan.len() {
+            let (op, a, b, c) = (plan[i], plan[i + 1], plan[i + 2], plan[i + 3]);
+            match op {
+                0 => {
+                    for k in 0..c {
+                        let v = mem.read8(a.wrapping_add(k));
+                        mem.write8(b.wrapping_add(k), v);
+                    }
+                }
+                1 => {
+                    for (k, v) in self.dma_absorb_take(c as usize, b as usize).into_iter().enumerate() {
+                        mem.write8(a.wrapping_add(k as u32), v);
+                    }
+                }
+                2 => {
+                    // mem -> periph: read RAM, push through the normal
+                    // peripheral write path in <=4B chunks (mirrors the
+                    // dma_push_periph wasm export).
+                    let mut k = 0usize;
+                    let n = b as usize;
+                    while k < n {
+                        let chunk = std::cmp::min(4, n - k);
+                        let mut val = 0u32;
+                        for j in 0..chunk {
+                            val |= (mem.read8(a.wrapping_add((k + j) as u32)) as u32) << (j * 8);
+                        }
+                        self.p.write(self, c, chunk as u8, val);
+                        k += chunk;
+                    }
+                }
+                _ => {
+                    for stream in 0..12 {
+                        if a & (1 << stream) != 0 {
+                            self.mark_dma_completed(stream, true);
+                        }
+                    }
+                }
+            }
+            i += 4;
+        }
+    }
+
     pub fn mark_dma_completed(&self, stream_idx: usize, _success: bool) {
         if stream_idx < 12 {
             DMA_COMPLETION_BITS.fetch_or(1 << stream_idx, Ordering::Release);

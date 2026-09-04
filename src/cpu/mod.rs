@@ -1,8 +1,13 @@
 pub mod regs;
 pub mod mem;
 pub(crate) mod thumb;
+// NOTE: vendor `tests` module excluded for now — its harness needs firmware
+// .bins and helper fns that don't exist in this tree (monox SVD, blinky.bin,
+// init_svd_for_test, WasmCpu). Port selected tests once the core boots here.
+// #[cfg(test)]
+// mod tests;
 #[cfg(test)]
-mod tests;
+mod smoke;
 pub use regs::Regs;
 pub use mem::Memory;
 use crate::system::WasmSystem;
@@ -61,6 +66,16 @@ pub struct Cpu {
     /// via `wake()` when an interrupt is pending. Only set when
     /// `deliver_irqs` is on; otherwise WFI is a nop.
     pub sleeping: bool,
+    /// DSP extension present (Cortex-M4). Cortex-M3 drivers set false, which
+    /// faults SMLAXY/SMULXY/SMLAD/SMUAD/SMULW/SMLAW as UNDEFINED. Defaults
+    /// true so the M4-verified behavior is unchanged.
+    pub dsp: bool,
+    /// Predicated 16-bit data-processing must not update APSR (ARM rule:
+    /// 16-bit instructions in an IT block, other than CMP/CMN/TST, do not
+    /// set flags). Set fresh by exec16/exec32 on every instruction; helpers
+    /// (nz/add_flags/sub_flags) and T1 carry lines consult it, CMP/CMN/TST
+    /// arms and all T2 arms ignore it.
+    pub it_suppress: bool,
 }
 
 impl Cpu {
@@ -78,6 +93,8 @@ impl Cpu {
             it_stack: Vec::new(),
             deliver_irqs: false,
             sleeping: false,
+            dsp: true,
+            it_suppress: false,
         }
     }
     pub fn reset(&mut self, sp: u32, pc: u32) {
@@ -91,6 +108,9 @@ impl Cpu {
         self.exc_stack.clear();
         self.it_stack.clear();
         self.sleeping = false;
+        // NOTE: `dsp` is configuration, not CPU state — preserved across reset.
+        // it_suppress is per-instruction transient (recomputed at each entry).
+        self.it_suppress = false;
     }
 
     /// Current stack pointer (r13 always mirrors it).
@@ -193,7 +213,11 @@ impl Cpu {
             self.regs.psp = sp;
         }
         self.ipsr = vector;
-        sys.p.nvic.borrow_mut().set_in_interrupt(true);
+        // NOTE: the vendor NVIC had set_in_interrupt() here; this tree's
+        // NVIC tracks the active stack via the get_next_pending_intr() push /
+        // clear_current_interrupt() pop pair instead, so there is nothing to
+        // set (take_exception runs with the entry already pushed by the pop,
+        // or standalone for SVC with an empty stack — both consistent).
         // Load handler PC through VTOR (model SCB, default 0x08000000).
         let vtor = sys.p.read(sys, 0xE000ED08, 4);
         let handler = mem.read32(vtor.wrapping_add(vector * 4));
@@ -263,9 +287,17 @@ impl Cpu {
             self.it_n = saved.n;
             self.it_idx = saved.idx;
         }
-        self.exc_stack.pop();
+        let irq = self.exc_stack.pop();
         self.ipsr = 0;
-        sys.p.nvic.borrow_mut().set_in_interrupt(false);
+        // Balance the active-priority push that get_next_pending_intr()
+        // performed on entry (mirrors finish_interrupt(); a standalone SVC
+        // pops an empty stack, which is a safe no-op).
+        sys.p.nvic.borrow_mut().clear_current_interrupt();
+        // SysTick debt drain (mirrors finish_interrupt()): re-pend each
+        // unconsumed 1ms tick so millis() tracks instruction time.
+        if irq == Some(crate::peripherals::nvic::irq::SYSTICK) {
+            while sys.p.nvic.borrow_mut().systick_take() {}
+        }
         // Chained PendSV/SVC tail? No tail-chaining in v1; the run loop
         // delivers the next pending exception on the next iteration.
         self.regs.r[15] = retpc | 1;
@@ -329,7 +361,11 @@ impl Cpu {
                 if pending {
                     // Bind first: `if let` would extend the borrow_mut guard
                     // through the body and take_exception would re-borrow.
-                    let next = sys.p.nvic.borrow_mut().get_and_clear_next_intr_pending();
+                    // get_next_pending_intr() pops the highest-priority
+                    // pending IRQ (PRIMASK/BASEPRI via the INTR_MASK statics
+                    // the driver maintains), clears it and pushes the active
+                    // stack entry that exception_return balances.
+                    let next = sys.p.nvic.borrow_mut().get_next_pending_intr();
                     if let Some(irq) = next {
                         self.take_exception(sys, mem, irq);
                     }

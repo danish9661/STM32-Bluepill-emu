@@ -6,8 +6,9 @@ pub mod bus;
 mod interrupts;
 pub mod peripherals;
 pub mod ext_devices;
+pub mod cpu;
 
-use system::{DmaDir, WasmSystem, VmEvent};
+use system::{WasmSystem, VmEvent};
 
 /// Emit a `console.warn` from Rust without pulling in `web_sys` (zero extra
 /// wasm size). Works in both the browser and Node.js. Used for recoverable
@@ -34,10 +35,16 @@ pub(crate) mod test_util {
     /// registry and the instruction counter are process-wide and WasmSystem
     /// holds Rc's, so every test that builds one is serialized.
     pub(crate) fn with_sys<R>(f: impl FnOnce(&WasmSystem) -> R) -> R {
-        let guard = TEST_LOCK.get_or_init(|| Mutex::new(()));
-        let _held = guard.lock().unwrap_or_else(|e| e.into_inner());
+        let _held = lock();
         let sys = WasmSystem::new();
         f(&sys)
+    }
+
+    /// Hold the global test lock directly (for tests that install the
+    /// process-wide SYS via init() instead of using a local system).
+    pub(crate) fn lock() -> std::sync::MutexGuard<'static, ()> {
+        let guard = TEST_LOCK.get_or_init(|| Mutex::new(()));
+        guard.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
@@ -61,7 +68,7 @@ fn try_sys() -> Option<&'static WasmSystem> {
     unsafe { (*std::ptr::addr_of!(SYS)).as_ref() }
 }
 
-fn sys() -> &'static WasmSystem {
+pub(crate) fn sys() -> &'static WasmSystem {
     try_sys().expect("WasmSystem not initialized — call init() or init_svd() first")
 }
 
@@ -291,27 +298,7 @@ pub fn dma_get_pending_count() -> u32 {
 /// fire only after every RAM move has landed.
 #[wasm_bindgen]
 pub fn dma_pump_all() -> Vec<u32> {
-    let sys = sys();
-    sys.dma_absorb_reset();
-    let mut plan: Vec<u32> = Vec::new();
-    let mut done_bits = 0u32;
-    for t in sys.take_pending_dma_transfers() {
-        done_bits |= 1 << t.stream_idx;
-        if t.direction == DmaDir::MemCopy || !t.peripheral {
-            plan.extend([0, t.src, t.dst, t.size as u32]);
-        } else if t.direction == DmaDir::Read {
-            // periph -> mem: absorb now, JS writes the bytes to RAM
-            let off = sys.dma_absorb_store(t.peri_addr, t.size);
-            plan.extend([1, t.dst, t.size as u32, off as u32]);
-        } else {
-            // mem -> periph: JS reads RAM, then pushes via dma_push_periph
-            plan.extend([2, t.src, t.size as u32, t.peri_addr]);
-        }
-    }
-    if done_bits != 0 {
-        plan.extend([3, done_bits, 0, 0]);
-    }
-    plan
+    sys().dma_build_plan()
 }
 
 /// Fetch a slice of the bytes absorbed by the last dma_pump_all() (offset,

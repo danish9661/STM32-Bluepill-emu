@@ -86,6 +86,9 @@ fn branch(
 // ---- flags ----
 #[inline]
 fn nz(c: &mut Cpu, v: u32) {
+    if c.it_suppress {
+        return;
+    }
     c.regs.xpsr = (c.regs.xpsr & !0xC0000000)
         | if v == 0 { 0x40000000 } else { 0 }
         | if v & 0x80000000 != 0 { 0x80000000 } else { 0 };
@@ -94,6 +97,9 @@ fn add_flags(c: &mut Cpu, a: u32, b: u32, ci: u32) -> u32 {
     let r = a.wrapping_add(b).wrapping_add(ci);
     let carry = (a as u64) + (b as u64) + (ci as u64) > 0xFFFF_FFFF;
     let over = ((a ^ r) & (b ^ r) & 0x80000000) != 0;
+    if c.it_suppress {
+        return r;
+    }
     c.regs.xpsr = (c.regs.xpsr & !0xF0000000)
         | if r == 0 { 0x40000000 } else { 0 }
         | if r & 0x80000000 != 0 { 0x80000000 } else { 0 }
@@ -106,6 +112,9 @@ fn sub_flags(c: &mut Cpu, a: u32, b: u32, ci: u32) -> u32 {
     let r = a.wrapping_sub(b).wrapping_sub(1 - ci);
     let borrow = (a as u64) < (b as u64) + (1 - ci) as u64;
     let over = ((a ^ b) & (a ^ r) & 0x80000000) != 0;
+    if c.it_suppress {
+        return r;
+    }
     c.regs.xpsr = (c.regs.xpsr & !0xF0000000)
         | if r == 0 { 0x40000000 } else { 0 }
         | if r & 0x80000000 != 0 { 0x80000000 } else { 0 }
@@ -243,6 +252,12 @@ fn shift_op(v: u32, typ: u32, amt: u32, ci: u32) -> (u32, u32) {
 
 pub fn exec16(cpu: &mut Cpu, sys: &WasmSystem, mem: &mut dyn Memory, op: u16, pc: u32) -> bool {
     let o = op as u32;
+    // 16-bit data-processing (except CMP/CMN/TST) must not update APSR inside
+    // an IT block (verified against Unicorn/silicon via the availableForWrite
+    // spin). Capture predication BEFORE it_ok() runs: it clears it_n on the
+    // last slot, which must still be suppressed. CMP/CMN/TST arms below opt
+    // back out explicitly.
+    cpu.it_suppress = cpu.it_n != 0;
     // IT predication: a not-taken instruction is still a 2-byte NOP for PC
     // purposes (and still consumes its IT slot).
     if !it_ok(cpu) {
@@ -257,7 +272,9 @@ pub fn exec16(cpu: &mut Cpu, sys: &WasmSystem, mem: &mut dyn Memory, op: u16, pc
         let (r, co) = shift_op(v, 0, im, carry(cpu));
         cpu.regs.r[rd] = r;
         nz(cpu, r);
-        cpu.regs.xpsr = (cpu.regs.xpsr & !0x20000000) | (co << 29);
+        if !cpu.it_suppress {
+            cpu.regs.xpsr = (cpu.regs.xpsr & !0x20000000) | (co << 29);
+        }
         adv(cpu, pc, 2);
         return true;
     }
@@ -271,7 +288,9 @@ pub fn exec16(cpu: &mut Cpu, sys: &WasmSystem, mem: &mut dyn Memory, op: u16, pc
         let (r, co) = shift_op(v, 1, im, carry(cpu));
         cpu.regs.r[rd] = r;
         nz(cpu, r);
-        cpu.regs.xpsr = (cpu.regs.xpsr & !0x20000000) | (co << 29);
+        if !cpu.it_suppress {
+            cpu.regs.xpsr = (cpu.regs.xpsr & !0x20000000) | (co << 29);
+        }
         adv(cpu, pc, 2);
         return true;
     }
@@ -285,7 +304,9 @@ pub fn exec16(cpu: &mut Cpu, sys: &WasmSystem, mem: &mut dyn Memory, op: u16, pc
         let (r, co) = shift_op(v, 2, im, carry(cpu));
         cpu.regs.r[rd] = r;
         nz(cpu, r);
-        cpu.regs.xpsr = (cpu.regs.xpsr & !0x20000000) | (co << 29);
+        if !cpu.it_suppress {
+            cpu.regs.xpsr = (cpu.regs.xpsr & !0x20000000) | (co << 29);
+        }
         adv(cpu, pc, 2);
         return true;
     }
@@ -330,9 +351,10 @@ pub fn exec16(cpu: &mut Cpu, sys: &WasmSystem, mem: &mut dyn Memory, op: u16, pc
         // Predicated (in-IT) T1 MOVS preserves flags (matches Unicorn and
         // GCC's expectation: D_PageTicker's `itt lt; movlt; strlt` needs N
         // live for strlt; clobbering it hangs the title forever). Bare movs
-        // still sets N/Z (V cleared, C preserved).
-        if cpu.it_n == 0 {
-            nz(cpu, o & 0xFF);
+        // still sets N/Z (V cleared, C preserved). it_suppress covers the
+        // last-slot case too (it_n is already cleared there when it_ok runs).
+        nz(cpu, o & 0xFF);
+        if !cpu.it_suppress {
             cpu.regs.xpsr &= !0x10000000;
         }
         adv(cpu, pc, 2);
@@ -340,6 +362,7 @@ pub fn exec16(cpu: &mut Cpu, sys: &WasmSystem, mem: &mut dyn Memory, op: u16, pc
     }
     if o & 0xF800 == 0x2800 {
         let rn = ((o >> 8) & 7) as usize;
+        cpu.it_suppress = false; // T1 CMP always updates flags, even in IT.
         sub_flags(cpu, rr(cpu, rn, pc), o & 0xFF, 1);
         adv(cpu, pc, 2);
         return true;
@@ -379,19 +402,38 @@ pub fn exec16(cpu: &mut Cpu, sys: &WasmSystem, mem: &mut dyn Memory, op: u16, pc
                 let (r, co) = shift_op(a, 0, b & 0xFF, carry(cpu));
                 cpu.regs.r[rd] = r;
                 nz(cpu, r);
-                cpu.regs.xpsr = (cpu.regs.xpsr & !0x20000000) | (co << 29);
+                if !cpu.it_suppress {
+                    cpu.regs.xpsr = (cpu.regs.xpsr & !0x20000000) | (co << 29);
+                }
             }
             3 => {
-                let (r, co) = shift_op(a, 1, b & 0xFF, carry(cpu));
+                // LSR (register): Rs==0 means NO shift (carry unchanged).
+                // shift_op's amt==0 arm is the immediate encoding (LSR#0=#32).
+                let amt = b & 0xFF;
+                let (r, co) = if amt == 0 {
+                    (a, carry(cpu))
+                } else {
+                    shift_op(a, 1, amt, carry(cpu))
+                };
                 cpu.regs.r[rd] = r;
                 nz(cpu, r);
-                cpu.regs.xpsr = (cpu.regs.xpsr & !0x20000000) | (co << 29);
+                if !cpu.it_suppress {
+                    cpu.regs.xpsr = (cpu.regs.xpsr & !0x20000000) | (co << 29);
+                }
             }
             4 => {
-                let (r, co) = shift_op(a, 2, b & 0xFF, carry(cpu));
+                // ASR (register): Rs==0 means NO shift (see LSR note).
+                let amt = b & 0xFF;
+                let (r, co) = if amt == 0 {
+                    (a, carry(cpu))
+                } else {
+                    shift_op(a, 2, amt, carry(cpu))
+                };
                 cpu.regs.r[rd] = r;
                 nz(cpu, r);
-                cpu.regs.xpsr = (cpu.regs.xpsr & !0x20000000) | (co << 29);
+                if !cpu.it_suppress {
+                    cpu.regs.xpsr = (cpu.regs.xpsr & !0x20000000) | (co << 29);
+                }
             }
             5 => {
                 let r = add_flags(cpu, a, b, carry(cpu));
@@ -402,13 +444,27 @@ pub fn exec16(cpu: &mut Cpu, sys: &WasmSystem, mem: &mut dyn Memory, op: u16, pc
                 cpu.regs.r[rd] = r;
             }
             7 => {
-                let (r, co) = shift_op(a, 3, b & 0xFF, carry(cpu));
+                // ROR (register): Rs==0 means NO shift (see LSR note; RRX is
+                // the immediate ROR#0 encoding only).
+                let amt = b & 0xFF;
+                let (r, co) = if amt == 0 {
+                    (a, carry(cpu))
+                } else {
+                    shift_op(a, 3, amt, carry(cpu))
+                };
                 cpu.regs.r[rd] = r;
                 nz(cpu, r);
-                cpu.regs.xpsr = (cpu.regs.xpsr & !0x20000000) | (co << 29);
+                if !cpu.it_suppress {
+                    cpu.regs.xpsr = (cpu.regs.xpsr & !0x20000000) | (co << 29);
+                }
             }
             8 => {
-                sub_flags(cpu, a, b, 1);
+                cpu.it_suppress = false; // T1 TST always updates flags.
+                // TST is an AND test (not SUB): N/Z from a&b, C/V unchanged.
+                // Using sub_flags here mis-set Z when a==b (1-1=0 vs 1&1=1),
+                // making EXTI0_IRQHandler's `tst r1,r0; beq` skip the PR clear
+                // + callback for line 0 only (other lines' SUB/AND agree).
+                nz(cpu, a & b);
             }
             9 => {
                 // RSB (negate): Rd = 0 - Rs, with flags
@@ -416,9 +472,11 @@ pub fn exec16(cpu: &mut Cpu, sys: &WasmSystem, mem: &mut dyn Memory, op: u16, pc
                 cpu.regs.r[rd] = r;
             }
             10 => {
+                cpu.it_suppress = false; // T1 CMP always updates flags.
                 sub_flags(cpu, a, b, 1);
             }
             11 => {
+                cpu.it_suppress = false; // T1 CMN always updates flags.
                 add_flags(cpu, a, b, 0);
             }
             12 => {
@@ -459,6 +517,7 @@ pub fn exec16(cpu: &mut Cpu, sys: &WasmSystem, mem: &mut dyn Memory, op: u16, pc
                 cpu.regs.r[rd] = r;
             }
             1 => {
+                cpu.it_suppress = false; // T1 CMP always updates flags.
                 sub_flags(cpu, rr(cpu, rd, pc), rr(cpu, rs, pc), 1);
             }
             2 => {
@@ -911,6 +970,9 @@ pub fn exec32(
 ) -> bool {
     let o1 = op1 as u32;
     let o2 = op2 as u32;
+    // 32-bit instructions respect their explicit S bit (helpers stay
+    // unconditional); only 16-bit paths use it_suppress.
+    cpu.it_suppress = false;
     if !it_ok(cpu) {
             adv(cpu, pc, 4);
             return true;
@@ -1337,9 +1399,6 @@ pub fn exec32(
         // only c4/5 here sent strh-reg into imm8 post-indexed writeback
         // (r9 -= imm8 per store), which corrupted DOOM's collump pointer.
         if (o2 & 0xC00) == 0 {
-            if signed {
-                return fault(cpu, pc, op1, op2, 4);
-            }
             let rm = (o2 & 0xF) as usize;
             let sh = (o2 >> 4) & 3;
             let off = rr(cpu, rm, pc).wrapping_shl(sh);
@@ -1353,12 +1412,19 @@ pub fn exec32(
                     let t = cpu.regs.r[15];
                     return branch(cpu, sys, mem, t, pc, op1, op2, 4);
                 }
-                cpu.regs.r[rt] = match size {
-                    1 => mem.read8(addr) as u32,
-                    2 => mem.read16(addr) as u32,
+                // Signed forms (F9 LDRSB/LDRSH-reg, GAS-verified) sign-extend.
+                cpu.regs.r[rt] = match (size, signed) {
+                    (1, false) => mem.read8(addr) as u32,
+                    (2, false) => mem.read16(addr) as u32,
+                    (1, true) => sx(mem.read8(addr) as u32, 8),
+                    (2, true) => sx(mem.read16(addr) as u32, 16),
                     _ => mem.read32(addr),
                 };
             } else {
+                if signed {
+                    // No signed store encodings exist; stay loud.
+                    return fault(cpu, pc, op1, op2, 4);
+                }
                 if rt == 15 {
                     return fault(cpu, pc, op1, op2, 4);
                 }
@@ -1452,32 +1518,64 @@ pub fn exec32(
                     _ => return fault(cpu, pc, op1, op2, 4),
                 }
             }
-            1 => {
-                // UXT AH / UXTH (op2 = F:Rd:10:rot:Rm)
-                if o2 & 0xF0C0 != 0xF080 {
-                    return fault(cpu, pc, op1, op2, 4);
-                }
-                let rot = ((o2 >> 4) & 3) * 8;
-                let v = ror32(rr(cpu, rm, pc), rot) & 0xFFFF;
-                cpu.regs.r[rd] = if rn == 15 {
-                    v
-                } else {
-                    rr(cpu, rn, pc).wrapping_add(v)
-                };
-                adv(cpu, pc, 4);
-                return true;
-            }
-            2 | 6 => {
-                // LSR / ROR (register): Rd = Rn <op> (Rm & 0xFF)
+            2 | 3 | 6 | 7 => {
+                // LSR/LSRS/ROR/RORS (register), op2[7:4]==0; S iff op is odd
+                // (GAS-verified: FA20 lsr.w / FA30 lsrs.w, FA60 ror.w /
+                // FA70 rors.w). SXT16 forms fault loudly for now.
                 if o2 & 0xF0F0 != 0xF000 {
                     return fault(cpu, pc, op1, op2, 4);
                 }
-                let typ = op >> 1; // 1, 3
+                let typ = op >> 1; // 1 (LSR), 3 (ROR)
                 let amt = rr(cpu, rm, pc) & 0xFF;
-                let (r, _) = shift_op(rr(cpu, rn, pc), typ, amt, carry(cpu));
+                // Register shift by 0 = no shift (carry unchanged). shift_op's
+                // amt==0 arm is the IMMEDIATE encoding (LSR#0=#32, ROR#0=RRX),
+                // so bypass it here (HAL_GPIO_Init's lsrs.w r5,r2,r6 with r6=0
+                // returned 0 instead of r2, skipping all GPIO/EXTI setup).
+                let (r, co) = if amt == 0 {
+                    (rr(cpu, rn, pc), carry(cpu))
+                } else {
+                    shift_op(rr(cpu, rn, pc), typ, amt, carry(cpu))
+                };
                 cpu.regs.r[rd] = r;
+                if op & 1 != 0 {
+                    nz(cpu, r);
+                    cpu.regs.xpsr = (cpu.regs.xpsr & !0x20000000) | (co << 29);
+                }
                 adv(cpu, pc, 4);
                 return true;
+            }
+            1 => {
+                // LSLS (op2[7:4]==0, S) or UXT AH / UXTH (op2 = F:Rd:10:rot:Rm).
+                // (GAS-verified: FA12 lsls.w.)
+                if o2 & 0xF000 != 0xF000 {
+                    return fault(cpu, pc, op1, op2, 4);
+                }
+                match (o2 >> 4) & 0xF {
+                    0 => {
+                        let amt = rr(cpu, rm, pc) & 0xFF;
+                        let (r, co) = shift_op(rr(cpu, rn, pc), 0, amt, carry(cpu));
+                        cpu.regs.r[rd] = r;
+                        nz(cpu, r);
+                        cpu.regs.xpsr = (cpu.regs.xpsr & !0x20000000) | (co << 29);
+                        adv(cpu, pc, 4);
+                        return true;
+                    }
+                    8 => {
+                        if o2 & 0xC0 != 0x80 {
+                            return fault(cpu, pc, op1, op2, 4);
+                        }
+                        let rot = ((o2 >> 4) & 3) * 8;
+                        let v = ror32(rr(cpu, rm, pc), rot) & 0xFFFF;
+                        cpu.regs.r[rd] = if rn == 15 {
+                            v
+                        } else {
+                            rr(cpu, rn, pc).wrapping_add(v)
+                        };
+                        adv(cpu, pc, 4);
+                        return true;
+                    }
+                    _ => return fault(cpu, pc, op1, op2, 4),
+                }
             }
             4 => {
                 // ASR-reg (op2[7:4]==0) or SXTAB/SXTB (op2[7:4]==8)
@@ -1487,7 +1585,12 @@ pub fn exec32(
                 match (o2 >> 4) & 0xF {
                     0 => {
                         let amt = rr(cpu, rm, pc) & 0xFF;
-                        let (r, _) = shift_op(rr(cpu, rn, pc), 2, amt, carry(cpu));
+                        // Register ASR by 0 = no shift (see LSR note above).
+                        let (r, _) = if amt == 0 {
+                            (rr(cpu, rn, pc), carry(cpu))
+                        } else {
+                            shift_op(rr(cpu, rn, pc), 2, amt, carry(cpu))
+                        };
                         cpu.regs.r[rd] = r;
                         adv(cpu, pc, 4);
                         return true;
@@ -1510,6 +1613,22 @@ pub fn exec32(
                 }
             }
             5 => {
+                // ASRS (op2[7:4]==0, S) or UXTAB / UXTB (op2 = F:Rd:10:rot:Rm).
+                // (GAS-verified: FA52 asrs.w.)
+                if ((o2 >> 4) & 0xF) == 0 {
+                    let amt = rr(cpu, rm, pc) & 0xFF;
+                    // Register ASRS by 0 = no shift (see LSR note above).
+                    let (r, co) = if amt == 0 {
+                        (rr(cpu, rn, pc), carry(cpu))
+                    } else {
+                        shift_op(rr(cpu, rn, pc), 2, amt, carry(cpu))
+                    };
+                    cpu.regs.r[rd] = r;
+                    nz(cpu, r);
+                    cpu.regs.xpsr = (cpu.regs.xpsr & !0x20000000) | (co << 29);
+                    adv(cpu, pc, 4);
+                    return true;
+                }
                 // UXTAB / UXTB (op2 = F:Rd:10:rot:Rm)
                 if o2 & 0xF0C0 != 0xF080 {
                     return fault(cpu, pc, op1, op2, 4);
@@ -1597,6 +1716,10 @@ pub fn exec32(
             1 => {
                 // SMLAXY (Ra!=15) / SMULXY (Ra==15). X/Y = bottom/top half
                 // of Rn/Rm via op2[5]/op2[4] (0=B/low, 1=T/high).
+                // UNDEFINED on Cortex-M3 (DSP extension): fault when disabled.
+                if !cpu.dsp {
+                    return fault(cpu, pc, op1, op2, 4);
+                }
                 let an = rr(cpu, rn, pc);
                 let am = rr(cpu, rm, pc);
                 let hn = if (o2 >> 5) & 1 == 1 {
@@ -1621,6 +1744,10 @@ pub fn exec32(
             2 => {
                 // SMLAD (Ra!=15) / SMUAD (Ra==15), dual 16x16 + accumulate.
                 // Only the plain form ([7:4]==0); X/SD variants fault loudly.
+                // UNDEFINED on Cortex-M3 (DSP extension): fault when disabled.
+                if !cpu.dsp {
+                    return fault(cpu, pc, op1, op2, 4);
+                }
                 if o2 & 0xF0 != 0 {
                     return fault(cpu, pc, op1, op2, 4);
                 }
@@ -1642,6 +1769,10 @@ pub fn exec32(
             3 => {
                 // SMULW (Ra==15) / SMLAW: 32x16 -> top 32 bits.
                 // Half via op2[4] (0=B/low, 1=T/high).
+                // UNDEFINED on Cortex-M3 (DSP extension): fault when disabled.
+                if !cpu.dsp {
+                    return fault(cpu, pc, op1, op2, 4);
+                }
                 let an = rr(cpu, rn, pc) as i32 as i64;
                 let am = rr(cpu, rm, pc);
                 let half = if (o2 >> 4) & 1 == 1 {
@@ -1787,7 +1918,9 @@ pub fn exec32(
             cpu.regs.r[rd] = sv;
             if s {
                 nz(cpu, sv);
-                cpu.regs.xpsr = (cpu.regs.xpsr & !0x20000000) | (co << 29);
+                if !cpu.it_suppress {
+                    cpu.regs.xpsr = (cpu.regs.xpsr & !0x20000000) | (co << 29);
+                }
             }
             adv(cpu, pc, 4);
             return true;

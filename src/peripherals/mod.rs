@@ -24,6 +24,7 @@ pub mod bkp;
 pub mod dac;
 pub mod usb;
 pub mod sdio;
+pub mod dwt;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -230,6 +231,7 @@ impl Peripherals {
             ("NVIC", 0xE000_E000u32, 0x100u32),
             ("SysTick", 0xE000_E010u32, 0x20u32),
             ("SCB", 0xE000_ED00u32, 0x100u32),
+            ("DWT", 0xE000_1000u32, 0x1000u32),
         ] {
             if peripherals.bus.get_mut().get(base).is_none() {
                 if let Some(p) = Self::build_peripheral(name, ext_devices, &mut peripherals.gpio.borrow_mut()) {
@@ -272,6 +274,7 @@ impl Peripherals {
             .or_else(|| Bkp::new(name))
             .or_else(|| Dac::new(name))
             .or_else(|| Sdio::new(name))
+            .or_else(|| Dwt::new(name))
     }
 
     pub fn new_wasm(gpio: GpioPorts, ext_devices: &ExtDevices) -> Self {
@@ -307,6 +310,7 @@ impl Peripherals {
             (0x4002_0000, "DMA1"), (0x4002_0400, "DMA2"),
             (0x4002_1000, "RCC"),  (0x4002_2000, "FLASH"),
             (0x4002_3000, "CRC"),
+            (0xE000_1000, "DWT"),
             (0xE000_E000, "NVIC"), (0xE000_E010, "SysTick"), (0xE000_ED00, "SCB"),
         ];
         regs.sort_by_key(|k| k.0);
@@ -705,6 +709,7 @@ use bkp::Bkp;
 use dac::Dac;
 use usb::Usb;
 use sdio::Sdio;
+use dwt::Dwt;
 
 #[cfg(test)]
 mod tests {
