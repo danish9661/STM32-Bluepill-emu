@@ -86,9 +86,15 @@ it directly. Mixing these up zeroes `SystemCoreClock` and breaks
   loads the handler through VTOR. Clears `sleeping` (exception entry wakes).
 - `exception_return(exc)`: unstacks from the bank selected by EXC_RETURN
   (mid-handler `msr psp` task switches honored), restores APSR + IT state,
-  keeps `CONTROL.SPSEL` coherent with the return stack, balances the NVIC
-  active stack, drains SysTick debt. `0xFFFFFFF1` (return-to-handler, i.e.
-  nesting) faults loudly — single-level handlers only.
+  keeps `CONTROL.SPSEL` coherent with the return stack (untouched on
+  handler-to-handler returns), resumes the outer vector when nested,
+  balances the NVIC active stack, drains SysTick debt.
+- **Nesting**: a strictly-higher-priority IRQ preempts a running handler
+  (inline delivery checks priority against the active stack, so same-priority
+  re-pends never nest — depth is bounded by priority levels). Nested takes
+  stack on MSP with `LR = 0xFFFFFFF1` and return to the preempted handler.
+  NVIC accounting stays balanced: pops own the push for dispatched IRQs,
+  synchronous takes (SVC) push explicitly via `push_active()`.
 - **SVC**: with lazy dispatch it faults to the driver (`0xDF00` check), which
   steps past and takes exception −5 synchronously; with `deliver_irqs` the
   core takes it inline. No mirror (deleted with Unicorn).
@@ -105,13 +111,32 @@ it directly. Mixing these up zeroes `SystemCoreClock` and breaks
 - Flash is execute/read-only for the guest; `load()` bypasses the protection
   (firmware install only). Unmapped reads return 0 and record the address in
   `bad`; writes are dropped.
+- Raw variants (`read8_raw`/`write8_raw`/`read16_raw`, defaulting to the
+  checked forms) bypass MPU checks for firmware install, DMA (trusted bus
+  master) and driver/debugger access.
 
 ## Cortex-M3 differences (vs the M4 origin)
 
 - `dsp: false` faults SMLAXY/SMULXY/SMLAD/SMUAD/SMULW/SMLAW as UNDEFINED.
 - No FPU: coprocessor encodings fault (correct — firmware uses soft float).
 - CPUID comes from the model SCB (`0x410FC241`).
-- MPU unmodeled (silent ignore; no firmware in the gate uses it).
+
+## Memory protection (MPU)
+
+Full ARMv7-M MPU (`WasmSystem.mpu`, registers hosted in the SCB at
+`0xE000ED90+`): 8 regions, RNR + VALID-latches-RNR + A1–A3 aliases, priority
+(highest number wins), subregion disable, AP matrix (v7-M `0b111` == `0b110`
+RO/RO), XN, background map (PRIVDEFENA), PPB always priv-only + XN.
+- Data deny: read returns 0 / store dropped, MMFSR + MMFAR recorded, MemManage
+  pended (HardFault without MEMFAULTENA). CFSR is true write-1-to-clear.
+- Exec deny (XN or unreadable): `run()` halts loudly via `CpuFault` instead
+  of running forbidden code.
+- CPU privilege is published to the model on MSR CONTROL and exception
+  transitions (FlatMemory has no CPU context); DMA uses raw access as a
+  trusted master. Exception stacking bypasses checks (documented
+  approximation — stacking faults would need precise-fault machinery).
+- Gate firmware never enables it: zero behavior change when off (one branch
+  per access).
 
 ## Driver contract (`src/native.rs`)
 
@@ -125,11 +150,15 @@ all delta peripherals key off it).
 
 ## Tests
 
-- `cargo test --release --lib cpu::smoke` — blinky, echo, periph39 39/39,
-  `firmware_gallery_native` (adc/timer/fade/flash/showcase/ws2812, live-digit
-  assertions), `periph39_inline_irqs_native` (every vector + SVC mid-slice;
-  3 lazy-assumption races documented, not bugs).
-- `cargo test --release --lib cpu::core_tests` — WFI sleep/wake, PSP switch.
+- `cargo test --release --lib cpu::smoke` — blinky, echo, periph39 39/39 in
+  lazy AND inline delivery (the suite's 3 lazy-assuming races were hardened
+  with critical sections — prompt delivery is safe), `firmware_gallery_native`
+  (adc/timer/fade/flash/showcase/ws2812, live-digit assertions).
+- `cargo test --release --lib cpu::core_tests` — WFI sleep/wake, PSP switch,
+  nested preemption (0x123 order log), SVC-in-handler active balance, MPU
+  register file + enforcement (AP matrix, priority, subregions, escalation).
+- `cargo test --lib system::tests::mpu_*` — pure matching/AP/background/PPB
+  unit tests (no SYS needed).
 - Product paths: `node pkg/cli.mjs`, `tests/test_emulator_js.mjs`,
   `node tests/test_rustcpu.mjs` (200M 39/39), `tests/test_bus_tap.mjs`,
   headless/headed browser suites — see `docs/PATH_B.md` for numbers.

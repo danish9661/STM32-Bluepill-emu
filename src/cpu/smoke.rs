@@ -253,17 +253,10 @@ fn pump_periph39_loop(cpu: &mut Cpu, mem: &mut FlatMemory, can_flag: u32) -> (u6
 
 /// Same 39-check suite with inline interrupt delivery (deliver_irqs=true):
 /// exceptions (incl. SVC) are taken mid-slice instead of at batch boundaries.
-///
-/// NOTE this cannot be 39/39: three checks assume lazy (batch-boundary)
-/// dispatch latency and race against prompt delivery —
-/// - "[EXTI reg]": SWIER pends IRQ6, the handler runs + clears PR0 before the
-///   test reads it (on real HW the preemption would do the same; the async
-///   "[EXTI IRQ]" check below proves the handler ran).
-/// - "[DMA RX]"/"[UART RX]": the AB-stdin timing shifts, so 'A' lands in the
-///   wrong consumer.
-/// What this proves instead: every interrupt source in the system (SVC,
-/// EXTI0/1/13, CAN RX, SysTick, PendSV, DMA TX, TIM2/3/4, RTC Alarm) is
-/// delivered inline with no faults or hangs over 200M instructions.
+/// Reaches the full 39/39: the firmware's three lazy-assuming races were
+/// hardened with critical sections (EXTI SWIER+PR read, Serial.begin +
+/// RXNEIE disable), so prompt delivery is safe. Product paths keep lazy
+/// dispatch; this test proves the core correct under prompt delivery too.
 #[test]
 fn periph39_inline_irqs_native() {
     let _held = crate::test_util::lock();
@@ -294,25 +287,7 @@ fn periph39_inline_irqs_native() {
     let (done, can_done) = pump_periph39_loop(&mut cpu, &mut mem, can_flag);
     let out = get_uart_output();
     assert!(cpu.fault.is_none(), "cpu faulted: {:?}", cpu.fault);
-    // Delivery proof: every IRQ vector + SVC served (see test doc for why
-    // the full 39/39 can't hold under prompt delivery).
-    for line in [
-        "[SVC] PASS",
-        "[EXTI IRQ] PASS",
-        "[EXTI1 IRQ] PASS",
-        "[EXTI13 IRQ] PASS",
-        "[CAN RX] PASS",
-        "[SysTick] PASS",
-        "[PendSV] PASS",
-        "[DMA TX] PASS",
-        "[TIM2 (NVIC)] PASS",
-        "[TIM3 PWM] PASS",
-        "[TIM4] PASS",
-        "[RTC Alarm IRQ] PASS",
-    ] {
-        assert!(out.contains(line), "{line} missing after {done} instr, can={can_done}:\n{}", tail(&out, 6000));
-    }
-    assert!(out.contains("SUMMARY"), "no SUMMARY after {done} instr:\n{}", tail(&out, 6000));
+    assert!(out.contains("SUMMARY pass=39 fail=0"), "39/39 missing after {done} instr, can={can_done}:\n{}", tail(&out, 6000));
 }
 
 fn tail(s: &str, n: usize) -> String {

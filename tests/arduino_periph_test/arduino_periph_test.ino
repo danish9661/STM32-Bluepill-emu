@@ -231,8 +231,12 @@ void testAFIO() {
 
 void testEXTI_reg() {
     attachInterrupt(PA0, extiISR, RISING); /* configures EXTI0 on PA0 via HAL */
+    /* Critical section: SWIER pends IRQ6, whose handler clears PR0 — the PR
+       read must win the race (prompt in-slice delivery always would). */
+    noInterrupts();
     reg(EXTI_B + 0x10) = 1;                /* SWIER */
     bool pr = (reg(EXTI_B + 0x14) & 1) != 0;
+    interrupts();
     report("EXTI reg", pr, pr ? "PR0 set via SWIER" : "PR0 not set");
 }
 
@@ -780,8 +784,14 @@ void loopAsyncChecks() {
 void setup() {
     pinMode(PC13, OUTPUT);
     digitalWrite(PC13, HIGH);
+    /* Critical section: begin() enables the RXNE interrupt, but the DMA RX
+       test below needs the first injected byte to stay in the peripheral RX
+       buffer — an IRQ in between would steal it into Serial's ring (prompt
+       delivery exposes the window; lazy dispatch never sees it). */
+    noInterrupts();
     Serial.begin(115200);
     reg(USART1_B + 0x0C) &= ~(1 << 5); /* keep RX bytes for DMA RX; re-enabled later */
+    interrupts();
 
     Serial.println();
     Serial.println("=== STM32 BluePill peripheral test (Arduino framework) ===");

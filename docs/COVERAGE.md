@@ -39,7 +39,7 @@ SPI3, GPIOE-G) are harmless supersets, marked *(S)* below.
 | NVIC / STK / SCB | 0xE000Exxx | Full | Priority dispatch, SysTick debt, SHPR/SHCSR, faults, deep sleep |
 | SCB_ACTRL | 0xE000E008 | Missing | Aux control (DISMCYCINT/DISFOLD — cycle-count subtilities only) |
 | NVIC_STIR | 0xE000EF00 | Missing | Software-triggered IRQs (RTOS test code sometimes uses it) |
-| MPU | 0xE000ED90 | Missing | Intentional: MPU-off firmware (the default) is unaffected |
+| MPU | 0xE000ED90 | Full | 8 regions, RNR/VALID/aliases, priority, subregions, AP/XN, background, PPB rules, MMFSR/MMFAR, MemManage/HardFault escalation (see docs/CPU.md) |
 | DBG / DBGMCU | 0xE0042000 | Missing | Intentional: debug/trace has no headless meaning |
 | ETHERNET_MAC/MMC/PTP/DMA | 0x40028xxx | Skipped | Correct: no F1 silicon has Ethernet (ST SVD quirk) |
 | OTG_FS_* | 0x50000xxx | Skipped | Correct: F103 has FS-device USB only, no OTG (SVD quirk) |
@@ -111,5 +111,5 @@ every real Blue Pill storage project uses SD.
   tamper; USB toggles/RESET/control/bulk/IRQ; everything in §1 marked Full
   has a group.
 - `tests/canary.mjs` + 200M runs (both paths): 39/39 real-firmware checks.
-- Deliberately untested: MPU/DBG/STIR/ACTRL (absent), eMMC path, USB SOF/
+- Deliberately untested: DBG/STIR/ACTRL (absent), eMMC path, USB SOF/
   suspend/double-buffer paths.

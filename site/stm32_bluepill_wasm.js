@@ -696,7 +696,8 @@ export function rustcpu_load(data, base) {
 
 /**
  * Raw guest-memory access (RAM + flash; flash writes stay protected, use
- * rustcpu_load for firmware). Backs memRead32 + the hi2c Mode RAM patch.
+ * rustcpu_load for firmware). Bypasses MPU checks like a debugger would.
+ * Backs memRead32 + the hi2c Mode RAM patch.
  * @param {number} addr
  * @param {number} len
  * @returns {Uint8Array}
