@@ -60,9 +60,8 @@ pub struct Cpu {
     it_stack: Vec<SavedIt>,
     /// Break `run()` when the model has a pending interrupt, so a driver
     /// with guest exception delivery can take it. Off by default: polling
-    /// firmware (and the current JS wasm driver, which has no ISR pump)
-    /// must run full budgets exactly like the Unicorn path, where pending
-    /// model IRQs never stop `emu_start`.
+    /// firmware (and the lazy batch-boundary driver) must run full budgets
+    /// exactly, never stopping early on model IRQs.
     pub deliver_irqs: bool,
     /// Halted in WFI/WFE (low-power). JS advances virtual time and wakes
     /// via `wake()` when an interrupt is pending. Only set when
@@ -310,8 +309,7 @@ impl Cpu {
         // NOTE: no even-retpc fault here. FreeRTOS's M4 port deliberately
         // stores the task entry with bit0 CLEAR (`bic r1, #1` in
         // pxPortInitialiseStack) and relies on exception return forcing
-        // Thumb state; Unicorn accepts this and the firmware is proven on
-        // it, so we force |1 like hardware does for the PC load.
+        // Thumb state, so force |1 like hardware does for the PC load.
         true
     }
 
@@ -358,10 +356,8 @@ impl Cpu {
             self.cycles += 1;
             // Inline interrupt delivery (no JS pump needed): take the next
             // deliverable exception when in thread mode with PRIMASK clear.
-            // (Unicorn needs the memWriteHook+processInterrupts dance because
-            // it cannot do Cortex-M entry/return; here stacking is exact, so
-            // the mid-`str` PENDSVSET hazard of AGENTS.md §9 cannot occur —
-            // the store completes, PC advances, then we stack the next PC.)
+            // Stacking is exact, so the store completes, PC advances, then we
+            // stack the next PC (no mid-`str` hazard by construction).
             if self.deliver_irqs && self.ipsr == 0 && self.regs.primask == 0 {
                 let pending = sys.p.nvic.borrow().has_pending();
                 if pending {

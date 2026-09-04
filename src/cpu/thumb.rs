@@ -253,7 +253,7 @@ fn shift_op(v: u32, typ: u32, amt: u32, ci: u32) -> (u32, u32) {
 pub fn exec16(cpu: &mut Cpu, sys: &WasmSystem, mem: &mut dyn Memory, op: u16, pc: u32) -> bool {
     let o = op as u32;
     // 16-bit data-processing (except CMP/CMN/TST) must not update APSR inside
-    // an IT block (verified against Unicorn/silicon via the availableForWrite
+    // an IT block (verified against silicon behavior via the availableForWrite
     // spin). Capture predication BEFORE it_ok() runs: it clears it_n on the
     // last slot, which must still be suppressed. CMP/CMN/TST arms below opt
     // back out explicitly.
@@ -348,7 +348,7 @@ pub fn exec16(cpu: &mut Cpu, sys: &WasmSystem, mem: &mut dyn Memory, op: u16, pc
     if o & 0xF800 == 0x2000 {
         let rd = ((o >> 8) & 7) as usize;
         cpu.regs.r[rd] = o & 0xFF;
-        // Predicated (in-IT) T1 MOVS preserves flags (matches Unicorn and
+        // Predicated (in-IT) T1 MOVS preserves flags (matches silicon and
         // GCC's expectation: D_PageTicker's `itt lt; movlt; strlt` needs N
         // live for strlt; clobbering it hangs the title forever). Bare movs
         // still sets N/Z (V cleared, C preserved). it_suppress covers the

@@ -1,11 +1,9 @@
 //! Native CPU backend (Path B) for the JS drivers.
 //!
 //! Owns a [`Cpu`] + [`FlatMemory`] pair that runs guest firmware with zero
-//! JS crossings per instruction, against the SAME peripheral model/DMA/NVIC
-//! as the Unicorn backend. The JS drivers (cli.mjs, emulator.js) pick it
-//! with `cpu: 'rust'` (benchmarking; Unicorn stays the default).
+//! JS crossings per instruction, against the shared peripheral model/DMA/NVIC.
 //!
-//! Driver loop shape per batch (mirrors the Unicorn path):
+//! Driver loop shape per batch (cli.mjs / emulator.js):
 //!   1. pump stdin via `uart_rx_byte`, skip while DMA busy
 //!   2. `rustcpu_dma_pump()` (plan build + exec against Rust RAM, no JS RAM)
 //!   3. `n = rustcpu_run(batch)` (SVC dispatched inline, exact count back)
@@ -18,8 +16,7 @@
 //!   8. `is_watchdog_reset_requested()` check
 //!
 //! Instruction accounting is EXACT here (executed count returned, handlers
-//! included); the Unicorn path credits full batches instead. Both stay
-//! within ~1% on real firmware.
+//! included).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use wasm_bindgen::prelude::*;
@@ -60,7 +57,7 @@ pub(crate) fn reset() {
 pub fn rustcpu_init(sp: u32, pc: u32, flash_size: u32, ram_size: u32) {
     let mut cpu = Cpu::new(sp, pc | 1);
     cpu.dsp = false;
-    cpu.deliver_irqs = false; // lazy batch-boundary dispatch (Unicorn parity)
+    cpu.deliver_irqs = false; // lazy batch-boundary dispatch
     let mem = FlatMemory::new(flash_size as usize, ram_size as usize);
     unsafe {
         *std::ptr::addr_of_mut!(NATIVE) = Some(NativeEmu { cpu, mem });
@@ -68,7 +65,7 @@ pub fn rustcpu_init(sp: u32, pc: u32, flash_size: u32, ram_size: u32) {
 }
 
 /// Load firmware bytes at a guest physical address (bypasses flash
-/// protection, like the Unicorn driver's mem_write at load time).
+/// protection, like a debugger memory write at load time).
 #[wasm_bindgen]
 pub fn rustcpu_load(data: &[u8], base: u32) {
     native_mut().mem.load(data, base);
@@ -134,7 +131,7 @@ pub fn rustcpu_dispatch() -> u32 {
 
 /// Pending CPU fault, if the last run/dispatch stopped on one: empty when
 /// clean, else [pc, op1, op2, len]. (Periph39 runs fault-free; anything here
-/// is a loud decoder gap, like the Unicorn path's unmapped faults.)
+/// is a loud decoder gap.)
 #[wasm_bindgen]
 pub fn rustcpu_fault() -> Vec<u32> {
     match &native_mut().cpu.fault {
@@ -190,8 +187,8 @@ pub fn rustcpu_mem_write(addr: u32, data: &[u8]) {
     }
 }
 
-/// Whole DMA pump against Rust RAM: build the op plan and execute it with no
-/// JS RAM crossings (the Unicorn driver's mem_read/mem_write per op).
+/// Whole DMA pump against Rust RAM with no JS crossings: build the op plan
+/// and execute it in one call.
 #[wasm_bindgen]
 pub fn rustcpu_dma_pump() {
     let emu = native_mut();
@@ -204,16 +201,16 @@ pub fn rustcpu_dma_pump() {
 }
 
 /// Fires when I2C1 DR was written with the R-bit set (HAL I2C1 ISR needs
-/// hi2c->Mode == 0x22 before reading DR). Same condition as the Unicorn
-/// memWriteHook; the driver then patches RAM *(0x200002d8)+0x3D.
+/// hi2c->Mode == 0x22 before reading DR). The driver drains the model flag
+/// per batch, then patches RAM *(0x200002d8)+0x3D.
 #[wasm_bindgen]
 pub fn rustcpu_i2c_hook_fired() -> bool {
     crate::sys().i2c_dr_hook.take()
 }
 
 // ---- Peripheral write tap (onPeriphWrite parity) --------------------------
-// The page taps the peripheral bus via Unicorn memWriteHook; Rust→Rust model
-// writes never cross JS, so the tap records (addr, size, value) in
+// The page taps the peripheral bus via onPeriphWrite; model writes never
+// cross JS, so the tap records (addr, size, value) in
 // Peripherals::write for the driver to feed to write watchers per batch.
 // Gated by a flag (default off): zero overhead unless a watcher subscribes.
 

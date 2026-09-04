@@ -258,7 +258,7 @@ pub fn get_next_pending_interrupt() -> i32 {
         .unwrap_or(-255)
 }
 
-/// Set PRIMASK and BASEPRI values from Unicorn CPU state.
+/// Set PRIMASK and BASEPRI values from CPU state.
 #[wasm_bindgen]
 pub fn set_intr_masks(primask: u32, basepri: u32) {
     system::INTR_MASK_PRIMASK.store(primask, Ordering::Relaxed);

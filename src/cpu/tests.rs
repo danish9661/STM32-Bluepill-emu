@@ -1,7 +1,7 @@
 //! Native bring-up tests for the WASM-native Thumb-2 CPU.
 //!
 //! These run the real firmware binaries through `WasmCpu` + the real
-//! peripheral model (SVD map) without any JS/Unicorn involvement, so the
+//! peripheral model (SVD map) with no second CPU involved, so the
 //! edit-compile-debug loop stays inside `cargo test`. They deliberately do
 //! NOT call `tick_n` (no INSTRUCTION_COUNT movement) and only drain their
 //! own UART output, so they are independent of the other (parallel) tests.

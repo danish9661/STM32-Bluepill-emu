@@ -23,7 +23,7 @@ pub fn get_ext_devices() -> &'static Mutex<ExtDevices> {
 pub static INSTRUCTION_COUNT: AtomicU64 = AtomicU64::new(0);
 pub fn instruction_count() -> u64 { INSTRUCTION_COUNT.load(Ordering::Relaxed) }
 
-// Interrupt masks set by JS from Unicorn CPU state on each instruction.
+// Interrupt masks set by JS from CPU state on each batch.
 pub static INTR_MASK_PRIMASK: AtomicU32 = AtomicU32::new(0);
 pub static INTR_MASK_BASEPRI: AtomicU32 = AtomicU32::new(0);
 
@@ -126,7 +126,7 @@ pub struct WasmSystem {
     pub intr: RefCell<crate::interrupts::IntrDispatch>,
     /// Set when I2C1 DR is written with the R-bit set; the native driver
     /// drains it per batch for the hi2c Mode RAM patch (same condition as
-    /// the Unicorn memWriteHook). Taken (cleared) on read.
+    /// the former JS mem hook). Taken (cleared) on read.
     pub i2c_dr_hook: Cell<bool>,
 }
 
@@ -275,9 +275,8 @@ impl WasmSystem {
         plan
     }
 
-    /// Execute a plan from dma_build_plan() against a Rust memory (the
-    /// native equivalent of processDma in cli.mjs/emulator.js, which uses
-    /// Unicorn mem_read/mem_write for the same ops).
+    /// Execute a plan from dma_build_plan() against Rust guest memory
+    /// (what processDma in cli.mjs/emulator.js drives via rustcpu_dma_pump).
     pub fn dma_exec_plan(&self, mem: &mut dyn crate::cpu::mem::Memory, plan: &[u32]) {
         let mut i = 0;
         while i + 4 <= plan.len() {

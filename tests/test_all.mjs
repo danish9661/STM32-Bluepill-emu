@@ -1655,7 +1655,7 @@ periph_write(SDIO + S_MASK, 4, 0);
 const DMA2 = 0x40020400, CH4 = 0x08 + 3 * 0x14;
 periph_write(DMA2 + CH4, 4, (2 << 10) | (2 << 8) | (1 << 7) | 0); // MSIZE/PSIZE=32b, MINC, EN=0
 periph_write(DMA2 + CH4 + 2 * 4, 4, SDIO + S_FIFO); // CPAR = FIFO
-periph_write(DMA2 + CH4 + 3 * 4, 4, 0x20000000);    // CMAR (no Unicorn here: plan only)
+periph_write(DMA2 + CH4 + 3 * 4, 4, 0x20000000);    // CMAR (plan only, no CPU involved)
 periph_write(DMA2 + CH4 + 1 * 4, 4, 128);          // CNDTR = 128 words
 periph_write(DMA2 + CH4, 4, (2 << 10) | (2 << 8) | (1 << 7) | 1); // EN (DIR=0: periph->mem)
 periph_write(SDIO + S_DLEN, 4, 512);

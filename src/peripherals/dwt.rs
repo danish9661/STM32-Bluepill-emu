@@ -4,9 +4,9 @@ use super::Peripheral;
 /// Minimal ARM DWT (Data Watchpoint and Trace) cycle counter.
 ///
 /// Arduino-STM32's `micros()` and `TwoWire::recoverBus()` spin on
-/// `DWT->CYCCNT` (0xE0001004), which QEMU/Unicorn implements but this
-/// peripheral model did not — reads returned 0, so any CYCCNT delay loop
-/// hung forever on the native Rust-CPU path. CYCCNT tracks the global
+/// `DWT->CYCCNT` (0xE0001004), which this peripheral model did not
+/// implement — reads returned 0, so any CYCCNT delay loop (e.g. `micros()`,
+/// I2C bus recovery) hung forever. CYCCNT tracks the global
 /// instruction counter (1 instr = 1 cycle, matching the TIM/ADC model);
 /// CTRL.CYCCNTENA is stored but not gated (lenient, like the rest of the
 /// model). Other DWT registers read 0 / ignore writes.

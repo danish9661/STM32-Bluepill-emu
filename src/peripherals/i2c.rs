@@ -267,7 +267,7 @@ impl Peripheral for I2c {
             0x08 => self.oar1 = value & 0x3FFF,
             0x0C => self.oar2 = value & 0x3FF,
             0x10 => {
-                // Native-driver hook parity (Unicorn memWriteHook): the HAL
+                // Driver hook parity (was a JS mem hook): the HAL
                 // I2C1 ISR needs hi2c->Mode == 0x22 (MASTER_RX) before reading
                 // DR. Flag read-address DR writes for the per-batch RAM patch.
                 if self.name == "I2C1" && (value & 1) != 0 {

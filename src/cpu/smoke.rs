@@ -1,6 +1,6 @@
 // Native bring-up tests for the Rust CPU core (Path B): run real firmware
 // binaries through `Cpu` + `FlatMemory` + the real peripheral model with no
-// JS/Unicorn involvement. The driver loop below (sliced run + step_batch +
+// JS CPU involved. The driver loop below (sliced run + step_batch +
 // mask sync) is the reference shape for the future wasm/JS backend.
 
 use super::{Cpu, mem::{FlatMemory, Memory}};

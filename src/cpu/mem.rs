@@ -28,8 +28,8 @@ fn is_periph(addr: u32) -> bool {
 /// `WasmCpu` is created).
 ///
 /// Flash is execute/read-only for the guest: normal `write8` stores to flash
-/// are ignored (real flash needs an erase/program sequence, serviced by the
-/// JS flash driver on the Unicorn path). `load()` bypasses the protection
+/// are ignored (real flash needs an erase/program sequence). `load()` bypasses
+/// the protection
 /// and is the only way to get firmware into flash.
 pub struct FlatMemory {
     pub flash: Vec<u8>,
