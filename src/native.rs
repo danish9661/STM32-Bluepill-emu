@@ -84,7 +84,10 @@ pub fn rustcpu_run(slice: u32) -> u32 {
     if let Some(f) = emu.cpu.fault.take() {
         if f.op1 & 0xFF00 == 0xDF00 {
             // SVC: step past it and run the SVCall handler synchronously.
+            // Push the active entry the pop-based dispatch would have pushed
+            // (balanced by exception_return, including nested takes).
             emu.cpu.regs.r[15] = f.pc.wrapping_add(2) | 1;
+            sys.p.nvic.borrow_mut().push_active(-5);
             emu.cpu.take_exception(sys, &mut emu.mem, -5);
             done += run_handler_to_return(&mut emu.cpu, &mut emu.mem);
         } else {

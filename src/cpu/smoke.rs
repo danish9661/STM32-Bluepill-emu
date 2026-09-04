@@ -45,6 +45,7 @@ fn handle_svc(cpu: &mut Cpu, mem: &mut FlatMemory) -> bool {
     match cpu.fault.take() {
         Some(f) if f.op1 & 0xFF00 == 0xDF00 => {
             cpu.regs.r[15] = f.pc.wrapping_add(2) | 1;
+            sys.p.nvic.borrow_mut().push_active(-5);
             cpu.take_exception(sys, mem, -5);
             run_handler_to_return(cpu, mem)
         }

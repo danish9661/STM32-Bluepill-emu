@@ -57,7 +57,144 @@ fn wfi_sleeps_and_wakes_on_dispatch() {
     assert_eq!(cpu.regs.r[15] & !1, 0x080000C4);
 }
 
-/// PSP task switch roundtrip: take from thread+PSP (frame lands on the task
+/// Nested preemption: a low-priority handler pends a higher-priority IRQ
+/// mid-handler (EXTI SWIER, like real firmware); with inline delivery the
+/// high IRQ preempts before the low handler finishes. The shift-register log
+/// reads 0x123 only under true preemption (0x132 if merely sequential).
+/// Also observes LR == EXC_RETURN_HANDLER on the nested take.
+#[test]
+fn nested_irq_preempts_mid_handler() {
+    let _held = crate::test_util::lock();
+    init();
+    let sys = sys();
+    let mut mem = FlatMemory::new(0x100, 0x200);
+    // Outer (IRQ7) @ 0x80: log(1); SWIER=bit0 (pend line 0); log(3); bx lr.
+    mem.load(
+        &[
+            0x07, 0x48, 0x01, 0x68, 0x09, 0x01, 0x01, 0x31, 0x01, 0x60, //
+            0x06, 0x48, 0x01, 0x21, 0x01, 0x60, //
+            0x03, 0x48, 0x01, 0x68, 0x09, 0x01, 0x03, 0x31, 0x01, 0x60, //
+            0x70, 0x47, 0x00, 0xBF, 0x00, 0xBF, //
+            0x70, 0x01, 0x00, 0x20, // SEQ @ 0x20000170
+            0x10, 0x04, 0x01, 0x40, // SWIER @ 0x40010410
+        ],
+        0x08000080,
+    );
+    // Inner (IRQ6) @ 0xB0: log(2); bx lr.
+    mem.load(
+        &[0x02, 0x48, 0x01, 0x68, 0x09, 0x01, 0x02, 0x31, 0x01, 0x60, 0x70, 0x47, 0x70, 0x01, 0x00, 0x20],
+        0x080000B0,
+    );
+    mem.load(&[0xB1u8, 0x00, 0x00, 0x08], 0x08000000 + 22 * 4); // IRQ6 -> inner
+    mem.load(&[0x81u8, 0x00, 0x00, 0x08], 0x08000000 + 23 * 4); // IRQ7 -> outer
+    let mut cpu = Cpu::new(0x200001C0, 0x080000C1);
+    cpu.dsp = false;
+    cpu.deliver_irqs = true;
+    set_intr_masks(0, 0);
+    // EXTI IMR lines 0+1; IRQ6 high prio (0x40), IRQ7 low (0xC0).
+    sys.p.write(sys, 0x40010400, 4, 0x3);
+    sys.p.write(sys, 0xE000E404, 4, 0xC0400000);
+    sys.p.nvic.borrow_mut().enable_irq(6);
+    sys.p.nvic.borrow_mut().enable_irq(7);
+    // Pend the LOW irq first (via the model SWIER path, like firmware).
+    sys.p.write(sys, 0x40010410, 4, 1 << 1);
+    let irq = sys.p.nvic.borrow_mut().get_next_pending_intr();
+    assert_eq!(irq, Some(7));
+    cpu.take_exception(sys, &mut mem, 7);
+    assert_eq!(cpu.ipsr, 23);
+    // Single-step: watch the inner take happen mid-handler.
+    let mut saw_nested_take = false;
+    let mut guard = 0u32;
+    while cpu.ipsr != 0 && guard < 200 && cpu.fault.is_none() {
+        set_intr_masks(0, 0);
+        cpu.run(sys, &mut mem, 1);
+        guard += 1;
+        if cpu.ipsr == 22 && !saw_nested_take {
+            saw_nested_take = true;
+            assert_eq!(
+                cpu.regs.r[14], 0xFFFFFFF1,
+                "nested entry must use EXC_RETURN_HANDLER"
+            );
+        }
+    }
+    assert!(cpu.fault.is_none(), "{:?}", cpu.fault);
+    assert!(saw_nested_take, "high IRQ never preempted the low handler");
+    assert_eq!(cpu.ipsr, 0);
+    assert_eq!(mem.read32(0x20000170), 0x123, "log order must be outer,inner,outer");
+    assert!(!sys.p.nvic.borrow().is_in_interrupt(), "active stack balanced");
+    assert_eq!(cpu.regs.r[13], 0x200001C0, "MSP fully unwound");
+    assert_eq!(cpu.regs.msp, 0x200001C0);
+}
+
+/// SVC inside a handler balances the NVIC active stack: after the inner
+/// return the outer entry must still be active (observed via
+/// is_in_interrupt), and the end state is fully unwound.
+#[test]
+fn svc_in_handler_balances_active() {
+    let _held = crate::test_util::lock();
+    init();
+    let sys = sys();
+    let mut mem = FlatMemory::new(0x100, 0x200);
+    // Outer (IRQ7) @ 0x80: log(1); svc #0; log(3); bx lr.
+    mem.load(
+        &[
+            0x05, 0x48, 0x01, 0x68, 0x09, 0x01, 0x01, 0x31, 0x01, 0x60, //
+            0x00, 0xDF, // svc #0
+            0x02, 0x48, 0x01, 0x68, 0x09, 0x01, 0x03, 0x31, 0x01, 0x60, //
+            0x70, 0x47, //
+            0x70, 0x01, 0x00, 0x20, // SEQ @ 0x20000170
+        ],
+        0x08000080,
+    );
+    // SVC handler @ 0xA0: log(2); bx lr.
+    mem.load(
+        &[0x02, 0x48, 0x01, 0x68, 0x09, 0x01, 0x02, 0x31, 0x01, 0x60, 0x70, 0x47, 0x70, 0x01, 0x00, 0x20],
+        0x080000A0,
+    );
+    mem.load(&[0x81u8, 0x00, 0x00, 0x08], 0x08000000 + 23 * 4); // IRQ7 -> outer
+    mem.load(&[0xA1u8, 0x00, 0x00, 0x08], 0x08000000 + 11 * 4); // SVCall -> svc handler
+    let mut cpu = Cpu::new(0x200001C0, 0x080000C1);
+    cpu.dsp = false;
+    cpu.deliver_irqs = true;
+    set_intr_masks(0, 0);
+    sys.p.write(sys, 0x40010400, 4, 0x2); // IMR line 1
+    sys.p.nvic.borrow_mut().enable_irq(7);
+    sys.p.write(sys, 0x40010410, 4, 1 << 1);
+    let irq = sys.p.nvic.borrow_mut().get_next_pending_intr();
+    assert_eq!(irq, Some(7));
+    cpu.take_exception(sys, &mut mem, 7);
+    // Step until back in the outer handler right after the SVC returned.
+    let mut back_in_outer = false;
+    let mut guard = 0u32;
+    while cpu.ipsr != 0 && guard < 200 && cpu.fault.is_none() {
+        set_intr_masks(0, 0);
+        cpu.run(sys, &mut mem, 1);
+        guard += 1;
+        if cpu.ipsr == 23 && (cpu.regs.r[15] & !1) >= 0x0800008C {
+            back_in_outer = true;
+            break;
+        }
+    }
+    assert!(cpu.fault.is_none(), "{:?}", cpu.fault);
+    assert!(back_in_outer, "never returned from nested SVC to outer handler");
+    // The outer entry must still be active (without the push_active balance,
+    // the inner return popped it and the stack reads empty here).
+    assert!(
+        sys.p.nvic.borrow().is_in_interrupt(),
+        "outer active entry lost across nested SVC return"
+    );
+    // Run to full return and check end state + log order.
+    guard = 0;
+    while cpu.ipsr != 0 && guard < 200 && cpu.fault.is_none() {
+        set_intr_masks(0, 0);
+        cpu.run(sys, &mut mem, 1);
+        guard += 1;
+    }
+    assert!(cpu.fault.is_none(), "{:?}", cpu.fault);
+    assert_eq!(cpu.ipsr, 0);
+    assert_eq!(mem.read32(0x20000170), 0x123);
+    assert!(!sys.p.nvic.borrow().is_in_interrupt(), "active stack balanced");
+}
 /// stack, LR=EXC_RETURN_PSP), `msr psp` to another task mid-handler (what
 /// PendSV does), return unstacks the NEW task. Asserts both frames.
 #[test]

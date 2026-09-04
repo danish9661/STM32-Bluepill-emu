@@ -732,11 +732,14 @@ pub fn exec16(cpu: &mut Cpu, sys: &WasmSystem, mem: &mut dyn Memory, op: u16, pc
     // SVC: synchronous exception. With delivery on, take it inline (exact
     // stacking, handler runs on MSP); otherwise loud fault (polling
     // firmware never SVCs, so hitting one is a bug worth surfacing).
+    // The active-priority push balances exception_return's pop, including
+    // an SVC taken inside a handler (nested).
     if o & 0xFF00 == 0xDF00 {
         if !cpu.deliver_irqs {
             return fault(cpu, pc, op, 0, 2);
         }
         adv(cpu, pc, 2);
+        sys.p.nvic.borrow_mut().push_active(-5);
         cpu.take_exception(sys, mem, -5);
         return true;
     }

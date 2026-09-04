@@ -76,6 +76,20 @@ impl Nvic {
         }
     }
 
+    /// Push an active-priority entry for a synchronously-taken exception
+    /// (SVC), which has no pending bit to pop via get_next_pending_intr.
+    /// Balanced by exactly one pop in `exception_return` (via
+    /// `clear_current_interrupt`), including nested entries.
+    pub fn push_active(&mut self, irq: i32) {
+        if irq == irq::NMI || irq == irq::HARD_FAULT {
+            if let Some(p) = Self::fixed_exception_priority(irq) {
+                self.active_prio_stack.push(p);
+                return;
+            }
+        }
+        self.active_prio_stack.push(self.exception_priority(irq));
+    }
+
     pub fn clear_pending(&mut self, irq: i32) {
         self.pending &= !(1u128 << (IRQ_OFFSET + irq));
         if let Some((idx, mask)) = Self::irq_reg_idx(irq) {

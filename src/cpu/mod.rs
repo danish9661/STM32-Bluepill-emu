@@ -8,15 +8,16 @@
 pub mod regs;
 pub mod mem;
 pub(crate) mod thumb;
-// NOTE: vendor `tests` module excluded for now — its harness needs firmware
-// .bins and helper fns that don't exist in this tree (monox SVD, blinky.bin,
-// init_svd_for_test, WasmCpu). Port selected tests once the core boots here.
-// #[cfg(test)]
-// mod tests;
+// NOTE: the vendored F407 `tests` module is deleted (it needed F407 SVD,
+// firmware images and harness shims that don't exist in this tree). Its
+// portable core — the SVC roundtrip + ISA snippet probes — lives in
+// `isa_tests.rs` on a firmware-free harness instead.
 #[cfg(test)]
 mod smoke;
 #[cfg(test)]
 mod core_tests;
+#[cfg(test)]
+mod isa_tests;
 pub use regs::Regs;
 pub use mem::Memory;
 use crate::system::WasmSystem;
@@ -163,9 +164,10 @@ impl Cpu {
 
     /// Take an exception: stack the context, load the handler from the
     /// vector table (via VTOR), set EXC_RETURN. Works for system exceptions
-    /// (negative irq) and external IRQs. No nesting in v1 (only called from
-    /// thread mode), but the stacking is fully hardware-shaped so ISRs run
-    /// unmodified, including FreeRTOS SVC/PendSV/SysTick handlers.
+    /// (negative irq) and external IRQs, thread mode and nested (a higher-
+    /// priority exception preempting a running handler stacks on MSP and
+    /// returns with EXC_RETURN_HANDLER), including FreeRTOS SVC/PendSV/
+    /// SysTick handlers.
     pub fn take_exception(&mut self, sys: &WasmSystem, mem: &mut dyn Memory, irq: i32) {
         let vector = (16 + irq) as u32;
         // Exception entry wakes the core (WFI sleeps until an interrupt is
@@ -212,9 +214,16 @@ impl Cpu {
         mem.write32(sp, self.regs.r[0]);
         // Handler mode always runs on MSP.
         self.regs.r[13] = self.regs.msp;
-        // LR = EXC_RETURN selecting the thread stack we came from.
-        self.regs.r[14] = if was_psp { EXC_RETURN_PSP } else { EXC_RETURN_MSP };
-        // ^ BUG: r13 must be the POST-PUSH sp, not stale msp! Fix below.
+        // LR selects the return stack: handler returns use EXC_RETURN_HANDLER
+        // (0xFFFFFFF1); thread returns select the bank we came from.
+        // (The stale `^ BUG` comment above was the pre-nesting confusion.)
+        self.regs.r[14] = if self.ipsr != 0 {
+            EXC_RETURN_HANDLER
+        } else if was_psp {
+            EXC_RETURN_PSP
+        } else {
+            EXC_RETURN_MSP
+        };
         self.regs.r[13] = sp;
         self.regs.msp = sp;
         // Hardware also advances the THREAD bank past the pushed frame, so a
@@ -225,11 +234,11 @@ impl Cpu {
             self.regs.psp = sp;
         }
         self.ipsr = vector;
-        // NOTE: the vendor NVIC had set_in_interrupt() here; this tree's
-        // NVIC tracks the active stack via the get_next_pending_intr() push /
-        // clear_current_interrupt() pop pair instead, so there is nothing to
-        // set (take_exception runs with the entry already pushed by the pop,
-        // or standalone for SVC with an empty stack — both consistent).
+        // NVIC active-priority accounting: whoever pops a pending IRQ pushes
+        // here. `get_next_pending_intr()` pops + pushes for dispatched IRQs;
+        // synchronous takes (SVC) push explicitly at their call sites via
+        // `push_active()` — every take is balanced by exactly one pop in
+        // `exception_return`, including nested entries.
         // Load handler PC through VTOR (model SCB, default 0x08000000).
         let vtor = sys.p.read(sys, 0xE000ED08, 4);
         let handler = mem.read32(vtor.wrapping_add(vector * 4));
@@ -237,7 +246,9 @@ impl Cpu {
     }
 
     /// Perform an exception return for an EXC_RETURN value in `exc`.
-    /// Returns false (with fault recorded) for unsupported returns.
+    /// 0xFFFFFFF9/0xFFFFFFFD return to thread (MSP/PSP bank); 0xFFFFFFF1
+    /// returns to the preempted handler (nested case). Returns false (with
+    /// fault recorded) for anything else.
     pub fn exception_return(
         &mut self,
         sys: &WasmSystem,
@@ -245,12 +256,8 @@ impl Cpu {
         exc: u32,
         pc: u32,
     ) -> bool {
-        if exc == EXC_RETURN_HANDLER {
-            // Return to handler mode (nested) — not supported in v1.
-            self.fault = Some(CpuFault { pc, op1: 0x4770, op2: 0, len: 2 });
-            return false;
-        }
-        if exc != EXC_RETURN_MSP && exc != EXC_RETURN_PSP {
+        let to_handler = exc == EXC_RETURN_HANDLER;
+        if !to_handler && exc != EXC_RETURN_MSP && exc != EXC_RETURN_PSP {
             self.fault = Some(CpuFault { pc, op1: 0x4770, op2: 0, len: 2 });
             return false;
         }
@@ -286,11 +293,14 @@ impl Cpu {
         // to match (hardware keeps them coherent; without this every
         // CONTROL-gated bank decision after the first return is wrong and
         // PendSV saves to a stale PSP — the FreeRTOS wedge). Bit0
-        // (privilege) is preserved.
-        if exc == EXC_RETURN_PSP {
-            self.regs.control |= 2;
-        } else {
-            self.regs.control &= !2;
+        // (privilege) is preserved. Handler-to-handler returns leave CONTROL
+        // alone (SPSEL is meaningless in handler mode).
+        if !to_handler {
+            if exc == EXC_RETURN_PSP {
+                self.regs.control |= 2;
+            } else {
+                self.regs.control &= !2;
+            }
         }
         // Restore the pre-exception IT state.
         if let Some(saved) = self.it_stack.pop() {
@@ -300,10 +310,16 @@ impl Cpu {
             self.it_idx = saved.idx;
         }
         let irq = self.exc_stack.pop();
-        self.ipsr = 0;
-        // Balance the active-priority push that get_next_pending_intr()
-        // performed on entry (mirrors finish_interrupt(); a standalone SVC
-        // pops an empty stack, which is a safe no-op).
+        // Resume the preempted context: outer handler's vector when nested,
+        // thread mode (0) otherwise. (Always-zero here was the nested-return
+        // bug: the core "returned" into thread mode mid-nest.)
+        self.ipsr = match self.exc_stack.last() {
+            Some(&outer) => (16 + outer) as u32,
+            None => 0,
+        };
+        // Balance the active-priority push for this entry: get_next's push
+        // for dispatched IRQs, the caller's push_active for synchronous
+        // takes (SVC). A standalone SVC on an empty stack is a safe no-op.
         sys.p.nvic.borrow_mut().clear_current_interrupt();
         // SysTick debt drain (mirrors finish_interrupt()): re-pend each
         // unconsumed 1ms tick so millis() tracks instruction time.
@@ -362,10 +378,13 @@ impl Cpu {
             }
             self.cycles += 1;
             // Inline interrupt delivery (no JS pump needed): take the next
-            // deliverable exception when in thread mode with PRIMASK clear.
-            // Stacking is exact, so the store completes, PC advances, then we
-            // stack the next PC (no mid-`str` hazard by construction).
-            if self.deliver_irqs && self.ipsr == 0 && self.regs.primask == 0 {
+            // deliverable exception with PRIMASK clear — in thread mode AND
+            // in handler mode, where a strictly-higher-priority IRQ preempts
+            // (nested). Priority vs the active stack is enforced inside
+            // get_next_pending_intr, so same-priority re-pends never nest and
+            // depth is bounded by priority levels. Stacking is exact, so the
+            // store completes, PC advances, then we stack the next PC.
+            if self.deliver_irqs && self.regs.primask == 0 {
                 let pending = sys.p.nvic.borrow().has_pending();
                 if pending {
                     // Bind first: `if let` would extend the borrow_mut guard
