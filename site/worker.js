@@ -29,7 +29,6 @@ let canInjected = false;
 const CAN_RAM_FLAG = 0x200000b8; // fallback when main thread sends no address
 let canFlagAddr = CAN_RAM_FLAG;
 let oledOff = null, lcdOff = null, oledCtx = null, lcdCtx = null;
-let sabView = null;
 
 // Pin activity buffer drained per frame
 let pinBuf = [];
@@ -108,10 +107,6 @@ async function handleMessage(e) {
       try { lcdCtx = lcdOff ? lcdOff.getContext('2d') : null; } catch {}
       break;
     }
-    case 'initSAB': {
-      try { sabView = new Int32Array(msg.sab); } catch {}
-      break;
-    }
   }
 }
 
@@ -148,9 +143,6 @@ function loop() {
   const regs = emu.getRegisters();
   const uartOut = emu.getUartOutput();
   const pins = pinBuf.splice(0);
-  if (sabView) {
-    try { Atomics.store(sabView, 0, lastResult ? lastResult.instCount : 0); Atomics.store(sabView, 1, regs.PC); Atomics.store(sabView, 2, regs.SP); Atomics.store(sabView, 3, runSteps); if (typeof Atomics.notify === 'function') Atomics.notify(sabView, 0, 1); } catch {}
-  }
   // OffscreenCanvas: render directly in worker if transferred, else send FB to main
   let oledFb = null, lcdFb = null, rgbDuty = null, buzz = null;
   if (oledCtx) {
@@ -213,7 +205,7 @@ function loop() {
     post('stopped');
     return;
   }
-  // SAB fast path: when crossOriginIsolated, queueMicrotask is ~0ms vs setTimeout 4ms clamp
-  if (typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated) queueMicrotask(loop);
-  else setTimeout(loop, 0);
+  // Always yield via macrotask so control messages (stop/uartRx/
+  // gpioSetInput) interleave with emulation while running.
+  setTimeout(loop, 0);
 }

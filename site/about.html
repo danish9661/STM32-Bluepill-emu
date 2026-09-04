@@ -247,8 +247,8 @@ timing, interrupts and electrical behaviour, all in one WebAssembly module.</p>
 <h2>At a glance</h2>
 <div class="stat-grid">
     <div class="stat"><b>~23 MIPS</b><span>headless (50M/~2.1s, pure 26.5)</span></div>
-    <div class="stat"><b>~21 MIPS</b><span>browser direct run (200M/9.3s, SAB OFF)</span></div>
-    <div class="stat"><b>9.22 vs 8.65</b><span>loop SAB ON vs OFF (+6.6%)</span></div>
+    <div class="stat"><b>~21 MIPS</b><span>browser direct run (200M/9.3s)</span></div>
+    <div class="stat"><b>~96 MIPS</b><span>browser direct run, native CPU</span></div>
     <div class="stat"><b>236/236</b><span>peripheral unit tests</span></div>
     <div class="stat"><b>39/39</b><span>integration checks</span></div>
     <div class="stat"><b>30+</b><span>emulated peripherals</span></div>
@@ -260,7 +260,7 @@ timing, interrupts and electrical behaviour, all in one WebAssembly module.</p>
 <ol>
     <li><strong>Rust CPU</strong> &mdash; a native Thumb-2 interpreter executes Cortex-M3 instructions in <strong>adaptive 20K/50K batches</strong> (20K when IRQ/DMA pending, 50K idle; <code>batch_size</code> overrides), with exact instruction accounting.</li>
     <li><strong>Rust Peripheral WASM</strong> &mdash; the same WebAssembly module models every chip register with cycle-accurate timing, electrical behaviour (GPIO pull-ups, open-drain, slew), interrupt priorities and DMA transfers.</li>
-    <li><strong>Module Worker + OffscreenCanvas + SAB</strong> &mdash; browser emulation runs off-main-thread (<code>site/worker.js:1</code>, <code>site/index.html:449</code>); canvas is transferred via <code>OffscreenCanvas</code> (<code>site/worker.js:117</code>); <code>SharedArrayBuffer</code> + <code>Atomics</code> (<code>site/worker.js:163</code>) shares frame stats when <code>crossOriginIsolated</code> (<code>site/_headers:1</code>), with <code>coi-serviceworker.js</code> polyfill for GitHub Pages (SAB ON +6.6%).</li>
+    <li><strong>Module Worker + OffscreenCanvas</strong> &mdash; browser emulation runs off-main-thread (<code>site/worker.js:1</code>, <code>site/index.html:449</code>); canvas is transferred via <code>OffscreenCanvas</code> (<code>site/worker.js:117</code>); frame stats ride the per-frame message (a SharedArrayBuffer channel was removed — it had no readers and its scheduler starved worker controls).</li>
 </ol>
 </div>
 
@@ -285,7 +285,7 @@ timing, interrupts and electrical behaviour, all in one WebAssembly module.</p>
     <li><strong>Closed-form timer advance</strong> &mdash; CNT jumps to next event tick (124&times; on <code>advance()</code>).</li>
     <li><strong>Adaptive 20K/50K batch</strong> (<code>pkg/emulator.js:698</code>) &mdash; 20K keeps IRQ latency ≈1.1 ms; 50K doubles idle throughput, free when idle.</li>
     <li><strong>REG_POOL pooling</strong> (<code>pkg/emulator.js:228</code>) &mdash; batch register transport reuses 3 mallocs (384 allocs/40M → pooled).</li>
-    <li><strong>Worker + OffscreenCanvas + SAB</strong> (<code>site/worker.js:1</code>) &mdash; off-main-thread + zero-copy canvas + <code>SharedArrayBuffer</code> (<code>site/worker.js:163</code>) + <code>queueMicrotask</code> (<code>site/worker.js:220</code>) vs <code>setTimeout 4ms</code>; browser 8.6 MIPS headed, SAB ON +6.6%.</li>
+    <li><strong>Worker + OffscreenCanvas</strong> (<code>site/worker.js:1</code>) &mdash; off-main-thread + zero-copy canvas; the loop always yields via <code>setTimeout</code> so stop/UART/GPIO controls stay live; browser 8.6 MIPS headed.</li>
     <li><strong>UI_THROTTLE 10</strong> (<code>site/index.html:441</code>) &mdash; DOM 6fps vs emulation 60fps decoupling.</li>
     <li><strong>Bus binary search + Rust DMA pump</strong> &mdash; sorted-vector lookup (~99% hit) + DMA resolved entirely in Rust (flat op-plan).</li>
 </ul>
@@ -464,7 +464,7 @@ emu.<span class="n">close</span>();                        <span class="c">// fr
 
 <h2>Browser demo features</h2>
 <p style="font-size:13px; color:#64748b; margin-bottom:8px;">
-The live demo (<a href="index.html">index.html</a>) runs entirely in the browser with no server needed &mdash; just open the page or serve it with <code>python3 -m http.server -d site</code>. Worker off-thread + OffscreenCanvas + SAB dual-mode + adaptive batch + <code>batch_size</code> option (<code>site/worker.js:1</code>, <code>site/_headers:1</code>, <code>pkg/emulator.js:217</code>) — see <code>docs/USAGE.md</code>. Badge shows <code>SAB ON/OFF</code> (<code>site/index.html:300</code>, both work).
+The live demo (<a href="index.html">index.html</a>) runs entirely in the browser with no server needed &mdash; just open the page or serve it with <code>python3 -m http.server -d site</code>. Worker off-thread + OffscreenCanvas + adaptive batch + <code>batch_size</code> option (<code>site/worker.js:1</code>, <code>pkg/emulator.js</code>) — see <code>docs/USAGE.md</code>.
 </p>
 
 <h3>10 built-in presets</h3>
@@ -587,7 +587,7 @@ The emulator has a three-tier test suite that runs in CI on every push:
 
 <details>
   <summary>How fast is it?</summary>
-  <div class="faq-body"><strong>Headless (Node CLI)</strong>: <strong>~23 MIPS</strong> (50M in ~2.1s, pure compute 26.5 MIPS); emulator.js path 200M in 8.2s. <strong>Browser direct run</strong> (headless Chromium): 200M in 9.3s (<strong>~21.5 MIPS</strong>, SAB OFF) — parity with Node since the CAN-autopilot timing fix (a stale flag address used to cost 3M-iteration spin storms). <strong>Interactive page loop</strong>: 8.6 MIPS headed (frame-budgeted); <strong>SAB ON 9.22 vs OFF 8.65 = +6.6%</strong> on the loop scheduler — SAB uses <code>SharedArrayBuffer</code> + <code>Atomics</code> (<code>site/worker.js:163</code>) when <code>crossOriginIsolated</code> (<code>site/_headers:1</code>); <code>coi-serviceworker.js</code> polyfills GitHub Pages (still works, just slower). The Rust interpreter is ~99% of wall time; JS/Rust layer ~1%. See <code>docs/ARCHITECTURE.md</code>.</div>
+  <div class="faq-body"><strong>Headless (Node CLI)</strong>: <strong>~23 MIPS</strong> (50M in ~2.1s, pure compute 26.5 MIPS); emulator.js path 200M in 8.2s. <strong>Browser direct run</strong> (headless Chromium): 200M in 9.3s (<strong>~21.5 MIPS</strong>) — parity with Node since the CAN-autopilot timing fix (a stale flag address used to cost 3M-iteration spin storms). <strong>Interactive page loop</strong>: 8.6 MIPS headed (frame-budgeted). The Rust interpreter is ~99% of wall time; JS/Rust layer ~1%. See <code>docs/ARCHITECTURE.md</code>.</div>
 </details>
 
 <details>

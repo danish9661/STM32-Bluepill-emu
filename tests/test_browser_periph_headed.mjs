@@ -1,21 +1,16 @@
 // Headed full-firmware test through the real page (worker run-loop), in the
-// exact end-user environment: reload first so the coi-serviceworker polyfill
-// has activated (SAB ON state), then load + run the periph37 preset and wait
-// for SUMMARY. TARGET=local runs against localhost:8765, default is live Pages.
+// exact end-user environment: load + run the periph37 preset and wait for
+// SUMMARY. TARGET=local runs against localhost:8765, default is live Pages.
 import { test, expect } from '@playwright/test';
 const TARGETS = {
   live: 'https://danish9661.github.io/STM32-Bluepill-emu',
   local: 'http://localhost:8765',
 };
 const which = process.env.TARGET === 'local' ? 'local' : 'live';
-test(`periph37 via page, SAB-ON headed (${which})`, async ({ page }) => {
+test(`periph37 via page, headed (${which})`, async ({ page }) => {
   page.on('pageerror', e => console.log('PAGEERROR:', String(e).slice(0, 200)));
   await page.goto(TARGETS[which] + '/', { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(4000);
-  await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.waitForTimeout(4000);
-  const sab = await page.locator('#sabBadge').textContent();
-  console.log('SAB state:', sab);
   await page.selectOption('#presetSelect', 'periph37');
   await page.click('#loadPresetBtn');
   await expect(page.locator('#runBtn')).toBeEnabled({ timeout: 60000 });

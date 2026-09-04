@@ -33,18 +33,16 @@ Browser dual-mode (`site/index.html:16`, `site/worker.js:1`, `site/_headers:1`):
   │  worker.js: createEmulator + step loop @ ~60fps / 80ms budget (site/worker.js:130)   │
   │  worker posts {frame, pins, uartOut, oledFb/lcdFb, rgbDuty, buzz} → main renders     │
   │  OffscreenCanvas: main transfers canvas → worker renders directly (site/worker.js:117) │
-  │  SAB fast path when crossOriginIsolated (site/worker.js:123, site/_headers:1):        │
-  │    SharedArrayBuffer 32B [instCount, PC, SP, runSteps] + Atomics.store/notify        │
-  │    queueMicrotask loop (~0ms) vs setTimeout 4ms clamp when not isolated              │
   │  UI_THROTTLE 10: step every rAF, render visuals every 10th frame (site/index.html:441)│
   └────────────────────────────────────────────────────────────────────────────────────────┘
   ┌─ Main-thread fallback ──────────────────────────────────────────────────────┐
   │  requestAnimationFrame(runLoop) (site/index.html:1034) when Worker unavailable       │
   │  same adaptive 20K/50K batch + UI_THROTTLE 10 DOM decoupling                         │
   └────────────────────────────────────────────────────────────────────────────────────────┘
-  SAB dual-mode (`site/coi-serviceworker.js:1`, `site/index.html:300` badge):
-    COOP/COEP headers present → crossOriginIsolated=true → SAB ON (zero-copy, faster)
-    GitHub Pages (no headers) → coi-serviceworker polyfill → SAB OFF → still works
+  (Removed 2026-09: the SharedArrayBuffer frame-stats channel had no reader —
+  `window._sabView` was written and never read — while its `queueMicrotask`
+  scheduler starved worker control messages and the coi-serviceworker polyfill
+  intercepted every fetch. The loop always yields via `setTimeout` now.)
 ```
 
 ## The two modules
@@ -193,10 +191,10 @@ each enabled bank (`BCR.MBKEN`, writes also need `BCR.WREN`) reads/writes a JS-b
 byte image (`add_fsmc_bank('FSMC.BANK1', data)`) at its 0x6000_0000+ window, with
 byte/16/32-bit accesses. NAND/PC-Card banks are always enabled.
 
-## Worker + SAB + OffscreenCanvas + adaptive batch & pooling
+## Worker + OffscreenCanvas + adaptive batch
 
 - **Worker** (`site/worker.js:1`, `site/index.html:449`): module Worker (`{type:'module'}`) runs `createEmulator` + `emu.step()` loop at ~60fps (80ms budget, `site/worker.js:130`). Main thread keeps DOM/canvas; worker posts `{frame, pins, uartOut, oledFb/lcdFb, rgbDuty, buzz}` per frame (`site/worker.js:199`). Fallback is main-thread `requestAnimationFrame(runLoop)` (`site/index.html:1034`) when Worker unavailable. Both paths share the same `emulator.js` batch logic.
-- **SAB dual-mode** (`site/_headers:1`, `site/coi-serviceworker.js:1`, `site/index.html:16`, `site/index.html:300`, `site/worker.js:123`): `Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: require-corp` → `crossOriginIsolated=true` → `SharedArrayBuffer` 32B `[instCount, PC, SP, runSteps]` written with `Atomics.store`/`Atomics.notify` (`site/worker.js:163`). Loop uses `queueMicrotask(loop)` when isolated (~0ms, `site/worker.js:220`) vs `setTimeout 4ms` clamp otherwise. GitHub Pages has no headers → `coi-serviceworker.js` polyfill registers a ServiceWorker that injects COOP/COEP and reloads; SAB badge (`site/index.html:300`) shows `SAB ON` (green) or `SAB OFF` (grey) — both modes work, ON is +6.6% faster.
+- **No SharedArrayBuffer** (removed 2026-09): the 32B `[instCount, PC, SP, runSteps]` channel was written every frame but never read, its `queueMicrotask` scheduler starved worker control messages (stop/uart/gpio arrive as macrotasks), and the coi-serviceworker polyfill intercepted every fetch. Frame stats ride the existing per-frame `postMessage`; the loop always yields via `setTimeout`.
 - **OffscreenCanvas** (`site/worker.js:117`, `site/index.html:977`): main transfers `oledCanvas`/`lcdCanvas` via `transferControlToOffscreen()` to worker; worker renders via `OffscreenCanvas.getContext('2d')` directly (`site/worker.js:168`, `site/worker.js:185`). If transfer fails (Safari/no support) worker sends framebuffers to main for rendering — no capability loss.
 - **Adaptive batch**: `curBatch = (anyPending || dmaBusy) ? 20K : 50K` (`batch_size` opt overrides adaptive). 20K keeps IRQ latency ≈1.1 ms when active; 50K doubles idle throughput. Measured free vs fixed 20K.
 - **UI_THROTTLE 10** (`site/index.html:441`, `site/index.html:1082`): DOM decoupling — `step()` runs every `rAF` frame (~60fps) for full throughput; visuals (`renderBoard`, `renderGpio`, `renderShowcase`, `updateRegs`) run only every 10th frame (~6fps). Stepping is never starved by rendering; this lifted headed browser from 4.5 → 8.6 MIPS before Worker, and with Worker keeps main thread ~6fps paint.
@@ -219,9 +217,9 @@ artifact skip, hook poll-shrinking, and the SVC mirror.)
 | Headless Rust CPU (`--cpu=rust`, periph39) | **72–75 MIPS** — 200M in ~2.7s, 39/39 (`docs/PATH_B.md`) |
 | Emulator.js path (Node, periph39) | **~24 MIPS** — 200M in 8.2s (`tests/test_emulator_js.mjs`) |
 | Emulator.js Rust CPU (`cpu:'rust'`) | **~70 MIPS** — 200M in ~2.8s, 39/39 (`tests/test_rustcpu.mjs`) |
-| Browser direct run (headless Chromium) | **~21.5 MIPS** — 200M in 9.3s, SAB OFF (`tests/test_browser.mjs`) — parity with Node since the CAN-autopilot fix below |
+| Browser direct run (headless Chromium) | **~21.5 MIPS** — 200M in 9.3s (`tests/test_browser.mjs`) — parity with Node since the CAN-autopilot fix below |
 | Browser interactive loop | **8.6 MIPS** headed (frame-budgeted rAF/worker loop, `site/worker.js:130`); headless rAF throttled |
-| SAB ON vs OFF (browser loop) | 9.22 MIPS (ON) vs 8.65 MIPS (OFF) = **+6.6%** (`site/_headers:1`, `site/worker.js:163`) |
+| SAB removal (browser loop) | mechanism deleted 2026-09 (unread channel + starved controls); loop throughput unchanged within noise |
 | Batch | **adaptive 20K/50K** — 20K when IRQ/DMA pending (≈1.1 ms latency), 50K idle (`pkg/emulator.js:698`, `pkg/cli.mjs:632`); `batch_size` overrides (`pkg/emulator.js:217`) |
 | Memory | stable ~150 MB RSS, no growth with instruction count |
 | Per-batch crossings | one `rustcpu_run` + tick + pump + dispatch; interpreter ~99% of runtime (profiled) |
@@ -232,7 +230,7 @@ Historical optimizations, in order: per-instruction tick → once-per-batch `ste
 only remaining O(ticks) loop was `tim.rs advance()`, rewritten to jump directly
 to update/compare-match event ticks with bit-identical event sets), **adaptive 20K/50K**
 (idle throughput, free), **REG_POOL pooling** (pkg/emulator.js:228 — 384 allocs/40M → pooled),
-**Worker + OffscreenCanvas + SAB** (site/worker.js:1 — browser loop 8-9 MIPS, +6.6% SAB),
+**Worker + OffscreenCanvas** (site/worker.js:1 — browser loop 8-9 MIPS; SAB deleted),
 **UI_THROTTLE 10** (site/index.html:441 — DOM 6fps, step 60fps; never starves emulation),
 **CAN-autopilot symbol resolution** (all drivers parseElf-resolve `canRxArmed` instead of
 a hardcoded address that went stale: emulator.js 200M 12.45s → 8.18s, browser 9.2 → 21.8 MIPS),
