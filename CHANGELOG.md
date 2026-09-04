@@ -2,12 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] — native Rust CPU replaces Unicorn
+## [2.0.0] — 2026-09-04 — native Rust CPU replaces Unicorn
 - CPU backend is now the vendored pure-Rust ARMv7-M interpreter
   (`src/cpu/`): Unicorn binaries, mem hooks, `mrs`/`i2c_init` patches, the
   SVC mirror and the `--cpu`/`cpu`/`?cpu` options are gone (single backend)
 - ~3.5x faster headless (periph39 200M: ~9.5s → ~2.7s, 72-75 MIPS),
   ~96 MIPS in headless Chromium; exact instruction accounting
+### Breaking
+- Unicorn removed: `unicorn_arm.cjs/.js` gone (~1.6MB), no `--cpu`/`cpu`/`?cpu`
+  options, no `mrs`/`i2c_init` patches, no mem hooks, no SVC mirror
+- `BluepillEmulator` drops `uc`, `Module`, `tick()`, `stepBatch()`,
+  `hasPendingInterrupt()`, `getNextPendingInterrupt()`, `setIntrMasks()`;
+  adds `dmaPending()`, `usbInjectSetup/Out()`, `memRead32()`, `batch_size` opt
+  (types in `pkg/emulator.d.ts` rewritten to match)
+- `tests/test_unicorn.cjs`, `test_svd_run.cjs` deleted; `test_esm.mjs` now
+  smokes the ESM glue + native backend API; new `tests/test_bus_tap.mjs`
 - New: `src/peripherals/dwt.rs` (DWT CYCCNT for `micros()`/I2C recovery),
   native firmware gallery + inline-IRQ/WFI/PSP core tests, bus-tap parity
   test (`tests/test_bus_tap.mjs`), in-page 7-seg decode test

@@ -83,6 +83,8 @@ export interface CreateEmulatorOptions {
   ext_devices?: ExtDevices;
   /** Print init info to console. */
   verbose?: boolean;
+  /** Fixed batch size (overrides the adaptive 20K/50K policy). */
+  batch_size?: number;
 }
 
 // ── Register set returned by getRegisters() ─────────────────────────────────
@@ -109,28 +111,20 @@ export interface StepResult {
 }
 
 export interface BluepillEmulator {
-  /** Raw Unicorn ARM engine handle. */
-  readonly uc: any;
-  /** Emscripten module (ARM_REG_*, HOOK_*, etc.). */
-  readonly Module: any;
+  /** Raw 32-bit word read (used by drivers for RAM flags). */
+  read32: (addr: number) => number;
+  /** Raw 32-bit word write. */
+  write32: (addr: number, val: number) => void;
 
   // ── Execution ─────────────────────────────────────────────────────────────
 
-  /** Run up to N instructions (0 = forever). Loops batches of 20K. */
+  /** Run up to N instructions (0 = forever). Loops adaptive 20K/50K batches. */
   run(maxInstructions?: number): RunResult;
   /** Run one batch (default 20K instructions), process DMA/interrupts/pin events. */
   step(maxBatch?: number): StepResult;
   /** Request stop of a running run() loop. */
   stop(): void;
-  /** Tick all peripherals once. */
-  tick(): void;
-  /** Process a batch of N instructions in one WASM call. Returns 0=ok, 1=watchdog. */
-  stepBatch(count: number): number;
-  /** Check if any interrupt is pending. */
-  hasPendingInterrupt(): boolean;
-  /** Get next pending IRQ number. */
-  getNextPendingInterrupt(): number;
-  /** Tear down the emulator. */
+  /** Tear down the emulator (no-op; state resets on init). */
   close(): void;
 
   // ── CPU state ─────────────────────────────────────────────────────────────
@@ -165,6 +159,8 @@ export interface BluepillEmulator {
   uartRxBytes(bytes: Uint8Array | number[]): boolean;
   /** Unread bytes in UART RX buffer. */
   rxPending(): number;
+  /** True while a DMA transfer is queued. */
+  dmaPending(): boolean;
 
   // ── GPIO ──────────────────────────────────────────────────────────────────
 
@@ -195,6 +191,10 @@ export interface BluepillEmulator {
 
   /** Inject CAN message; returns true if accepted. */
   canInjectMessage(addr: number, tir: number, tdtr: number, tdlr: number, tdhr: number): boolean;
+  /** Inject a USB SETUP packet (8 bytes) into EP0. Returns false when NAKed. */
+  usbInjectSetup(bytes: Uint8Array): boolean;
+  /** Inject a USB OUT packet into an endpoint. Returns false when NAKed. */
+  usbInjectOut(ep: number, bytes: Uint8Array): boolean;
 
   // ── Bus observers ─────────────────────────────────────────────────────────
 
@@ -241,10 +241,6 @@ export interface BluepillEmulator {
 
   /** Register rp2040js-style custom peripheral. */
   addJsPeripheral(base: number, size: number, read: (addr: number, size: number) => number, write: (addr: number, value: number, size: number) => void): boolean;
-  /** Set PRIMASK and BASEPRI values. */
-  setIntrMasks(primask: number, basepri: number): void;
-  /** Write 32-bit word to emulated memory. */
-  write32(addr: number, val: number): void;
 }
 
 /** Create a full STM32F103C8 emulator instance. */

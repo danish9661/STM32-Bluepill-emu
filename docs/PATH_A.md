@@ -1,7 +1,12 @@
-# Path A — Investigation & Decision (ABANDONED)
+# Path A — Investigation & Decision (ABANDONED, MOOT)
 
 > Status: **abandoned**. The dual-module architecture is the supported product.
 > See `AGENTS.md` ("Next Phase — Long-term Optimizations", item 1) for context.
+>
+> Historical note (2026-09-04): this experiment proposed linking the Rust
+> peripherals with the Unicorn C engine. Unicorn has since been removed
+> outright (see `docs/PATH_B.md`) — there is nothing left to link. Preserved
+> as a record; the Unicorn references below describe the old architecture.
 
 ## Goal
 
