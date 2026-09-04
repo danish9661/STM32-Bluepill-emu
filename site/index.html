@@ -426,6 +426,14 @@ if (sabBadge) {
 let emu = null;
 let worker = null;
 let useWorker = false;
+// CPU backend override for benchmarking: ?cpu=rust selects the native Path B
+// interpreter (no unicorn_arm.js needed); default is Unicorn. Applies to both
+// the worker and main-thread paths.
+const cpuBackend = (() => {
+  try {
+    return new URLSearchParams(location.search).get('cpu') === 'rust' ? 'rust' : 'unicorn';
+  } catch { return 'unicorn'; }
+})();
 let firmwareData = null;
 let symbolsData = null;
 let animId = null;
@@ -990,7 +998,7 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
         const svdForWorker = (chipSel === 'stm32f103c8' && svdXml) ? svdXml : undefined;
         // autoBytes for periph_test autopilot
         const ab = (name.includes('periph_test') || name.includes('arduino_periph_test')) ? [0x41, 0x42] : [];
-        worker.postMessage({ type: 'init', firmware: data, chip, svd: svdForWorker, ext_devices: extDevices, autoBytes: ab, canFlagAddr });
+        worker.postMessage({ type: 'init', firmware: data, chip, svd: svdForWorker, ext_devices: extDevices, autoBytes: ab, canFlagAddr, cpu: cpuBackend });
         // Try OffscreenCanvas transfer for showcase (worker renders directly, no copy)
         try {
           if (typeof OffscreenCanvas !== 'undefined' && $('oledCanvas')?.transferControlToOffscreen) {
@@ -1029,9 +1037,10 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
             ram_size: 0x5000,
             vector_table: 0x08000000,
             ext_devices: extDevices,
+            cpu: cpuBackend,
         });
         emu.onPinChange(onPinActivity);
-        log(`Loaded ${name} on ${chipSel === 'stm32f105' ? 'STM32F105' : 'STM32F103C8'} (${data.length} bytes). PC=0x${emu.getRegisters().PC.toString(16).padStart(8, '0')}`);
+        log(`Loaded ${name} on ${chipSel === 'stm32f105' ? 'STM32F105' : 'STM32F103C8'} (${data.length} bytes, cpu=${cpuBackend}). PC=0x${emu.getRegisters().PC.toString(16).padStart(8, '0')}`);
         if (symbolsData) emu.setSymbols(symbolsData);
         $('runBtn').disabled = false;
         $('stopBtn').disabled = true;
