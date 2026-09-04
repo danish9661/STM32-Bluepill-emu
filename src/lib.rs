@@ -7,6 +7,7 @@ mod interrupts;
 pub mod peripherals;
 pub mod ext_devices;
 pub mod cpu;
+pub mod native;
 
 use system::{WasmSystem, VmEvent};
 
@@ -100,6 +101,7 @@ pub fn init() {
     console_error_panic_hook::set_once();
     system::INSTRUCTION_COUNT.store(0, Ordering::Relaxed);
     peripherals::gpio::clear_pin_events();
+    native::reset();
     set_sys(WasmSystem::new());
 }
 
@@ -110,6 +112,7 @@ pub fn init_svd(svd_xml: &str) {
     console_error_panic_hook::set_once();
     system::INSTRUCTION_COUNT.store(0, Ordering::Relaxed);
     peripherals::gpio::clear_pin_events();
+    native::reset();
     set_sys(WasmSystem::new_svd(svd_xml));
 }
 

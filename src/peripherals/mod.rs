@@ -500,6 +500,13 @@ impl Peripherals {
             v |= (value & 1) << bit_number;
             return self.write(sys, addr, 1, v);
         }
+        // Native-backend bus tap (onPeriphWrite parity): the Unicorn path
+        // feeds write watchers from memWriteHook; Rust→Rust model writes
+        // never cross JS, so record them here (translated address, once).
+        // Gated: the Unicorn driver never enables it (no double-fire).
+        if crate::native::write_tap_enabled() {
+            crate::native::record_write(addr, size, value);
+        }
         // NVIC priority registers are byte-addressable, bypass alignment
         if Self::nvic_priority_check(addr) {
             self.nvic.borrow_mut().write(sys, addr - Self::NVIC_REGS_BASE, value);

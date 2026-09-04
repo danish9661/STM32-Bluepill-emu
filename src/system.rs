@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicBool, AtomicI32, AtomicU8, Ordering};
 use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -123,6 +124,10 @@ pub struct WasmSystem {
     /// Interrupt-dispatch policy state (batch budget, SVC mirror) — shared by
     /// cli.mjs and emulator.js so both use one implementation.
     pub intr: RefCell<crate::interrupts::IntrDispatch>,
+    /// Set when I2C1 DR is written with the R-bit set; the native driver
+    /// drains it per batch for the hi2c Mode RAM patch (same condition as
+    /// the Unicorn memWriteHook). Taken (cleared) on read.
+    pub i2c_dr_hook: Cell<bool>,
 }
 
 impl WasmSystem {
@@ -135,7 +140,8 @@ impl WasmSystem {
         Self::register_touchscreen_gpios(&p);
         WasmSystem { p, pending_dma: RefCell::new(Vec::new()), absorb_buf: RefCell::new(Vec::new()),
             event_queue: RefCell::new(Vec::new()), spi_miso: RefCell::new(HashMap::new()),
-            i2c_rx: RefCell::new(HashMap::new()), intr: RefCell::new(crate::interrupts::IntrDispatch::default()) }
+            i2c_rx: RefCell::new(HashMap::new()), intr: RefCell::new(crate::interrupts::IntrDispatch::default()),
+            i2c_dr_hook: Cell::new(false) }
     }
 
     pub fn new_svd(svd_xml: &str) -> Self {
@@ -147,7 +153,8 @@ impl WasmSystem {
         Self::register_touchscreen_gpios(&p);
         WasmSystem { p, pending_dma: RefCell::new(Vec::new()), absorb_buf: RefCell::new(Vec::new()),
             event_queue: RefCell::new(Vec::new()), spi_miso: RefCell::new(HashMap::new()),
-            i2c_rx: RefCell::new(HashMap::new()), intr: RefCell::new(crate::interrupts::IntrDispatch::default()) }
+            i2c_rx: RefCell::new(HashMap::new()), intr: RefCell::new(crate::interrupts::IntrDispatch::default()),
+            i2c_dr_hook: Cell::new(false) }
     }
 
     fn register_software_spis(p: &Peripherals) {
