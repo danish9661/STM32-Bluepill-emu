@@ -1,6 +1,7 @@
 // Browser speed benchmark: runs a fixed instruction window in real Chromium
-// via the shipped WASM stack (emulator.js + stm32_bluepill_wasm_bg.wasm +
-// unicorn_arm.js) and reports MIPS for hardcoded vs SVD bus, same firmware +
+// via the shipped WASM stack (emulator.js + stm32_bluepill_wasm_bg.wasm,
+// native Rust CPU + Rust peripherals in one module) and reports MIPS for
+// hardcoded vs SVD bus, same firmware +
 // devices + gated UART/CAN feed as the Node runs.
 import { test, expect } from '@playwright/test';
 
