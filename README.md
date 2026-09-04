@@ -85,7 +85,6 @@ emu.close();
 ### Browser
 
 ```html
-<script src="unicorn_arm.js"></script>
 <script type="module">
   import { STM32F1 } from 'stm32f1-emu';
 
@@ -261,7 +260,7 @@ const emu = await createEmulator({
 | `run(maxInstructions?)` | `{ totalSteps, instCount, stopped }` | Run up to N instructions (0 = forever) |
 | `step(maxBatch?)` | `{ pc, instCount, stopped }` | Run one batch (default 20K instructions) |
 | `stop()` | `void` | Request stop |
-| `close()` | `void` | Tear down Unicorn instance |
+| `close()` | `void` | Release the emulator instance (no-op teardown) |
 
 ### Registers & Memory
 
@@ -438,5 +437,3 @@ MIT — see [LICENSE](LICENSE).
 
 ## Acknowledgements
 
-- [AlexAltea/unicorn.js](https://github.com/AlexAltea/unicorn.js) — JavaScript / WebAssembly port of the Unicorn ARM CPU emulator.
-- [Unicorn Engine](https://www.unicorn-engine.org/) — Multi-architecture CPU emulator framework based on QEMU.

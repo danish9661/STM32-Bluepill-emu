@@ -4,10 +4,10 @@
 <meta charset="UTF-8">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="About the STM32F103C8 Blue Pill emulator — a full-system microcontroller emulator that runs real Arduino firmware in the browser and Node.js, powered by WebAssembly (WASM) and the Unicorn ARM CPU emulator.">
+<meta name="description" content="About the STM32F103C8 Blue Pill emulator — a full-system microcontroller emulator that runs real Arduino firmware in the browser and Node.js, powered by WebAssembly (WASM) and a native Rust ARM CPU emulator.">
 <meta name="keywords" content="STM32 emulator, Bluepill emulator, STM32F103C8 emulator, ARM Cortex-M3, Arduino firmware emulation, run Arduino in browser, embedded emulator, WASM emulator">
 <meta property="og:title" content="About — STM32 Bluepill Emulator">
-<meta property="og:description" content="Full-system STM32F103C8 emulation running real Arduino firmware in the browser via WASM + Unicorn ARM.">
+<meta property="og:description" content="Full-system STM32F103C8 emulation running real Arduino firmware in the browser via WASM + a native Rust ARM core.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="https://danish9661.github.io/STM32-Bluepill-emu/og-image.png">
 <meta property="og:url" content="https://danish9661.github.io/STM32-Bluepill-emu/about.html">
@@ -18,7 +18,7 @@
   "@type": "SoftwareApplication",
   "name": "STM32 Bluepill Emulator",
   "alternateName": "STM32F103C8 Emulator",
-  "description": "Full-system emulator for the STM32F103C8 Blue Pill microcontroller that runs real Arduino firmware in the browser and Node.js via WebAssembly (WASM) and the Unicorn ARM Cortex-M3 CPU emulator.",
+  "description": "Full-system emulator for the STM32F103C8 Blue Pill microcontroller that runs real Arduino firmware in the browser and Node.js via WebAssembly (WASM) and a native Rust ARM Cortex-M3 CPU emulator.",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Web, Node.js",
   "url": "https://danish9661.github.io/STM32-Bluepill-emu/about.html",
@@ -217,11 +217,11 @@ footer a:hover { color: #7dd3fc; text-decoration: underline; }
 unmodified firmware</strong> &mdash; compiled Arduino sketches (STM32duino), libopencm3 and
 STM32Cube HAL programs &mdash; in your browser or in Node.js, without any hardware.</p>
 
-<p>Instead of a simplified instruction interpreter, it combines two real engines:
-<strong>Unicorn</strong>, the ARM <strong>Cortex-M3</strong> CPU emulator (compiled to
-WebAssembly), and a <strong>Rust peripheral emulator</strong> that implements the chip&rsquo;s
-registers &mdash; GPIO, USART, SPI, I2C, TIM, ADC, DAC, DMA, CAN, RTC, CRC, NVIC, EXTI, FSMC
-and more &mdash; with realistic timing, interrupts and electrical behaviour.</p>
+<p>Instead of a simplified instruction interpreter, it runs a native
+<strong>Rust Cortex-M3</strong> CPU interpreter plus a <strong>Rust peripheral
+emulator</strong> that implements the chip&rsquo;s registers &mdash; GPIO, USART, SPI,
+I2C, TIM, ADC, DAC, DMA, CAN, RTC, CRC, NVIC, EXTI, FSMC and more &mdash; with realistic
+timing, interrupts and electrical behaviour, all in one WebAssembly module.</p>
 </div>
 
 <div class="badge-row">
@@ -258,19 +258,19 @@ and more &mdash; with realistic timing, interrupts and electrical behaviour.</p>
 <div class="card">
 <p>The emulator uses a <strong>dual-engine architecture</strong>:</p>
 <ol>
-    <li><strong>Unicorn ARM</strong> &mdash; a QEMU-based TCG JIT compiler executes Cortex-M3 Thumb/Thumb-2 instructions in <strong>adaptive 20K/50K batches</strong> (<code>pkg/emulator.js:698</code> — 20K when IRQ/DMA pending, 50K idle; <code>batch_size</code> overrides). This gives native-like CPU speed without a custom decoder.</li>
-    <li><strong>Rust Peripheral WASM</strong> &mdash; a WebAssembly module models every chip register with cycle-accurate timing, electrical behaviour (GPIO pull-ups, open-drain, slew), interrupt priorities and DMA transfers.</li>
+    <li><strong>Rust CPU</strong> &mdash; a native Thumb-2 interpreter executes Cortex-M3 instructions in <strong>adaptive 20K/50K batches</strong> (20K when IRQ/DMA pending, 50K idle; <code>batch_size</code> overrides), with exact instruction accounting.</li>
+    <li><strong>Rust Peripheral WASM</strong> &mdash; the same WebAssembly module models every chip register with cycle-accurate timing, electrical behaviour (GPIO pull-ups, open-drain, slew), interrupt priorities and DMA transfers.</li>
     <li><strong>Module Worker + OffscreenCanvas + SAB</strong> &mdash; browser emulation runs off-main-thread (<code>site/worker.js:1</code>, <code>site/index.html:449</code>); canvas is transferred via <code>OffscreenCanvas</code> (<code>site/worker.js:117</code>); <code>SharedArrayBuffer</code> + <code>Atomics</code> (<code>site/worker.js:163</code>) shares frame stats when <code>crossOriginIsolated</code> (<code>site/_headers:1</code>), with <code>coi-serviceworker.js</code> polyfill for GitHub Pages (SAB ON +6.6%).</li>
 </ol>
 </div>
 
 <h3>Batch loop</h3>
 <div class="card">
-<p>Each emulation step follows this cycle (adaptive batch, <code>pkg/emulator.js:698</code>):</p>
+<p>Each emulation step follows this cycle (adaptive batch):</p>
 <ol>
     <li>Pump stdin &mdash; UART RX bytes from the host</li>
     <li>Process DMA transfers queued by peripherals</li>
-    <li>Execute an adaptive batch via Unicorn&rsquo;s JIT (20K busy / 50K idle)</li>
+    <li>Execute an adaptive batch in the Rust interpreter (20K busy / 50K idle)</li>
     <li>Tick all peripherals by the elapsed instruction count (<code>step_batch</code>)</li>
     <li>Deliver pending interrupts (up to 64 per batch, NVIC-priority ordered)</li>
     <li>Check watchdog reset flags</li>
@@ -392,7 +392,7 @@ and more &mdash; with realistic timing, interrupts and electrical behaviour.</p>
 <div class="card">
 <ul>
     <li><strong>NVIC priority dispatch</strong> &mdash; pending IRQs are sorted by priority and delivered in batches of up to 64 per step. A fairness mechanism prevents a single high-rate IRQ from starving others.</li>
-    <li><strong>SVC (supervisor call)</strong> &mdash; fires synchronously mid-batch via the Unicorn INTR hook. The 32-byte Cortex-M exception frame is built on the real stack and mirrored in Rust. SVCall handler vector is resolved from the vector table.</li>
+    <li><strong>SVC (supervisor call)</strong> &mdash; dispatched inline onto the real stack. The 32-byte Cortex-M exception frame is built on the real stack; the SVCall handler vector is resolved from the vector table.</li>
     <li><strong>PendSV</strong> &mdash; pended via SCB ICSR PENDSVSET, dispatched at the next batch boundary. Used for context-switch testing.</li>
     <li><strong>Faults</strong> &mdash; BusFault, UsageFault and HardFault set CFSR/HFSR/BFAR registers, pends the appropriate exception, and escalates to HardFault if the fault handler is not enabled in SHCSR.</li>
     <li><strong>SysTick debt drain</strong> &mdash; <code>millis()</code> / <code>micros()</code> accuracy via a debt counter: missed ticks are accumulated and delivered one-per-batch to avoid double-counting.</li>
@@ -587,7 +587,7 @@ The emulator has a three-tier test suite that runs in CI on every push:
 
 <details>
   <summary>How fast is it?</summary>
-  <div class="faq-body"><strong>Headless (Node CLI)</strong>: <strong>~23 MIPS</strong> (50M in ~2.1s, pure compute 26.5 MIPS); emulator.js path 200M in 8.2s. <strong>Browser direct run</strong> (headless Chromium): 200M in 9.3s (<strong>~21.5 MIPS</strong>, SAB OFF) — parity with Node since the CAN-autopilot timing fix (a stale flag address used to cost 3M-iteration spin storms). <strong>Interactive page loop</strong>: 8.6 MIPS headed (frame-budgeted); <strong>SAB ON 9.22 vs OFF 8.65 = +6.6%</strong> on the loop scheduler — SAB uses <code>SharedArrayBuffer</code> + <code>Atomics</code> (<code>site/worker.js:163</code>) when <code>crossOriginIsolated</code> (<code>site/_headers:1</code>); <code>coi-serviceworker.js</code> polyfills GitHub Pages (still works, just slower). Unicorn TCI is ~97.5% of wall time; JS/Rust layer &lt;3%. See <code>docs/ARCHITECTURE.md:201</code>.</div>
+  <div class="faq-body"><strong>Headless (Node CLI)</strong>: <strong>~23 MIPS</strong> (50M in ~2.1s, pure compute 26.5 MIPS); emulator.js path 200M in 8.2s. <strong>Browser direct run</strong> (headless Chromium): 200M in 9.3s (<strong>~21.5 MIPS</strong>, SAB OFF) — parity with Node since the CAN-autopilot timing fix (a stale flag address used to cost 3M-iteration spin storms). <strong>Interactive page loop</strong>: 8.6 MIPS headed (frame-budgeted); <strong>SAB ON 9.22 vs OFF 8.65 = +6.6%</strong> on the loop scheduler — SAB uses <code>SharedArrayBuffer</code> + <code>Atomics</code> (<code>site/worker.js:163</code>) when <code>crossOriginIsolated</code> (<code>site/_headers:1</code>); <code>coi-serviceworker.js</code> polyfills GitHub Pages (still works, just slower). The Rust interpreter is ~99% of wall time; JS/Rust layer ~1%. See <code>docs/ARCHITECTURE.md</code>.</div>
 </details>
 
 <details>
@@ -603,8 +603,6 @@ The emulator has a three-tier test suite that runs in CI on every push:
 <h2>Acknowledgements</h2>
 <div class="card">
 <ul>
-    <li><a href="https://github.com/AlexAltea/unicorn.js">AlexAltea/unicorn.js</a> &mdash; JavaScript / WebAssembly port of the Unicorn ARM CPU emulator.</li>
-    <li><a href="https://www.unicorn-engine.org/">Unicorn Engine</a> &mdash; Multi-architecture CPU emulator framework based on QEMU.</li>
 </ul>
 </div>
 

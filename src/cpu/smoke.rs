@@ -39,8 +39,7 @@ fn dispatch_interrupts(cpu: &mut Cpu, mem: &mut FlatMemory) -> bool {
 }
 
 /// SVC fault from run(): consume it, step past the svc, and dispatch the
-/// SVCall handler synchronously (mirrors the JS intr_svc_enter path, but on
-/// the real stack, so no mirror is needed).
+/// SVCall handler synchronously on the real stack (no mirror needed).
 fn handle_svc(cpu: &mut Cpu, mem: &mut FlatMemory) -> bool {
     let sys = sys();
     match cpu.fault.take() {

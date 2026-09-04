@@ -6,9 +6,9 @@
 npm install stm32f1-emu
 ```
 
-The package ships everything as WASM: the CPU core is embedded in `unicorn_arm.cjs`
-(self-contained binary, no external files) and peripherals in
-`stm32_bluepill_wasm_bg.wasm`. It works in **Node** and in the **browser** (ES modules).
+The package ships everything as WASM: the native Rust CPU core plus all
+peripherals live in `stm32_bluepill_wasm_bg.wasm` (no external binaries).
+It works in **Node** and in the **browser** (ES modules).
 
 ## Library API (browser / Node)
 

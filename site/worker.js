@@ -10,24 +10,6 @@ self.onmessage = (e) => {
   handleMessage(e);
 };
 async function _initEmu() {
-  try { self.postMessage({ type: 'debug', msg: 'worker boot' }); } catch {}
-  if (!globalThis.MUnicorn) {
-    try { self.postMessage({ type: 'debug', msg: 'fetching unicorn_arm.js' }); } catch {}
-    try {
-      const r = await fetch('./unicorn_arm.js');
-      const txt = await r.text();
-      (0, eval)(txt);
-    } catch (e) {
-      try { const m = await import('./unicorn_arm.js'); globalThis.MUnicorn = m.MUnicorn || m.default || globalThis.MUnicorn; } catch {}
-    }
-  }
-  if (!globalThis.MUnicorn) {
-    // Best-effort: the rust backend (cpu:'rust' at init) never needs it.
-    // A missing MUnicorn only errors later, for non-rust backends.
-    try { self.postMessage({ type: 'debug', msg: 'MUnicorn unavailable (ok for cpu:rust)' }); } catch {}
-  } else {
-    try { self.postMessage({ type: 'debug', msg: 'MUnicorn ready' }); } catch {}
-  }
   try { self.postMessage({ type: 'debug', msg: '_initEmu start' }); } catch {}
   const mod = await import('./emulator.js');
   createEmulator = mod.createEmulator;
@@ -71,10 +53,6 @@ async function handleMessage(e) {
       // addresses go stale on rebuild); fall back for hex/bin firmware.
       canFlagAddr = msg.canFlagAddr || CAN_RAM_FLAG;
       pinBuf = [];
-      if ((msg.cpu || 'rust') !== 'rust' && !globalThis.MUnicorn) {
-        post('error', { message: 'MUnicorn not loaded in worker (needed for cpu:unicorn)' });
-        break;
-      }
       try { self.postMessage({ type: 'debug', msg: 'createEmulator start' }); } catch {}
       try {
         emu = await createEmulator({
@@ -85,9 +63,6 @@ async function handleMessage(e) {
           ram_size: 0x5000,
           vector_table: 0x08000000,
           ext_devices: msg.ext_devices || {},
-          // CPU backend passthrough ('unicorn' default, 'rust' = native Path B
-          // interpreter: no unicorn_arm.js needed in this worker).
-          cpu: msg.cpu || 'rust',
         });
         try { self.postMessage({ type: 'debug', msg: 'createEmulator done' }); } catch {}
         emu.onPinChange((port, pin, level) => pinBuf.push(port, pin, level));

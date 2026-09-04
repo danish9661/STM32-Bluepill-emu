@@ -150,9 +150,10 @@ memory hooks with shared linear memory was retired as moot (no win available).
 | Batch size | 20,000 instructions (5× lower IRQ latency vs 100K, zero speed cost) |
 | Unicorn TCG share of runtime | ~97.5% (JS/Rust layer is exhausted) |
 
-**Conclusion:** the JS/Rust bridge is no longer a bottleneck. Further speed
-gains would require replacing Unicorn's TCG JIT itself (Path B, deferred —
-see `docs/NEXT_PHASE.md`). The dual-WASM architecture is the right call.
+**Conclusion (historical — Path B has since landed, see `docs/PATH_B.md`):**
+at the time the JS/Rust bridge was no longer the bottleneck, and replacing
+Unicorn's TCG looked deferred. The native interpreter then beat it ~3.5x and
+Unicorn was removed.
 
 ---
 

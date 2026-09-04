@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] — native Rust CPU replaces Unicorn
+- CPU backend is now the vendored pure-Rust ARMv7-M interpreter
+  (`src/cpu/`): Unicorn binaries, mem hooks, `mrs`/`i2c_init` patches, the
+  SVC mirror and the `--cpu`/`cpu`/`?cpu` options are gone (single backend)
+- ~3.5x faster headless (periph39 200M: ~9.5s → ~2.7s, 72-75 MIPS),
+  ~96 MIPS in headless Chromium; exact instruction accounting
+- New: `src/peripherals/dwt.rs` (DWT CYCCNT for `micros()`/I2C recovery),
+  native firmware gallery + inline-IRQ/WFI/PSP core tests, bus-tap parity
+  test (`tests/test_bus_tap.mjs`), in-page 7-seg decode test
+
 ## [1.4.0] — 2026-09-03
 
 ### Added

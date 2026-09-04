@@ -104,24 +104,22 @@ memory reads through `uc_mem_map_ptr` on a shared heap).
 performance — the JS boundary was measured at ~0.001 accesses/instruction
 (~0.1% of runtime), so speed is not the win being purchased.
 
-### 5. Pure-Rust Cortex-M core ("Path B") — deferred, do NOT start yet
-Rewrite Unicorn's core in Rust (mdl / cargo-cortex-m style, or unicorn's own
-in-progress Rust core if it ships). Highest risk on the list: TCG JIT parity
-unproven (interpreters typically land 10-30M IPS vs 22M), instruction-level
-drift risk (canary is the gate), and multi-day effort. Only worthwhile when a
-feature requires modifying the CPU core itself, or if upstream's Rust core
-lands and makes it free.
+### 5. Pure-Rust Cortex-M core ("Path B") — LANDED (see `docs/PATH_B.md`)
+Replaced Unicorn with the vendored interpreter (`src/cpu/`): 39/39 on both
+old backends before the cutover, ~3.5x faster headless (72-75 vs 20-21 MIPS),
+exact instruction accounting, no mem hooks. The TCG-parity risk did not
+materialize — Unicorn here was TCI, and the native core beats it.
 
 ## Emulation-loop reference (current)
 
 ```
 cli.mjs / emulator.js loop (each iteration = 1 batch of 20K instructions):
   1. pump stdin → uart_rx_byte()              (gated: rx_empty && !dmaBusy)
-  2. processDma()                              ← move queued DMA via Unicorn
-  3. uc.emu_start(pc|1, 0, 0, 20000)           ← hookless counting
-  4. step_batch(20000)                         ← Rust ticks (once per batch)
-  5. processDma()
-  6. processInterrupts()                       ← up to 64 IRQs per batch
+  2. rustcpu_dma_pump()                        ← plan build + exec in Rust RAM
+  3. rustcpu_run(20000)                        ← exact executed count back
+  4. step_batch(count)                         ← Rust ticks (once per batch)
+  5. rustcpu_dma_pump()
+  6. rustcpu_dispatch()                        ← up to 64 IRQs per batch
   7. watchdog reset check
 ```
 

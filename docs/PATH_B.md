@@ -1,8 +1,7 @@
 # Path B — Native Rust CPU backend (ACTIVE, `rust_cpu` branch)
 
-> Status: **working, opt-in**. The Unicorn backend stays the default everywhere;
-> `cpu: 'rust'` / `--cpu=rust` selects the native interpreter (benchmarking hook,
-> slated to replace Unicorn later — hence the dual option for now).
+> Status: **default backend; Unicorn deleted**. The `--cpu` / `cpu` / `?cpu`
+> options are gone (single backend). This doc records the cutover.
 
 ## Goal
 
@@ -12,13 +11,11 @@ tree, M4 core) instead of Unicorn TCG, against the **same** peripheral model,
 DMA plan pump, NVIC dispatch and bus. M3 correctness: `dsp: false` faults the
 DSP extension; CPUID still comes from the model SCB (`0x410FC241`).
 
-## Selection
+## Selection (historical — options removed with Unicorn)
 
-| Surface | Flag | Notes |
-|---|---|---|
-| `pkg/cli.mjs` | `--cpu=rust` (or `EMU_CPU=rust`) | Skips Unicorn load, `mrs` patch, `i2c_init` patch |
-| `pkg/emulator.js` | `createEmulator({ cpu: 'rust' })` | No Unicorn instance/hooks; `stm32f1.js` passes opts through free |
-| `site/worker.js` | `init` message `{ cpu: 'rust' }` | `unicorn_arm.js` not required on this path |
+During bring-up both backends coexisted (`--cpu=rust`, `createEmulator({cpu})`,
+worker `msg.cpu`, `?cpu=rust`) for benchmarking; Unicorn stayed the default
+until the cutover, then the flags were deleted.
 
 ## Architecture (what's shared, what isn't)
 
@@ -44,10 +41,12 @@ Two Unicorn-isms are replicated, not inherited:
   the same write path). Drained per batch after pin events (CS-before-DR order
   preserved as on the hook path).
 
-Skipped on purpose: `patchMrsMsp` (core implements MRS), `i2c_init` NVIC patch
-(core runs the real `bl`s — proven by native I2C passing unpatched),
-hook-based poll shrinking (no read hooks by design; keeps the 20K/50K
-pending/DMA/RX adaptive sizes).
+Deleted with Unicorn: `patchMrsMsp`, the `i2c_init` NVIC patch, the `bl`
+artifact skip, hook poll-shrinking, the SVC mirror, `regsRead`/`regsWrite`
+pooling, `unicorn_arm.cjs/.js` (~1.6MB), `test_unicorn.cjs`,
+`test_svd_run.cjs`. The core implements MRS and runs the real `bl`s (proven
+by native I2C passing unpatched); adaptive batch keeps 20K/50K on
+pending/DMA/RX state.
 
 ## Bugs found bringing it up (all fixed)
 
@@ -101,9 +100,25 @@ handler dispatch is single-stepped — that overhead is *included* above.)
 
 ## What's left
 
-- Browser/worker verification of the rust path (message plumbing is in;
-  headless CDP + headed sweep not run).
-- Broader native ELF coverage beyond the gallery (16 model suites already run
-  against the shared model on both builds).
-- Default-flip + Unicorn removal decision (the dual option is temporary).
-- Vendored-core license note (origin unknown; see branch TODO).
+- Headed browser sweep of the single backend (headless CDP green:
+  periph39 200M 39/39 @ ~96 MIPS, 7-seg decode live).
+- Vendored-core license (see below).
+- Soak: any latent decoder gap now faults loudly via `rustcpu_fault()` +
+  UNDEFINSTR escalation instead of hanging silently.
+
+## License note (vendored CPU core — needs author sign-off)
+
+- Provenance: `src/cpu/` was extracted verbatim from
+  `danish9661/stm32F4-emulator`, path `stm32-periph-wasm/src/cpu/`, commit
+  `3df073e` (`feature/wasm-cpu`) — see `cortex-m3/README.md` §1 — then ported
+  M4→M3 on this branch (DSP gates, IT-suppress flag rule, register-shift
+  fixes, TST-as-AND, WFI wake).
+- That repo's `LICENSE` is the full **GPL-3.0** text (verified 2026-09-04).
+  This repo ships MIT (`package.json`, `LICENSE`), including the compiled
+  core inside `stm32_bluepill_wasm_bg.wasm` and the `stm32f1-emu` npm files.
+- Same GitHub user owns both repos, so relicensing/dual-licensing the
+  vendored part is presumably theirs to grant — but that grant is not
+  recorded anywhere. Before publishing an npm release or merging to master,
+  record it explicitly (e.g. a license header in `src/cpu/` naming terms, or
+  a note from the author), or replace the core. This note is a flag, not a
+  legal determination.

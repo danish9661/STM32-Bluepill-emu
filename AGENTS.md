@@ -1,9 +1,10 @@
 # STM32 Bluepill WASM Emulation — Context File
 
 ## Project Overview
-Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real Arduino firmware. Two modules bridge through JavaScript:
-1. **Unicorn ARM** (`pkg/unicorn_arm.cjs`) — ARM Cortex-M3 CPU emulator (binary Node addon, unmodifiable)
+Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real Arduino firmware. One WASM module holds the whole machine:
+1. **Native Rust CPU** (`src/cpu/`) — ARM Cortex-M3 Thumb-2 interpreter + guest RAM (`FlatMemory`), zero JS crossings per instruction
 2. **Rust Peripherals** WASM (`pkg/stm32_bluepill_wasm_bg.wasm`) — GPIO, USART, TIM, SPI, I2C, DMA, RTC, CRC, CAN, NVIC, EXTI, ADC, DAC, FLASH, PWR, BKP, IWDG, WWDG, etc.
+(Unicorn TCG was the CPU before 2026-09; see `docs/PATH_B.md`.)
 
 > **Staging rule (CI incident 2026-08-09):** always `git add -A` or stage BOTH `pkg/` and `site/` together. Commit `7040bd0` staged only `site/` (fresh `pkg/emulator.js` stayed uncommitted at 100K batches) — CI's `cmp pkg/emulator.js site/emulator.js` guard failed on the next commit and caught it. Local working trees mask this; fresh checkouts don't.
 
@@ -13,32 +14,24 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 ```
 ┌─────────────────────────── JS (pkg/cli.mjs) ─────────────────────────┐
 │                                                                      │
-│  HOOKLESS instruction counting — emu_start(begin,0,0,maxBatch)      │
-│  stops exactly at maxBatch (faults: ~0.01% of batches, skip+credit) │
-│  memReadHook / memWriteHook → periph_read / periph_write  [JIT]     │
+│  EXACT instruction counting — rustcpu_run(batch) returns executed   │
+│  instructions. No mem hooks: peripheral writes are recorded in-Rust │
+│  for onPeriphWrite watchers; DMA pumps against Rust RAM, zero JS.   │
 │                                                                      │
 │  Loop (each iteration = 1 batch):                                    │
 │    1. pump stdin → uart_rx_byte()                                    │
-│    2. processDma()            ← move queued DMA data via Unicorn    │
-│    3. uc.emu_start(pc|1, 0, 0, maxBatch=20K)                        │
-│    4. step_batch(batchInstCount)   ← Rust ticks peripherals         │
+│    2. rustcpu_dma_pump()      ← plan build + exec against Rust RAM  │
+│    3. rustcpu_run(maxBatch)   ← run one batch, exact count back     │
+│    4. step_batch(count)       ← Rust ticks peripherals              │
 │       - status==1 → watchdog reset requested → stop                 │
-│    5. processDma()                                                  │
-│    6. processInterrupts()  ← up to 64 IRQs per batch (intr_next)      │
+│    5. rustcpu_dma_pump()                                             │
+│    6. rustcpu_dispatch()      ← up to 64 IRQs per batch (intr_next)  │
 │    7. is_watchdog_reset_requested() check                           │
-│                                                                      │
-│  DMA crosses the WASM boundary:                                      │
-│    Rust queues DmaTransfer → dma_pump_all() pops the whole queue,     │
-│    absorbs/pushes periph bytes internally (dma_absorb_store /         │
-│    dma_push_periph) and returns a flat op plan for JS: [op,a,b,c]:    │
-│    op0=RAM memcpy, op1=store absorbed (dma_take_absorbed),            │
-│    op2=read RAM then push, op3=done bits (dma_set_completed_many);    │
-│    JS only touches Unicorn RAM via uc.mem_read/mem_write              │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Performance
-- ~22M IPS real-world (200M instructions in ~9.0s; browser periph39 full run: 0.5s wall)
+- ~72M IPS real-world, native CPU (200M in ~2.7s; browser periph39 ~96 MIPS headless)
 - **step_batch ticks once per batch, not per instruction** (`src/lib.rs`): all peripheral `tick()`s are instruction-delta based, so advancing INSTRUCTION_COUNT by `count` + one `sys.tick()` is equivalent but ~100K× cheaper — was ~55% of runtime (wasm-function[36]/[364] under `step_batch` in cpu-prof); **3.8× speedup** (21.2s → 5.6s for 100M). Requires per-batch tickers to process ALL accumulated ticks — `tim.rs advance()` had a `ticks.min(1000)` cap that dropped timer events (TIM2 IRQ never fired: CNT stuck at 12K of ARR=36K); removed.
 - Peripheral access hooks are NOT a bottleneck anymore: measured 0.001 accesses/instruction (~27K per 50M instr) for the periph37 firmware
 - `step_batch()` gave 3.15× speedup over per-instruction `step()`
@@ -138,12 +131,12 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
 - 200M full run: 39/39 in **9.00s** (~22M IPS).
 
 ## Active Workarounds (temporary, remove or upstream later)
-1. **`mrs rX, msp` → `mov rX, sp`** (cli.mjs `patchMrsMsp`, ~line 19): Unicorn cannot decode Thumb `mrs`; newlib `_sbrk` uses it; rewrite to 4-byte equivalent + nop (same footprint)
-2. **i2c_init NVIC patch** (cli.mjs ~line 252): patch offset 0x8001BBC (block 0x8001BBC–0x8001BDB) replaced with inline ISER0/ISER1 writes + preserved `SetPriority` calls (Unicorn skips the two `bl HAL_NVIC_EnableIRQ`)
-3. **hi2c->Mode patch** (cli.mjs `memWriteHook`): when `0x40005410` (I2C1 DR) is written with the R-bit set, patch RAM `*(0x200002d8)+0x3D` to 0x22 — HAL I2C1 ISR requires `hi2c->Mode == 0x22` (MASTER_RX) before reading DR
-4. **Interrupt frame restored from the stacked frame** (not JS locals): the frame at SP-32 is written before the handler runs and read back after (both cli.mjs + emulator.js, since §9) — restoring xPSR is REQUIRED (see §8: the handler's emu_start clobbers APSR; dropping it mis-evaluates any cmp/beq that straddles the batch boundary)
+1. ~~**`mrs rX, msp` → `mov rX, sp`**~~ — **retired with Unicorn**: the native core decodes `mrs` directly.
+2. ~~**i2c_init NVIC patch**~~ — **retired with Unicorn**: the core runs the real `bl HAL_NVIC_EnableIRQ` (proven unpatched by native I2C passing).
+3. **hi2c->Mode patch**: the I2C model flags I2C1 DR writes with the R-bit (`WasmSystem.i2c_dr_hook`); the driver patches RAM `*(0x200002d8)+0x3D` to 0x22 pre-dispatch — HAL I2C1 ISR requires `hi2c->Mode == 0x22` (MASTER_RX) before reading DR
+4. ~~**Interrupt frame restored from the stacked frame in JS**~~ — **retired with Unicorn**: stacking/return live in `Cpu::take_exception`/`exception_return` (xPSR included).
 5. **64-IRQ budget in `intr_next()`** (src/interrupts.rs, reset by step/step_batch): prevents starvation when a high-priority IRQ re-pends itself — paired with the NVIC `last_popped` fairness, a hot IRQ (TXE) alternates with other pendings instead of consuming every slot (e.g. CAN TX IRQ37 prio16 vs I2C EV IRQ31 prio32)
-6. **DMA**: the **whole pump loop lives in Rust** — `dma_pump_all()` pops the queue, absorbs periph→mem bytes internally (`dma_absorb_store`/`dma_take_absorbed` side buffer) and returns a flat op plan for JS (`[op,a,b,c]`: 0=RAM memcpy, 1=store absorbed, 2=read RAM then `dma_push_periph`, 3=done bits → `dma_set_completed_many`) — JS only executes `uc.mem_read`/`mem_write` on Unicorn RAM, exactly one crossing per RAM op. Completion is signaled LAST (op 3) so TC IRQs fire only after data lands. The `dma_absorb_periph`/`dma_push_periph` chunked-call pattern is preserved for tests. ISR return is one Rust call: `finish_interrupt(irq)` = `clear_current_interrupt()` + SysTick debt drain (JS `nvic_systick_take` loop gone). Note: Vec<u8> returns arrive in JS as a plain number array, not Uint8Array (test_all joins bytes with String.fromCharCode)
+6. **DMA**: the **whole pump lives in Rust** — `rustcpu_dma_pump()` builds the op plan and executes it against Rust RAM with zero JS crossings. Completion is signaled LAST (op 3) so TC IRQs fire only after data lands. ISR return is one Rust call: `finish_interrupt(irq)` = `clear_current_interrupt()` + SysTick debt drain (JS `nvic_systick_take` loop gone). Note: Vec<u8> returns arrive in JS as a plain number array, not Uint8Array (test_all joins bytes with String.fromCharCode)
 
 ## To Run / Rebuild
 ```bash
@@ -156,7 +149,7 @@ node tests/test_all.mjs              # 224 unit tests
 node tests/canary.mjs                # regression canary: 39/39 firmware checks, ~25s
 node tests/test_emulator_js.mjs      # browser run-loop path: 200M, 39/39 (~10s)
 node tests/test_firmware_formats.mjs # hex/map/elf cross-format consistency
-node tests/test_esm.mjs              # ESM glue + unicorn boot smoke
+node tests/test_esm.mjs              # ESM glue + native backend API smoke
 node tests/bench.mjs                 # benchmarks
 node pkg/cli.mjs tests/arduino_periph_test/build/arduino_periph_test.ino.elf   # run firmware
 echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml --max=200000000
@@ -176,8 +169,8 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 ## Next Phase — What's Left
 
 ### Immediate (ALL PASS as of this sprint; re-check after any change)
-1. **Verify nothing regressed** — rerun `tests/test_all.mjs` (224) + canary (`node tests/canary.mjs`, 39/39) after any edit to `src/` or `pkg/cli.mjs`
-2. **Path A spike** (next project): Rust → `wasm32-unknown-emscripten` staticlib with raw `#[no_mangle]` exports, link with emcc-compiled unicorn C, boot the firmware — see docs/NEXT_PHASE.md §4 for the acceptance gate. Dual-wasm stays the default until it passes.
+1. **Verify nothing regressed** — rerun `tests/test_all.mjs` (372) + canary (`node tests/canary.mjs`, 39/39) after any edit to `src/` or `pkg/cli.mjs`
+2. ~~**Path A spike** (link Rust staticlib with emcc-compiled unicorn C)~~ — **moot**: Unicorn is deleted; there is nothing left to link (single Rust WASM module already).
 
 ### Known issue (monitor only, mostly explained)
 - Historical `Fatal: undefined Stack: undefined` at ~35M+ instructions — **identified (2026-08-11)**: that text is cli.mjs's own catch handler format (`console.error('Fatal:', e.name, e.message)` + `'Stack:', ...`, present since the initial commit), not any wasm/glue string — no "Fatal:" exists in unicorn_arm.cjs/.js, stm32_bluepill_wasm.js or the .wasm. So the incident was a JS promise rejection with a nameless value (bare string/undefined; wasm-bindgen panics throw `new Error(msg)` with name+message, so a REAL Rust/wasm panic would have printed differently). Current handler is hardened (`e?.name || '(no name)'`, `Type:` dump) so a re-occurrence is now diagnosable. Not reproduced across ~6B stress instructions (22 runs, 2026-08-13: 3×200M + 2×500M + 1×1B periph39 cli, canary, emulator.js 200M browser path, showcase/ws2812/echo/fade/flash/timer_uart/adc_uart ELFs 100–200M — all exit 0, zero `Fatal`/`(no name)` in output); monitor only.
@@ -270,13 +263,13 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 ## Next Phase — Long-term Optimizations
 1. **Single WASM module — "Path A" (EXPERIMENT status, see docs/NEXT_PHASE.md §4)**: compile Rust peripherals + Unicorn C into one `emcc` output (`wasm32-unknown-emscripten` + `staticlib` + raw `#[no_mangle]` exports — wasm-bindgen does NOT support the emscripten target, so the ~70 exports need a shim; fetch unicorn C source, `third_party/unicorn/` is gitignored). Dual-wasm stays the default until the acceptance gate passes (224/224, 39/39 both paths, IPS within ~2× of 22M). Gain is architectural, not speed.
 2. ~~**Replace mem hooks with shared linear memory**~~ — **retired (moot)**: `uc_mem_map_ptr(mem, periph_range)` would remove the JS crossing, but peripheral access was measured at 0.001 accesses/instruction (~0.1% of runtime) — no measurable win available
-3. **DMA + interrupts fully in Rust** (no JS round-trip; `uc_intr` or stop+re-exec) — mostly landed (plan-based pump, intr dispatch §9); remaining RAM→RAM moves need Unicorn memory access
-4. **Pure-Rust Cortex-M core — "Path B" (deferred, do NOT start)**: rewrite Unicorn's core (mdl / cargo-cortex-m, or unicorn's in-progress Rust core upstream). Highest risk (TCG perf parity unproven, decoder drift); only when a feature needs CPU-core changes, or upstream ships it free
+3. ~~**DMA + interrupts fully in Rust**~~ — **LANDED**: `rustcpu_dma_pump()` + `rustcpu_dispatch()` run fully in Rust against Rust RAM (zero JS round-trips).
+4. ~~**Pure-Rust Cortex-M core — "Path B" (deferred)**~~ — **LANDED (see `docs/PATH_B.md`)**: vendored interpreter in `src/cpu/`, 39/39 both backends pre-cutover, ~3.5x faster, Unicorn deleted.
 
 ## Files Most Relevant
 - `src/peripherals/i2c.rs` — I2C state machine
 - `src/lib.rs` — WASM API; new exports
-- `pkg/cli.mjs` — DR Mode patch, workarounds, loop, SVC hook, fault gate
+- `pkg/cli.mjs` — main loop (stdin/DMA/run/tick/dispatch/CAN/watchdog), hi2c Mode patch, fault gate
 - `src/peripherals/usart.rs` — TXE byte-time pacing, `rx_pending()`
 - `src/ext_devices/spi_flash.rs`, `src/peripherals/spi.rs`, `src/ext_devices/touchscreen.rs` — touchscreen SPI reads (deferred_reply)
 - `src/peripherals/gpio.rs` — electrical model (`pin_level()`), slew (`pending_transitions`), `read_pin_effective()`; `set_input_pin()` fires EXTI edges (page-driven button widgets → attachInterrupt works)
