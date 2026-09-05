@@ -11,7 +11,7 @@
 //! mode, no IT block, delivery off (SVC must fault, not take).
 
 use super::{
-    mem::{FlatMemory, Memory},
+    mem::FlatMemory,
     thumb, Cpu,
 };
 use crate::{init, sys};

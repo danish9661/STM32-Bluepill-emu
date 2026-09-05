@@ -277,6 +277,16 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - **Real decoder bugs found & fixed**: MSR PRIMASK/CONTROL/APSR guard (`0x8800`→`0x8000`; old code fell into the branch decoder as a wild branch — silent mis-decode); STREX always-success (new single-global exclusive monitor + CLREX + clear on exception entry/return); LDMDB+W wrote start instead of end; LDM IB/DA keyed off P not U (both swapped); T3 Rn==PC always literal (reg/imm `[11:10]` heuristic broke negative literals); PLD/PLI forms NOP (reg/imm8/literal, incl. F9-signed-RtPC which has no LDRSB encoding); USAT-ASR (0xF3A0, previously SUB garbage); DBG hint NOP.
 - **Verified**: cpu:: 34/34 (incl. 22 probes), census dumps + both gates green, test_all 392/392, canary 39/39, cli + emulator.js 200M 39/39 @ ~2.9s (perf intact), event/format/esm suites green.
 
+### 25. Flag-lifecycle audit: the ORE bug class, systematically (`src/peripherals/{usart,spi,i2c,tim,adc}.rs`, `tests/test_all.mjs`) [committed]
+- **Method**: for every status bit in the big-5 peripherals, verify BOTH the set-condition and the clear-condition exist and are tested. Bits the model sets-but-never-clears wedge firmware (ORE proved it); bits never set at all are benign (firmware reads 0; document).
+- **USART**: ORE fixed last sprint (SR→DR sequence via `sr_read_armed`). TXE/RXNE/TC managed; IDLE/PE/FE/NE/LBD/CTS never set (no error injection; IDLE-line RX noted as future work, not a wedge risk).
+- **SPI**: RXNE/TXE managed; OVR/MODF/BSY/CRCERR never set (transfers complete synchronously, so no overrun can occur) — benign, documented.
+- **I2C — real bug found & fixed**: BTF was set when ITBUFEN cleared mid-transfer but cleared NOWHERE except full reset → stuck EV re-pends for the rest of the transfer (HAL clears ITBUFEN near every transfer end, so this fired constantly). Fix: clear BTF on DR read + DR write (transfer progress), matching RM0008. AF is set-on-NACK and clears on next START/reset (not W1C — benign: HAL never reuses AF state across transfers). OVR/BERR/ARLO/PECERR never set (benign). `stretch_until` is dead (never assigned — noted, harmless).
+- **TIM**: UIF/CCxIF set + W0C-cleared (`sr &= value`) ✓; TIF/COMIF/BIF/CCxOF never set (slave/motor features, out of scope) — benign.
+- **ADC**: AWD/EOC/JEOC/JSTRT/STRT set + cleared (EOC on DR read, rest on SR write; SR uses direct-assign `= value & 0x3F`, equivalent to W0C for sane firmware); F103 has no OVR bit — N/A.
+- **Recovery-test template** (new standard for error states): force the error, assert the flag, exercise the clear sequence, assert normal operation resumes. Added I2C-BTF block (7 asserts: SB→ADDR→Active→BTF set→DR-write clears→STOP clean→bus reusable; device on 0x51 so the later NACK-at-0x50 test still NACKs; `reset_ext_devices()` after to leave no residue).
+- **Verified**: test_all 399/399; full gate + perf re-run at commit.
+
 
 
 ## Next Phase — Long-term Optimizations

@@ -141,6 +141,7 @@ impl Peripheral for I2c {
                 0x10 => {
                     let v = self.dr;
                     self.sr1 &= !(1 << 6); // Clear RXNE on DR read
+                    self.sr1 &= !(1 << 2); // BTF clears on DR read (byte taken)
                     if let Some(idx) = self.active_device {
                         if matches!(self.state, I2cState::Active { is_read: true }) {
                             let mut d = self.devices[idx].device.borrow_mut();
@@ -310,6 +311,7 @@ impl Peripheral for I2c {
                             sys.push_event(crate::system::VmEvent::I2cWrite { channel: self.i2c_channel(), byte: value as u8 });
                         }
                         self.sr1 |= 1 << 7; // TXE
+                        self.sr1 &= !(1 << 2); // BTF clears on DR write
                         if self.cr2 & (1 << 11) != 0 {
                             let ch = self.resolve_dma_channel(sys, true);
                             if ch != 0 { sys.p.dma_request(sys, ch as u32); }

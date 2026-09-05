@@ -7,7 +7,7 @@ const { init, init_svd, periph_read, periph_write, tick, step_batch, has_pending
         gpio_read_input, get_uart_output, uart_rx_byte, adc_set_sim_value,
         is_watchdog_reset_requested, can_inject_message, gpio_set_slew, raise_fault,
         add_fsmc_bank, gpio_set_analog, adc_set_rc_tau, register_js_peripheral,
-        add_sd_card, reset_ext_devices, rcc_sysclk_hz,
+        add_sd_card, reset_ext_devices, rcc_sysclk_hz, add_i2c_eeprom,
         drain_events, usb_inject_setup, usb_inject_out,
         gpio_take_pin_events } = periph;
 
@@ -676,6 +676,33 @@ assert_eq(periph_read(I2C1 + 0x1C, 4), 0x50, 'I2C1 CCR');
 // Check SR2: busy flag (bit 1) should be 0 when idle
 let i2c_sr2 = periph_read(I2C1 + 0x18, 4);
 assert_eq(i2c_sr2 & (1 << 1), 0, 'I2C1 SR2 BUSY = 0 (idle)');
+
+// BTF lifecycle + recovery (RM0008: BTF clears on DR access; a sticky BTF
+// re-pends the EV interrupt forever, the I2C analogue of the USART ORE wedge).
+// NOTE: address 0x51, not 0x50 — the later I2C-NACK test needs 0x50 missing.
+add_i2c_eeprom('I2C1', 0x51, new Uint8Array(256).fill(0xAB));
+reset();
+periph_write(0x4002101C, 4, 1 << 21); // I2C1 clock
+periph_write(I2C1 + 0x00, 4, 1); // PE
+periph_write(I2C1 + 0x04, 4, (1 << 10) | (1 << 9)); // ITBUFEN + ITEVTEN
+periph_write(I2C1 + 0x00, 4, 1 | (1 << 8)); // START
+assert_eq(periph_read(I2C1 + 0x14, 4) & 1, 1, 'I2C BTF setup: SB set');
+periph_write(I2C1 + 0x10, 4, 0xA2); // address 0x51 + write
+assert_eq(periph_read(I2C1 + 0x14, 4) & (1 << 1), 1 << 1, 'I2C BTF setup: ADDR set');
+periph_read(I2C1 + 0x14, 4); // SR1 read arms the ADDR clear...
+periph_read(I2C1 + 0x18, 4); // ...SR2 read completes it -> Active(TX)
+periph_write(I2C1 + 0x10, 4, 0x00); // EEPROM mem-address byte
+periph_write(I2C1 + 0x04, 4, (1 << 9)); // clear ITBUFEN mid-transfer -> BTF
+assert_eq(periph_read(I2C1 + 0x14, 4) & (1 << 2), 1 << 2, 'I2C SR1 BTF set after ITBUFEN clear');
+periph_write(I2C1 + 0x10, 4, 0x5A); // DR write clears BTF (transfer progresses)
+assert_eq(periph_read(I2C1 + 0x14, 4) & (1 << 2), 0, 'I2C SR1 BTF cleared by DR write');
+periph_write(I2C1 + 0x00, 4, 1 | (1 << 9)); // STOP
+assert_eq(periph_read(I2C1 + 0x14, 4), 0, 'I2C SR1 clean after STOP');
+assert_eq(periph_read(I2C1 + 0x18, 4) & (1 << 1), 0, 'I2C SR2 BUSY = 0 after STOP');
+periph_write(I2C1 + 0x00, 4, 1 | (1 << 8)); // bus usable again: START -> SB
+assert_eq(periph_read(I2C1 + 0x14, 4) & 1, 1, 'I2C bus recovered: SB set again');
+reset_ext_devices(); // leave no devices behind for later groups
+reset();
 
 // ============================================================
 // RTC
