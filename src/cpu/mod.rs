@@ -18,6 +18,9 @@ mod smoke;
 mod core_tests;
 #[cfg(test)]
 mod isa_tests;
+#[cfg(test)]
+mod census;
+
 pub use regs::Regs;
 pub use mem::Memory;
 use crate::system::WasmSystem;
@@ -64,6 +67,10 @@ pub struct Cpu {
     pub ipsr: u32,
     /// IRQ numbers of entered exceptions (for NVIC active-bit hygiene).
     exc_stack: Vec<i32>,
+    /// LDREX reservation address (word-aligned), None when clear. Single
+    /// global monitor is exact on a single core; cleared on CLREX and on
+    /// exception entry/return (firmware retry loops then behave like HW).
+    pub exclusive: Option<u32>,
     /// Saved IT states, parallel to exc_stack.
     it_stack: Vec<SavedIt>,
     /// Break `run()` when the model has a pending interrupt, so a driver
@@ -117,6 +124,7 @@ impl Cpu {
             sleeping: false,
             dsp: true,
             it_suppress: false,
+            exclusive: None,
         }
     }
     pub fn reset(&mut self, sp: u32, pc: u32) {
@@ -133,6 +141,7 @@ impl Cpu {
         // NOTE: `dsp` is configuration, not CPU state — preserved across reset.
         // it_suppress is per-instruction transient (recomputed at each entry).
         self.it_suppress = false;
+        self.exclusive = None;
     }
 
     /// Current stack pointer (r13 always mirrors it).
@@ -246,6 +255,9 @@ impl Cpu {
             self.regs.psp = sp;
         }
         self.ipsr = vector;
+        // LDREX reservation dies on exception entry (firmware retry loops
+        // then behave like silicon instead of succeeding spuriously).
+        self.exclusive = None;
         // Entering handler mode is always privileged (MPU).
         sync_privilege(self, sys);
         // NVIC active-priority accounting: whoever pops a pending IRQ pushes
@@ -332,6 +344,7 @@ impl Cpu {
             None => 0,
         };
         sync_privilege(self, sys);
+        self.exclusive = None;
         // Clear this entry's IABR active bit (set on dispatch); the old
         // pop-only return leaked it, leaving phantom-active IRQs.
         if let Some(q) = irq {

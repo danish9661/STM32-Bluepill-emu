@@ -983,11 +983,19 @@ pub fn exec32(
         // USAT / SSAT (saturate). Shares hw1 with MSR (0xF380|Rn) but o2[15]
         // is always 0 here (imm5 lives in o2[14:10]); MSR needs o2>=0x8800,
         // so the two are disjoint. GAS-verified: usat=F380, ssat=F300/F322.
-        if o1 & 0xFFF0 == 0xF380 && o2 < 0x8000 {
-            // USAT Rd, #sat, Rn [, LSL #sh]
+        // USAT shift type lives in o1[5] (0=LSL 0xF380, 1=ASR 0xF3A0); the
+        // ASR form previously fell into modified-imm data-proc and computed
+        // garbage (silent mis-decode of a valid encoding).
+        if (o1 & 0xFFF0 == 0xF380 || o1 & 0xFFF0 == 0xF3A0) && o2 < 0x8000 {
+            // USAT Rd, #sat, Rn [, LSL/ASR #sh]
             let sat = (o2 & 0x1F) as u32;
             let sh = ((o2 >> 10) & 0x1F) as u32;
-            let v = rr(cpu, (o1 & 0xF) as usize, pc).wrapping_shl(sh);
+            let a = rr(cpu, (o1 & 0xF) as usize, pc);
+            let v = if (o1 >> 5) & 1 == 0 {
+                a.wrapping_shl(sh)
+            } else {
+                ((a as i32).wrapping_shr(sh.min(31))) as u32
+            };
             let max: u64 = if sat >= 32 { 0xFFFF_FFFF } else { (1u64 << sat) - 1 };
             let r = (v as u64).min(max) as u32;
             if (v as u64) > max {
@@ -1035,8 +1043,17 @@ pub fn exec32(
             adv(cpu, pc, 4); // NOP.W
             return true;
         }
+        if o1 == 0xF3AF && o2 == 0x80F0 {
+            adv(cpu, pc, 4); // DBG: hint, no-op on silicon
+            return true;
+        }
         if o1 == 0xF3BF && (o2 & 0xFF00) == 0x8F00 {
-            adv(cpu, pc, 4); // DMB/DSB/ISB/CLREX
+            // DMB/DSB/ISB/CLREX. CLREX (o2==0x8F5F) drops the LDREX
+            // reservation; the barriers are NOPs for the emulator.
+            if o2 == 0x8F5F {
+                cpu.exclusive = None;
+            }
+            adv(cpu, pc, 4);
             return true;
         }
         if o1 & 0xFFF0 == 0xF3E0 && o2 & 0xF000 == 0x8000 {
@@ -1058,8 +1075,12 @@ pub fn exec32(
             adv(cpu, pc, 4);
             return true;
         }
-        if o1 & 0xFFF0 == 0xF380 && o2 & 0xFF00 == 0x8800 {
-            // MSR SYSm, Rn
+        if o1 & 0xFFF0 == 0xF380 && o2 & 0xF000 == 0x8000 {
+            // MSR SYSm, Rn. SYSm lives in o2[7:0] (0-3 xPSR, 8-9 MSP/PSP,
+            // 16-20 PRIMASK..CONTROL) with o2[15:12]==8 for all of them —
+            // the old 0x8800 guard rejected SYSm with high nibble 0
+            // (PRIMASK, CONTROL, APSR) and those encodings fell through
+            // into the branch decoder as wild branches.
             let sysm = (o2 & 0xFF) as u32;
             let v = rr(cpu, (o1 & 0xF) as usize, pc);
             match sysm {
@@ -1397,21 +1418,31 @@ pub fn exec32(
             adv(cpu, pc, 4);
             return true;
         }
-        // T3: c<8. Register-offset iff op2[11:10]==00 (GAS-verified:
-        // strh [r9,r3,lsl#1]=o2:0x2013, str [r4,r7,lsl#2]=0x0027,
+        // T3: c<8. Register-offset iff op2[11:10]==00 AND Rn!=PC: with
+        // Rn==PC every form is literal (capstone-verified: even [11:10]==00
+        // decodes literal, e.g. `ldr.w r0,[pc,#-3]`), so Rn==PC always
+        // routes to the imm8/literal path below. (GAS-verified: strh
+        // [r9,r3,lsl#1]=o2:0x2013, str [r4,r7,lsl#2]=0x0027,
         // strb [r9,r3]=0x2003, ldr [r3,r0,lsl#2]=0x4020; imm forms like
         // str [r4],#4 (0x0B04) have [11:10]!=00). Applies to every data
         // class (STRB/LDRB/STRH/LDRH/STR/LDR), not just words — routing
         // only c4/5 here sent strh-reg into imm8 post-indexed writeback
         // (r9 -= imm8 per store), which corrupted DOOM's collump pointer.
-        if (o2 & 0xC00) == 0 {
+        if (o2 & 0xC00) == 0 && rn != 15 {
             let rm = (o2 & 0xF) as usize;
             let sh = (o2 >> 4) & 3;
             let off = rr(cpu, rm, pc).wrapping_shl(sh);
             let addr = rr(cpu, rn, pc).wrapping_add(off);
             if is_load {
+                // Rt==PC: unsigned byte/half is PLD (pure hint); word is a
+                // genuine LDR-register branch (`ldr.w pc,[r5,r2]`);
+                // signed-RtPC has no encoding (UNPREDICTABLE, stay loud).
+                if rt == 15 && !signed && size != 4 {
+                    adv(cpu, pc, 4);
+                    return true;
+                }
                 if rt == 15 {
-                    if size != 4 {
+                    if size != 4 || signed {
                         return fault(cpu, pc, op1, op2, 4);
                     }
                     cpu.regs.r[15] = mem.read32(addr);
@@ -1453,6 +1484,20 @@ pub fn exec32(
         let base = rr(cpu, rn, pc);
         let addr = if p == 1 { base.wrapping_add(off) } else { base };
         if is_load {
+            // PLD/PLI are pure hints: unsigned byte/half with Rt==PC (any
+            // Rn — `pld [pc,#-x]`, `pld [r0,#-x]`), plus F9 LDRSB/LDRSH
+            // with Rt==PC (there is no literal-into-PC signed load; the
+            // encoding IS PLI). Word Rt==PC is the genuine `ldr.w pc`
+            // interworking branch (literal or offset, handled by the load
+            // path below); other signed-RtPC has no encoding (faults below).
+            if rt == 15 && !signed && size != 4 {
+                adv(cpu, pc, 4);
+                return true;
+            }
+            if rt == 15 && signed && f9 && (c == 1 || c == 3 || c == 9 || c == 11) {
+                adv(cpu, pc, 4);
+                return true;
+            }
             let v = match size {
                 1 => mem.read8(addr) as u32,
                 2 => mem.read16(addr) as u32,
@@ -1986,13 +2031,19 @@ pub fn exec32(
                 .wrapping_add((mem.read16(tab.wrapping_add(idx.wrapping_mul(2))) as u32) * 2);
             return branch(cpu, sys, mem, t | 1, pc, op1, op2, 4);
         }
-        // LDREX / STREX (E8 + nibble 4/5, word form)
+        // LDREX / STREX (E8 + nibble 4/5, word form). Single global
+        // reservation: exact on a single core (see Cpu::exclusive).
         if (o1 & 0x0FF0) == 0x0840 {
             let rt = ((o2 >> 12) & 0xF) as usize;
             let rdv = ((o2 >> 8) & 0xF) as usize;
             let addr = rr(cpu, rn, pc).wrapping_add(o2 & 0xFF);
-            mem.write32(addr, rr(cpu, rt, pc));
-            cpu.regs.r[rdv] = 0;
+            if cpu.exclusive == Some(addr & !3) {
+                mem.write32(addr, rr(cpu, rt, pc));
+                cpu.regs.r[rdv] = 0;
+            } else {
+                cpu.regs.r[rdv] = 1;
+            }
+            cpu.exclusive = None; // STREX always clears, pass or fail
             adv(cpu, pc, 4);
             return true;
         }
@@ -2002,13 +2053,17 @@ pub fn exec32(
             }
             let rt = ((o2 >> 12) & 0xF) as usize;
             let addr = rr(cpu, rn, pc).wrapping_add(o2 & 0xFF);
+            cpu.exclusive = Some(addr & !3);
             cpu.regs.r[rt] = mem.read32(addr);
             adv(cpu, pc, 4);
             return true;
         }
-        // LDM / STM (bits[11:9]==100, bit6==0; IA iff bit8==0, W=bit5, L=bit4)
+        // LDM / STM: P=o1[8] (pre/post), U=o1[7] (up/down), W=o1[5], L=o1[4].
+        // IA=P0U1, IB=P1U1, DA=P0U0, DB=P1U0 (the old code keyed everything
+        // off P alone, swapping IB/DB and DA/IA semantics).
         if (o1 & 0x0E40) == 0x0800 {
-            let ia = o1 & 0x0100 == 0;
+            let p = o1 & 0x0100 != 0;
+            let u = o1 & 0x0080 != 0;
             let w = o1 & 0x0020 != 0;
             let l = o1 & 0x0010 != 0;
             let list = o2;
@@ -2017,11 +2072,10 @@ pub fn exec32(
                 return fault(cpu, pc, op1, op2, 4);
             }
             let mut a = cpu.regs.r[rn];
-            if !ia {
-                a = a.wrapping_sub(n * 4);
-                if w {
-                    cpu.regs.r[rn] = a;
-                }
+            if p && u {
+                a = a.wrapping_add(4); // IB: first transfer at Rn+4
+            } else if !u {
+                a = a.wrapping_sub(n * 4); // DA/DB: first transfer below Rn
             }
             let mut newpc: Option<u32> = None;
             for i in 0..16 {
@@ -2042,8 +2096,16 @@ pub fn exec32(
                     a += 4;
                 }
             }
-            if w && ia && !(l && (list >> rn) & 1 == 1) {
-                cpu.regs.r[rn] = a;
+            // Writeback: loads end at the final address in all modes; stores
+            // end there only when incrementing (IA/IB) — decrementing stores
+            // (DA/DB, e.g. every stmdb sp! push) write back the START address.
+            // Suppressed when Rn itself is in a load list (loaded value wins).
+            if w && !(l && (list >> rn) & 1 == 1) {
+                cpu.regs.r[rn] = if !l && !u {
+                    a.wrapping_sub(n * 4)
+                } else {
+                    a
+                };
             }
             if let Some(t) = newpc {
                 return branch(cpu, sys, mem, t, pc, op1, op2, 4);
@@ -2054,10 +2116,7 @@ pub fn exec32(
         // STRD / LDRD: same bits[11:9]==100 as LDM/STM but bit6==1
         // (complementary patterns 0x0800 vs 0x0840; GAS-verified).
         if (o1 & 0x0E40) == 0x0840 {
-            let p = o1 & 0x0100 != 0; // E9 form (pre/offset); E8 post (unsupported)
-            if !p {
-                return fault(cpu, pc, op1, op2, 4);
-            }
+            let p = o1 & 0x0100 != 0; // E9 offset/pre-indexed; E8 post
             let u = o1 & 0x0080 != 0;
             let w = o1 & 0x0020 != 0;
             let l = o1 & 0x0010 != 0;
@@ -2066,7 +2125,13 @@ pub fn exec32(
             let rt2 = ((o2 >> 8) & 0xF) as usize;
             let off = (o2 & 0xFF) * 4;
             let base = rr(cpu, rn, pc);
-            let addr = if u { base.wrapping_add(off) } else { base.wrapping_sub(off) };
+            // Post-indexed (P=0): transfer at base, then write base+/-off
+            // back (writeback is implicit, W ignored).
+            let addr = if p {
+                if u { base.wrapping_add(off) } else { base.wrapping_sub(off) }
+            } else {
+                base
+            };
             if l {
                 cpu.regs.r[rt] = mem.read32(addr);
                 cpu.regs.r[rt2] = mem.read32(addr.wrapping_add(4));
@@ -2074,8 +2139,14 @@ pub fn exec32(
                 mem.write32(addr, rr(cpu, rt, pc));
                 mem.write32(addr.wrapping_add(4), rr(cpu, rt2, pc));
             }
-            if w {
-                cpu.regs.r[rn] = addr;
+            if w || !p {
+                cpu.regs.r[rn] = if p {
+                    addr
+                } else if u {
+                    base.wrapping_add(off)
+                } else {
+                    base.wrapping_sub(off)
+                };
             }
             adv(cpu, pc, 4);
             return true;
