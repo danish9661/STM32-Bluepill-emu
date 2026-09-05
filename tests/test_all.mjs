@@ -196,6 +196,21 @@ assert_eq(periph_read(USART1 + 0x04, 4) & 0xFF, 0x31, 'USART RX first byte 1');
 assert_eq(periph_read(USART1 + 0x04, 4) & 0xFF, 0x32, 'USART RX second byte 2');
 assert_eq(periph_read(USART1 + 0x04, 4) & 0xFF, 0x33, 'USART RX third byte 3');
 
+// ORE: burst past the 16-deep RX FIFO, then clear via the RM0008 SR+DR
+// read sequence (a sticky ORE used to wedge UART RX forever after any
+// >16-byte burst, e.g. pasted terminal lines in the echo demo)
+for (let i = 0; i < 17; i++) uart_rx_byte(USART1, 0x60 + i);
+sr = periph_read(USART1 + 0x00, 4);
+assert_eq(sr & (1 << 3), 1 << 3, 'USART SR ORE after 17-byte burst');
+for (let i = 0; i < 16; i++) assert_eq(periph_read(USART1 + 0x04, 4) & 0xFF, 0x60 + i, `USART RX drain byte ${i}`);
+sr = periph_read(USART1 + 0x00, 4);
+assert_eq(sr & (1 << 3), 0, 'USART SR ORE cleared by SR+DR sequence');
+// UART recovers: the next byte is received normally
+uart_rx_byte(USART1, 0x7A); // 'z'
+sr = periph_read(USART1 + 0x00, 4);
+assert_eq(sr & (1 << 5), 1 << 5, 'USART RXNE after post-ORE byte');
+assert_eq(periph_read(USART1 + 0x04, 4) & 0xFF, 0x7A, 'USART RX post-ORE byte z');
+
 // ============================================================
 // ADC
 // ============================================================

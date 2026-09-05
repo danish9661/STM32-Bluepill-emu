@@ -264,6 +264,12 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - **Fix (3.44→2.82s, ~70 MIPS, full enforcement intact)**: zero-call fast path (plain-static `MPU_ON`, synced on init + MPU CTRL writes) + outline ALL cold arms (`mpu_check_*_slow`, periph byte arms, exec-fault construction) so hot skeletons stay JIT-inlinable + raw fetch (exec_allow = data-read predicate + XN ⇒ allowed fetch bytes are data-readable by construction; re-gating them re-checked a proven predicate twice per fetch). Residual ~5% over gates-compiled-out is the honest cost of real enforcement. Details in docs/CPU.md "Memory protection".
 - **Verified**: `tests/test_all.mjs` 372/372 (incl. MPU paths), cargo cpu:: 16/16 + mpu 4/4, canary 39/39, cli 200M 39/39 @ 2.82s, emulator.js 200M 3/3, all 11 event/format/esm suites green. Pre-existing note: `cargo test --release --lib ext_devices::sd_card::block_rw_round_trip` fails at HEAD too (slice OOB, SDHC image size — untouched by this change, out of scope).
 
+### 23. Sticky ORE wedged UART RX + IABR active-bit leak (`src/peripherals/{usart,nvic}.rs`, `src/cpu/mod.rs`, `tests/test_all.mjs`) [committed]
+- **Symptom**: echo demo printed the first messages, then a long line (≥17 chars at once) killed UART RX permanently — only the 17th byte overflowed the 16-deep FIFO, but nothing ever echoed again. Isolated headless: 16/16 bursts healthy, 17/17 bursts 0/17 with zero recovery over +100M instr.
+- **Root cause (real bug, HW-verified semantics)**: the model's ORE bit was set-on-overflow but never cleared. RM0008 clears ORE on an SR-read + DR-read sequence; with sticky ORE, HAL's error path dropped every later byte forever (firmware kept cycling — uwTick advanced — just starved). Fix: `sr_read_armed` flag (set by guest SR read, consumed by guest DR read which clears ORE). Post-fix bursts behave like real HW: first 16 echo, overrun bytes lost, UART recovers, follow-ups echo.
+- **Companion fix**: `get_next_pending_intr` set IABR active bits on dispatch but the pop-only return never cleared them (phantom-active IRQs visible to firmware). `exception_return` now clears its own entry's bit via new `clear_active_bit()` (external IRQs only; SVC/NMI/HardFault have no IABR bit).
+- **Verified**: `tests/test_all.mjs` 392/392 (+20 ORE assertions); burst24 headless 16/24 + recovery; canary 39/39; cli 200M 39/39 @ 2.92s (perf intact); emulator.js 3/3; stm32f1 + ws_bridge green.
+
 
 
 ## Next Phase — Long-term Optimizations

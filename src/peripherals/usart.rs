@@ -29,6 +29,10 @@ pub struct Usart {
     rx_buf: Vec<u8>,
     irq_num: i32,
     txe_clear_until: u64,
+    /// RM0008 ORE-clear sequence state: set by a guest SR read, consumed by
+    /// the next guest DR read (which then clears ORE). Without this the ORE
+    /// bit was sticky forever and HAL's error path dropped every later byte.
+    sr_read_armed: bool,
     /// DMA channel: 0=none, 4/5=USART1_TX/RX, 6/7=USART2_TX/RX
     dma_channel_tx: u8,
     dma_channel_rx: u8,
@@ -54,6 +58,7 @@ impl Usart {
                 rx_buf: Vec::new(),
                 irq_num: irq,
                 txe_clear_until: 0,
+                sr_read_armed: false,
                 dma_channel_tx: tx_ch,
                 dma_channel_rx: rx_ch,
             }) as Box<dyn Peripheral>
@@ -92,6 +97,7 @@ impl Usart {
 
     fn read_sr(&mut self) -> u32 {
         self.refresh_txe();
+        self.sr_read_armed = true;
         self.sr
     }
 
@@ -109,6 +115,12 @@ impl Usart {
         if self.rx_buf.is_empty() && !self.is_loopback() {
             self.sr &= !(1 << 5); // Clear RXNE only when buffer empty
         }
+        // RM0008 §27.3: ORE clears on SR-read followed by DR-read. The flag
+        // above proves the guest did the SR half of the sequence.
+        if self.sr_read_armed {
+            self.sr &= !(1 << 3);
+        }
+        self.sr_read_armed = false;
         self.sr |= 0x40; // TC stays set
         self.update_interrupt(sys);
         dr

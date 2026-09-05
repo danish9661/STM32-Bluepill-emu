@@ -515,8 +515,7 @@ pub fn pwm_duty(addr: u32, channel: u32) -> u32 {
 }
 
 #[wasm_bindgen]
-pub fn is_watchdog_reset_requested() -> bool {
-    system::is_watchdog_reset_requested()
+pub fn is_watchdog_reset_requested() -> bool {    system::is_watchdog_reset_requested()
 }
 
 /// Inject a received byte into the UART at the given peripheral base address.

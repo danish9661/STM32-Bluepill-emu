@@ -244,6 +244,18 @@ impl Nvic {
         self.active_prio_stack.pop();
     }
 
+    /// Clear the IABR active bit for a returned exception (external IRQs
+    /// only; system exceptions have no IABR bit). `get_next_pending_intr`
+    /// sets the bit on dispatch but the old pop-only return left it set
+    /// forever — firmware reading IABR saw phantom-active IRQs.
+    pub fn clear_active_bit(&mut self, irq: i32) {
+        if irq >= 0 {
+            if let Some((idx, mask)) = Self::irq_reg_idx(irq) {
+                self.active[idx] &= !mask;
+            }
+        }
+    }
+
     pub fn maybe_set_systick_intr_pending(&mut self) {
         if let Some(systick_period) = self.systick_period {
             let n = INSTRUCTION_COUNT.load(Ordering::Relaxed);

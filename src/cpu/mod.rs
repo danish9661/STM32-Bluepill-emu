@@ -332,6 +332,11 @@ impl Cpu {
             None => 0,
         };
         sync_privilege(self, sys);
+        // Clear this entry's IABR active bit (set on dispatch); the old
+        // pop-only return leaked it, leaving phantom-active IRQs.
+        if let Some(q) = irq {
+            sys.p.nvic.borrow_mut().clear_active_bit(q);
+        }
         // Balance the active-priority push for this entry: get_next's push
         // for dispatched IRQs, the caller's push_active for synchronous
         // takes (SVC). A standalone SVC on an empty stack is a safe no-op.

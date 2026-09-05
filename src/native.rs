@@ -114,8 +114,7 @@ fn run_handler_to_return(cpu: &mut Cpu, mem: &mut FlatMemory) -> u32 {
 /// Dispatch all pending interrupts within the shared per-batch budget.
 /// Returns the number of IRQs dispatched.
 #[wasm_bindgen]
-pub fn rustcpu_dispatch() -> u32 {
-    let emu = native_mut();
+pub fn rustcpu_dispatch() -> u32 {    let emu = native_mut();
     let sys = crate::sys();
     let mut n = 0u32;
     loop {
