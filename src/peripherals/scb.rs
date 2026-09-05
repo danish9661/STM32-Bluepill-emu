@@ -147,13 +147,12 @@ impl Peripheral for Scb {
             0x1C => self.shpr[1],
             0x20 => self.shpr[2],
             0x24 => self.shcsr,
-            0x28 => self.cfsr | _sys.mpu.get().mmfsr as u32,
+            0x28 => self.cfsr | _sys.mpu.mmfsr.get() as u32,
             0x2C => self.hfsr,
             0x30 => self.dfsr,
             0x34 => {
-                let m = _sys.mpu.get();
-                if m.mmfar_valid {
-                    m.mmfar
+                if _sys.mpu.mmfar_valid.get() {
+                    _sys.mpu.mmfar.get()
                 } else {
                     self.mmfar
                 }
@@ -164,16 +163,16 @@ impl Peripheral for Scb {
             0x88 => self.cpacr,
             // MPU (delegated to WasmSystem state; see docs/CPU.md).
             0x90 => 0x0800, // TYPE: 8 regions, unified
-            0x94 => _sys.mpu.get().ctrl,
-            0x98 => _sys.mpu.get().rnr as u32,
-            0x9C => _sys.mpu.get().regions[_sys.mpu.get().sel()].rbar,
-            0xA0 => _sys.mpu.get().regions[_sys.mpu.get().sel()].rasr,
-            0xA4 => _sys.mpu.get().regions[1].rbar,
-            0xA8 => _sys.mpu.get().regions[1].rasr,
-            0xAC => _sys.mpu.get().regions[2].rbar,
-            0xB0 => _sys.mpu.get().regions[2].rasr,
-            0xB4 => _sys.mpu.get().regions[3].rbar,
-            0xB8 => _sys.mpu.get().regions[3].rasr,
+            0x94 => _sys.mpu.ctrl.get(),
+            0x98 => _sys.mpu.rnr.get() as u32,
+            0x9C => _sys.mpu.regions[_sys.mpu.sel()].get().rbar,
+            0xA0 => _sys.mpu.regions[_sys.mpu.sel()].get().rasr,
+            0xA4 => _sys.mpu.regions[1].get().rbar,
+            0xA8 => _sys.mpu.regions[1].get().rasr,
+            0xAC => _sys.mpu.regions[2].get().rbar,
+            0xB0 => _sys.mpu.regions[2].get().rasr,
+            0xB4 => _sys.mpu.regions[3].get().rbar,
+            0xB8 => _sys.mpu.regions[3].get().rasr,
             _ => 0,
         }
     }
@@ -192,12 +191,10 @@ impl Peripheral for Scb {
             0x28 => {
                 // CFSR is write-1-to-clear (real HW semantics).
                 self.cfsr &= !value;
-                let mut m = sys.mpu.get();
-                m.mmfsr &= !(value as u8);
-                if m.mmfsr == 0 {
-                    m.mmfar_valid = false;
+                sys.mpu.mmfsr.set(sys.mpu.mmfsr.get() & !(value as u8));
+                if sys.mpu.mmfsr.get() == 0 {
+                    sys.mpu.mmfar_valid.set(false);
                 }
-                sys.mpu.set(m);
             }
             0x2C => self.hfsr = value & 0x7FFF,
             0x30 => self.dfsr = value & 0xFFFF,
@@ -208,41 +205,36 @@ impl Peripheral for Scb {
             // MPU register file (state lives on WasmSystem; RNR-selected
             // plus A1-A3 aliases, VALID latches RNR first per ARM ordering).
             0x94 => {
-                let mut m = sys.mpu.get();
-                m.ctrl = value & 7;
-                sys.mpu.set(m);
+                sys.mpu.ctrl.set(value & 7);
+                crate::system::sync_mpu_gate(sys);
             }
-            0x98 => {
-                let mut m = sys.mpu.get();
-                m.rnr = (value & 7) as u8;
-                sys.mpu.set(m);
-            }
+            0x98 => sys.mpu.rnr.set((value & 7) as u8),
             0x9C | 0xA4 | 0xAC | 0xB4 => {
-                let mut m = sys.mpu.get();
                 let idx = match offset {
                     0x9C => {
                         if value & (1 << 4) != 0 {
-                            m.rnr = (value & 7) as u8;
+                            sys.mpu.rnr.set((value & 7) as u8);
                         }
-                        m.sel()
+                        sys.mpu.sel()
                     }
                     0xA4 => 1,
                     0xAC => 2,
                     _ => 3,
                 };
-                m.regions[idx].rbar = value;
-                sys.mpu.set(m);
+                let mut r = sys.mpu.regions[idx].get();
+                r.rbar = value;
+                sys.mpu.regions[idx].set(r);
             }
             0xA0 | 0xA8 | 0xB0 | 0xB8 => {
-                let mut m = sys.mpu.get();
                 let idx = match offset {
-                    0xA0 => m.sel(),
+                    0xA0 => sys.mpu.sel(),
                     0xA8 => 1,
                     0xB0 => 2,
                     _ => 3,
                 };
-                m.regions[idx].rasr = value;
-                sys.mpu.set(m);
+                let mut r = sys.mpu.regions[idx].get();
+                r.rasr = value;
+                sys.mpu.regions[idx].set(r);
             }
             _ => {}
         }

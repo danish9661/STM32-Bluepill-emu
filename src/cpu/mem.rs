@@ -127,31 +127,29 @@ impl FlatMemory {
 
 impl Memory for FlatMemory {
     fn read8(&self, addr: u32) -> u8 {
-        // MPU data-read gate (single branch when disabled; debugger, DMA and
-        // firmware-install paths use the raw variants instead).
-        if !crate::sys().mpu_check_data(addr, false) {
-            return 0;
+        // MPU data-read gate: one mirrored-flag load + branch when disabled
+        // (debugger, DMA and firmware-install paths use raw variants instead).
+        // The peripheral arm is outlined cold so the hot RAM/flash skeleton
+        // stays small enough for the JIT to inline (see MPU_ON docs).
+        if crate::system::mpu_gate_on() {
+            core::hint::cold_path();
+            if !crate::sys().mpu_check_data_slow(addr, false) {
+                return 0;
+            }
         }
-        self.read8_raw(addr)
+        if is_periph(addr) {
+            return self.read8_periph_cold(addr);
+        }
+        self.read8_raw_unchecked(addr)
     }
+
     fn read8_raw(&self, addr: u32) -> u8 {
         if is_periph(addr) {
-            // Single width-1 model read (mirrors the JS memReadHook, which
-            // takes the low byte). The model aligns internally.
-            return crate::sys().p.read(crate::sys(), addr, 1) as u8;
+            return self.read8_periph_cold(addr);
         }
-        if self.in_flash(addr) {
-            self.flash[(addr - self.flash_base) as usize]
-        } else if self.in_ram(addr) {
-            self.ram[(addr - self.ram_base) as usize]
-        } else if let Some(idx) = self.extra_idx(addr) {
-            let r = &self.extra[idx];
-            r.data[(addr - r.base) as usize]
-        } else {
-            self.bad.set(Some(addr));
-            0
-        }
+        self.read8_raw_unchecked(addr)
     }
+
     fn read16(&self, addr: u32) -> u16 {
         if is_periph(addr) {
             return crate::sys().p.read(crate::sys(), addr, 2) as u16;
@@ -182,31 +180,25 @@ impl Memory for FlatMemory {
     }
     fn write8(&mut self, addr: u32, v: u8) {
         // MPU data-write gate (denials drop the store).
-        if !crate::sys().mpu_check_data(addr, true) {
-            return;
+        if crate::system::mpu_gate_on() {
+            core::hint::cold_path();
+            if !crate::sys().mpu_check_data_slow(addr, true) {
+                return;
+            }
         }
-        self.write8_raw(addr, v)
+        if is_periph(addr) {
+            return self.write8_periph_cold(addr, v);
+        }
+        self.write8_raw_unchecked(addr, v)
     }
+
     fn write8_raw(&mut self, addr: u32, v: u8) {
         if is_periph(addr) {
-            // Single width-1 model write. Never split a wider guest store
-            // into byte RMWs here: each model write can have side effects
-            // (a USART DR write emits a UART char), so one guest store must
-            // equal exactly one model call, like the JS memWriteHook.
-            crate::sys().p.write(crate::sys(), addr, 1, v as u32);
-            return;
+            return self.write8_periph_cold(addr, v);
         }
-        if self.in_flash(addr) {
-            // flash protection: guest stores are ignored (see struct docs)
-        } else if self.in_ram(addr) {
-            self.ram[(addr - self.ram_base) as usize] = v;
-        } else if let Some(idx) = self.extra_idx(addr) {
-            let r = &mut self.extra[idx];
-            r.data[(addr - r.base) as usize] = v;
-        } else {
-            self.bad.set(Some(addr));
-        }
+        self.write8_raw_unchecked(addr, v)
     }
+
     fn write16(&mut self, addr: u32, v: u16) {
         if is_periph(addr) {
             crate::sys().p.write(crate::sys(), addr, 2, v as u32);
@@ -224,5 +216,57 @@ impl Memory for FlatMemory {
         self.write8(addr + 1, ((v >> 8) & 0xFF) as u8);
         self.write8(addr + 2, ((v >> 16) & 0xFF) as u8);
         self.write8(addr + 3, ((v >> 24) & 0xFF) as u8);
+    }
+}
+
+impl FlatMemory {
+    /// Hot RAM/flash/extra body shared by read8/read8_raw. Kept tiny so the
+    /// JIT keeps inlining the gated callers; peripheral + MPU arms live in
+    /// cold out-of-line fns below.
+    #[inline(always)]
+    fn read8_raw_unchecked(&self, addr: u32) -> u8 {
+        if self.in_flash(addr) {
+            self.flash[(addr - self.flash_base) as usize]
+        } else if self.in_ram(addr) {
+            self.ram[(addr - self.ram_base) as usize]
+        } else if let Some(idx) = self.extra_idx(addr) {
+            let r = &self.extra[idx];
+            r.data[(addr - r.base) as usize]
+        } else {
+            self.bad.set(Some(addr));
+            0
+        }
+    }
+
+    #[inline(always)]
+    fn write8_raw_unchecked(&mut self, addr: u32, v: u8) {
+        if self.in_flash(addr) {
+            // flash protection: guest stores are ignored (see struct docs)
+        } else if self.in_ram(addr) {
+            self.ram[(addr - self.ram_base) as usize] = v;
+        } else if let Some(idx) = self.extra_idx(addr) {
+            let r = &mut self.extra[idx];
+            r.data[(addr - r.base) as usize] = v;
+        } else {
+            self.bad.set(Some(addr));
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn read8_periph_cold(&self, addr: u32) -> u8 {
+        // Single width-1 model read (mirrors the JS memReadHook, which
+        // takes the low byte). The model aligns internally.
+        crate::sys().p.read(crate::sys(), addr, 1) as u8
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn write8_periph_cold(&self, addr: u32, v: u8) {
+        // Single width-1 model write. Never split a wider guest store
+        // into byte RMWs here: each model write can have side effects
+        // (a USART DR write emits a UART char), so one guest store must
+        // equal exactly one model call, like the JS memWriteHook.
+        crate::sys().p.write(crate::sys(), addr, 1, v as u32);
     }
 }

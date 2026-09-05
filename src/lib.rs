@@ -69,6 +69,7 @@ fn try_sys() -> Option<&'static WasmSystem> {
     unsafe { (*std::ptr::addr_of!(SYS)).as_ref() }
 }
 
+#[inline(always)]
 pub(crate) fn sys() -> &'static WasmSystem {
     try_sys().expect("WasmSystem not initialized — call init() or init_svd() first")
 }
@@ -103,6 +104,7 @@ pub fn init() {
     peripherals::gpio::clear_pin_events();
     native::reset();
     set_sys(WasmSystem::new());
+    system::sync_mpu_gate(sys());
 }
 
 /// Initialize the emulator from an SVD XML string (e.g., STM32F407.svd).
@@ -114,6 +116,7 @@ pub fn init_svd(svd_xml: &str) {
     peripherals::gpio::clear_pin_events();
     native::reset();
     set_sys(WasmSystem::new_svd(svd_xml));
+    system::sync_mpu_gate(sys());
 }
 
 #[wasm_bindgen]

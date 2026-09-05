@@ -135,8 +135,20 @@ RO/RO), XN, background map (PRIVDEFENA), PPB always priv-only + XN.
   transitions (FlatMemory has no CPU context); DMA uses raw access as a
   trusted master. Exception stacking bypasses checks (documented
   approximation — stacking faults would need precise-fault machinery).
-- Gate firmware never enables it: zero behavior change when off (one branch
-  per access).
+- Gate firmware never enables it: zero behavior change when off. The off-state
+  fast path is load-bearing for speed — ~1B gate evaluations per 200M run, and
+  ANY per-access call/branch shape cost ~30% in V8 (measured 2.6s → 3.9s across
+  five variants: method call, inlined check, Cell-field loads, atomic mirror,
+  cold_path hints — none recovered it). What works: a plain-static `MPU_ON`
+  mirror (synced on init + every MPU CTRL write) collapsing the gate to one
+  `global.get` + branch with zero calls, ALL cold arms (`mpu_check_*_slow`,
+  periph byte arms, exec-fault construction) outlined `#[cold] + #[inline(never)]`
+  so the hot RAM/flash skeletons stay small enough for the JIT to keep inlining,
+  and raw fetch (`exec_allow` = data-read predicate + XN, so an allowed fetch's
+  bytes are data-readable by construction — re-gating fetch bytes would re-check
+  a proven predicate twice per instruction). Result: 200M 39/39 in ~2.8s
+  (~70 MIPS) vs 2.6s with gates compiled out; the residual ~5% is the honest
+  cost of real enforcement.
 
 ## Driver contract (`src/native.rs`)
 

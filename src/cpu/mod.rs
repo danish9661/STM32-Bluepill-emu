@@ -351,8 +351,23 @@ impl Cpu {
         true
     }
 
-    pub fn run(&mut self, sys: &WasmSystem, mem: &mut dyn Memory, budget: u32) -> u32 {
-        let mut done = 0;
+    /// Cold MPU execute-never arm: records MMFSR + pends MemManage
+    /// (escalating without MEMFAULTENA) and raises the diagnosable halt.
+    /// Returns true when the run loop must break. Outlined so the hot
+    /// fetch skeleton stays small for the JIT (see MPU_ON docs).
+    #[cold]
+    #[inline(never)]
+    fn mpu_exec_denied(&mut self, sys: &WasmSystem, mem: &mut dyn Memory, pc: u32) -> bool {
+        if sys.mpu_check_exec_slow(pc) {
+            return false;
+        }
+        if self.fault.is_none() {
+            self.fault = Some(CpuFault { pc, op1: mem.read16_raw(pc), op2: 0, len: 2 });
+        }
+        true
+    }
+
+    pub fn run(&mut self, sys: &WasmSystem, mem: &mut dyn Memory, budget: u32) -> u32 {        let mut done = 0;
         while done < budget {
             if self.fault.is_some() {
                 break;
@@ -362,21 +377,25 @@ impl Cpu {
             }
             let pc = self.regs.r[15] & !1;
             // MPU execute-never (no-op unless enabled): fault loudly instead
-            // of silently running forbidden code. The model records MMFSR and
-            // pends MemManage (escalating without MEMFAULTENA) inside the
-            // check; the halt here makes it diagnosable.
-            if !sys.mpu_check_exec(pc) {
-                if self.fault.is_none() {
-                    self.fault = Some(CpuFault { pc, op1: mem.read16_raw(pc), op2: 0, len: 2 });
+            // of silently running forbidden code. Outlined cold so the hot
+            // fetch skeleton stays JIT-friendly (see MPU_ON docs).
+            if sys.mpu.enabled() {
+                core::hint::cold_path();
+                if self.mpu_exec_denied(sys, mem, pc) {
+                    break;
                 }
-                break;
             }
-            let op = mem.read16(pc);
+            // Raw fetch: the exec gate above already enforced read permission
+            // (exec_allow = data-read predicate + XN clear, so an allowed
+            // fetch's bytes are data-readable by construction) — per-byte
+            // data gates here would re-check a proven predicate twice per
+            // fetch for zero enforcement gain.
+            let op = mem.read16_raw(pc);
             let l = thumb::len(op);
             let ok = if l == 2 {
                 thumb::exec16(self, sys, mem, op, pc)
             } else {
-                let o2 = mem.read16(pc + 2);
+                let o2 = mem.read16_raw(pc + 2);
                 thumb::exec32(self, sys, mem, op, o2, pc)
             };
             if !ok {
