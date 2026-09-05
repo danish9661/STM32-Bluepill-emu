@@ -519,14 +519,20 @@ function handleWorkerMsg(e) {
       setState('Stopped');
       $('stopBtn').disabled=true; $('runBtn').disabled=false;
     }
-    // autopilot check (worker already does CAN/uart, but main checks SUMMARY)
+    // autopilot check (worker already does CAN/uart, but main checks SUMMARY).
+    // The 10K-step (~200M instr) budget cap applies ONLY to autopilot runs:
+    // interactive presets (echo/fade/timer/...) loop forever and must keep
+    // running past it, else typed input lands on a halted emulator.
     const termText = terminal.textContent;
     const sumM = termText.match(/SUMMARY\s+pass=(\d+)\s+fail=(\d+)/);
-    if (sumM || runSteps>=10000) {
+    if (sumM || (autopilot && runSteps>=10000)) {
       if (sumM) {
         const pass=+sumM[1], fail=+sumM[2];
         log(`All done: ${pass} checks passed, ${fail} failed.`, fail?'t-err':'t-ok');
         setState(fail?'Error':'Done');
+      } else {
+        log('Autopilot stopped: instruction budget reached (200M).', 't-err');
+        setState('Stopped');
       }
       running=false;
       if (worker) worker.postMessage({type:'stop'});
