@@ -438,3 +438,23 @@ fn pld_hints_vs_ldr_pc_literal() {
     assert!(cpu.fault.is_none(), "ldr.w pc literal fault: {:?}", cpu.fault);
     assert_eq!(cpu.regs.r[15] & !1, 0x20002010);
 }
+
+/// SMLAL/UMLAL 64-bit accumulate (op 0xC/0xE only; op-9 plain is invalid).
+#[test]
+fn smlal_umlal_forms() {
+    let _held = crate::test_util::lock();
+    // smlal r0,r2,r1,r1 (FBC1 0201): acc=r2:r0=1:0 plus 0x10000*0x10000.
+    // 0x10000*0x10000 = 0x1_00000000 -> lo=0, hi=2 (1 accum + 1 carry).
+    let (cpu, _) = run_snippet(&[0xFBC1, 0x0201], &[(0, 0), (1, 0x10000), (2, 1)]);
+    assert!(cpu.fault.is_none(), "smlal fault: {:?}", cpu.fault);
+    assert_eq!(cpu.regs.r[0], 0);
+    assert_eq!(cpu.regs.r[2], 2);
+    // umlal lr,r5,r1,r2 (FBE1 E502): acc=r5:lr=3:2 plus 5*7=35 -> lo=37,hi=3.
+    let (cpu, _) = run_snippet(
+        &[0xFBE1, 0xE502, 0xE7FE],
+        &[(1, 5), (2, 7), (5, 3), (14, 2)],
+    );
+    assert!(cpu.fault.is_none(), "umlal fault: {:?}", cpu.fault);
+    assert_eq!(cpu.regs.r[14], 37);
+    assert_eq!(cpu.regs.r[5], 3);
+}

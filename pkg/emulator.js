@@ -253,6 +253,7 @@ export async function createEmulator(opts = {}) {
     let fwAddr = flash_addr;
     let elfRegions = null;
     let symbolList = [];
+    let symSorted = null;
 
     if (typeof firmware === 'string' || (firmware instanceof Uint8Array && firmware.length > 0 && firmware[0] === 0x3A)) {
         const text = typeof firmware === 'string' ? firmware : new TextDecoder().decode(firmware);

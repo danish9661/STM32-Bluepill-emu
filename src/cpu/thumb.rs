@@ -1856,6 +1856,8 @@ pub fn exec32(
                 // Missing this ran every sdiv as multiply-accumulate (the
                 // quotient came back as the dividend's high word, i.e. the
                 // dividend itself — DOOM's (10*168/10) stayed 1680).
+                // NOTE: plain (non-F:F) op-9 has no SMLAL encoding (SMLAL
+                // lives at op 0xC) — fault it instead of accumulating.
                 if o2 & 0xF0F0 == 0xF0F0 {
                     let b = rr(cpu, rm, pc) as i32;
                     cpu.regs.r[rd] = if b == 0 {
@@ -1866,17 +1868,7 @@ pub fn exec32(
                     adv(cpu, pc, 4);
                     return true;
                 }
-                // SMLAL
-                let a = rr(cpu, rn, pc) as i32 as i64;
-                let b = rr(cpu, rm, pc) as i32 as i64;
-                let lo = ((o2 >> 12) & 0xF) as usize;
-                let hi = ((o2 >> 8) & 0xF) as usize;
-                let acc = ((cpu.regs.r[hi] as u64) << 32) | cpu.regs.r[lo] as u64;
-                let p = (acc as i64).wrapping_add(a.wrapping_mul(b)) as u64;
-                cpu.regs.r[lo] = p as u32;
-                cpu.regs.r[hi] = (p >> 32) as u32;
-                adv(cpu, pc, 4);
-                return true;
+                return fault(cpu, pc, op1, op2, 4);
             }
             10 => {
                 // UMULL
@@ -1906,23 +1898,35 @@ pub fn exec32(
                 return true;
             }
             13 => {
-                // SDIV or SMLAL: SDIV has the same F:F op2 shape
-                if o2 & 0xF0F0 == 0xF0F0 {
-                    let b = rr(cpu, rm, pc) as i32;
-                    cpu.regs.r[rd] = if b == 0 {
-                        0
-                    } else {
-                        (rr(cpu, rn, pc) as i32).wrapping_div(b) as u32
-                    };
-                    adv(cpu, pc, 4);
-                    return true;
-                }
+                // SMLSLD/X (dual-halfword DSP) is all that lives here:
+                // UNDEFINED on Cortex-M3, fault either way.
+                return fault(cpu, pc, op1, op2, 4);
+            }
+            12 => {
+                // SMLAL (signed 32x32 + 64 accumulate). Op 0xC is its only
+                // home (the old arm-9 fallback accepted invalid op-9 shapes
+                // as SMLAL instead).
+                let a = rr(cpu, rn, pc) as i32 as i64;
+                let b = rr(cpu, rm, pc) as i32 as i64;
                 let lo = ((o2 >> 12) & 0xF) as usize;
                 let hi = ((o2 >> 8) & 0xF) as usize;
                 let acc = ((cpu.regs.r[hi] as u64) << 32) | cpu.regs.r[lo] as u64;
-                let a = rr(cpu, rn, pc) as i32 as i64;
-                let b = rr(cpu, rm, pc) as i32 as i64;
                 let p = (acc as i64).wrapping_add(a.wrapping_mul(b)) as u64;
+                cpu.regs.r[lo] = p as u32;
+                cpu.regs.r[hi] = (p >> 32) as u32;
+                adv(cpu, pc, 4);
+                return true;
+            }
+            14 => {
+                // UMLAL (unsigned 32x32 + 64 accumulate). Op 0xE is its only
+                // home (UDIV lives at op 0xB). Missing this faulted the
+                // soft-float __muldf3 helper, killing CoreMark result prints.
+                let lo = ((o2 >> 12) & 0xF) as usize;
+                let hi = ((o2 >> 8) & 0xF) as usize;
+                let acc = ((cpu.regs.r[hi] as u64) << 32) | cpu.regs.r[lo] as u64;
+                let p = acc.wrapping_add(
+                    (rr(cpu, rn, pc) as u64).wrapping_mul(rr(cpu, rm, pc) as u64),
+                );
                 cpu.regs.r[lo] = p as u32;
                 cpu.regs.r[hi] = (p >> 32) as u32;
                 adv(cpu, pc, 4);

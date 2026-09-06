@@ -1,0 +1,28 @@
+#line 1 "/home/danish1075/Documents/stm32 emu blue pill/tests/arduino_coremark/arduino_coremark.ino"
+// CoreMark 1.0 CPU-semantics check on the Bluepill emulator.
+// Runs the standard 2000-iteration performance profile and prints the
+// known-answer CRCs (list 0xe714, matrix 0x1fd7, state 0x8e3a,
+// final 0x5275). The test harness (tests/test_coremark.mjs) asserts them.
+#include <Arduino.h>
+
+extern "C" {
+int coremark_main(void);
+void coremark_putc(char c);
+}
+
+extern "C" void coremark_putc(char c) {
+    Serial1.write((uint8_t)c);
+}
+
+void setup() {
+    Serial1.begin(115200);
+    Serial1.print("\r\n=== CoreMark ===\r\n");
+    coremark_main();
+    Serial1.print("=== CoreMark DONE ===\r\n");
+}
+
+void loop() {
+    // Park: test ends by instruction budget.
+    delay(1000);
+}
+

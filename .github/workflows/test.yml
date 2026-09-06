@@ -100,6 +100,8 @@ jobs:
           cp site/arduino_eeprom2.bin tests/arduino_periph_test/build/eeprom2.bin
           cp site/arduino_spi_flash.bin tests/arduino_periph_test/build/spi_flash.bin
           cp site/arduino_spi_flash2.bin tests/arduino_periph_test/build/spi_flash2.bin
+          mkdir -p tests/arduino_coremark/build
+          cp site/arduino_coremark.elf tests/arduino_coremark/build/arduino_coremark.ino.elf
       - name: Unit tests
         run: node tests/test_all.mjs
       - name: Firmware format + ESM smoke tests
@@ -118,6 +120,8 @@ jobs:
         run: node tests/test_ws_bridge.mjs
       - name: WS2812 strip (SPI1 + DMA1 CH3) regression
         run: node tests/test_ws2812.mjs
+      - name: CoreMark CPU-semantics check (known-answer CRCs)
+        run: node tests/test_coremark.mjs
       - name: STM32F1 wrapper API (ergonomic class over emulator.js)
         run: node tests/test_stm32f1_api.mjs
       - name: I2C/SPI/USART virtual-peripheral event queue

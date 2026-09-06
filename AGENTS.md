@@ -287,6 +287,13 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - **Recovery-test template** (new standard for error states): force the error, assert the flag, exercise the clear sequence, assert normal operation resumes. Added I2C-BTF block (7 asserts: SB→ADDR→Active→BTF set→DR-write clears→STOP clean→bus reusable; device on 0x51 so the later NACK-at-0x50 test still NACKs; `reset_ext_devices()` after to leave no residue).
 - **Verified**: test_all 399/399; full gate + perf re-run at commit.
 
+### 26. CoreMark known-answer check + UMLAL/SMLAL decoder fix (`tests/arduino_coremark/`, `tests/test_coremark.mjs`, `src/cpu/thumb.rs`, `pkg/emulator.js`) [committed]
+- **Port**: upstream CoreMark 1.0 sources + Arduino sketch (Serial1 output, millis() timing, 200-iteration CI config; `main`→`coremark_main`, `ee_ptr_int` stays 32-bit for ARM). Rebuild: `arduino-cli compile --fqbn STMicroelectronics:stm32:GenF1:pnum=BLUEPILL_F103C8 --build-path tests/arduino_coremark/build tests/arduino_coremark`; ship `site/arduino_coremark.elf` (force-add) + CI copy step (build/ is ignored).
+- **Real decoder bug found by it**: soft-float `__muldf3` uses UMLAL (hw1 `0xFBE0`), which faulted — our FB block only had UDIV/SDIV opcodes. Fixed: new op-`0xC` (SMLAL) + op-`0xE` (UMLAL) arms; arm-9 SMLAL fallback removed (plain op-9 is invalid); dead-wrong arm-13 (SDIV/SMLAL at DSP-only `0xFBDx`) now faults. Before the fix CoreMark wedged in `WWDG_IRQHandler`'s default spin (UNDEFINSTR→HardFault, CFSR-verified) — a good reminder that any decode gap lands in the default-handler spin, not a loud error.
+- **Proof (three-way agreement)**: emulator @200 = native-x86 same-sources @200 = bit-identical (list/matrix/state/final); list/matrix/state also match the PUBLISHED 1.0 values (0xe714/0x1fd7/0x8e3a). Full 2000-iter emulator run matches published list/matrix/state too; seedcrc/final differ from the 1.0 publication on BOTH backends identically (upstream recipe drift, not emulation — differential proof dominates). CI asserts crclist/crcmatrix/crcstate/crcfinal + completion (~200M instr).
+- **Drive-by fix**: `pkg/emulator.js` `symSorted` was never declared — the fault reporter itself crashed (`ReferenceError`) on any decode gap without symbols; declared + reset in `setSymbols`.
+- **Verified**: test_coremark 5/5; cpu 35/35; census gates green; test_all 399/399; emulator.js + ws_bridge green.
+
 
 
 ## Next Phase — Long-term Optimizations
