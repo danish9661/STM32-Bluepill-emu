@@ -1,4 +1,0 @@
-core_main.o: \
- /home/danish1075/Documents/stm32\ emu\ blue\ pill/tests/arduino_coremark/build/sketch/core_main.c \
- /home/danish1075/Documents/stm32\ emu\ blue\ pill/tests/arduino_coremark/build/sketch/coremark.h \
- /home/danish1075/Documents/stm32\ emu\ blue\ pill/tests/arduino_coremark/build/sketch/core_portme.h
