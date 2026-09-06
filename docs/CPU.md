@@ -160,6 +160,30 @@ surface via `rustcpu_fault()` → driver raises UNDEFINSTR with symbols, else
 steps past. `INSTRUCTION_COUNT` advances only in `step_batch` (DWT CYCCNT and
 all delta peripherals key off it).
 
+## Decoder correctness (census + differential fuzz)
+
+- Census: `cpu::census` executes all 65,536 halfwords sterile (odd regs/mem so
+  valid indirect branches succeed) and diffs vs Capstone M-class
+  (`tests/census_16.py`, 0 gaps/0 over-accepts outside the reviewed ACCEPTED
+  list); `census_dump_32` samples every first halfword × 256 seconds
+  (`tests/census_32.py`, per-family rules + accepted_gap for UNPREDICTABLE
+  shapes). Gate: `cargo test --release --lib cpu::census &&
+  python3 tests/census_*.py` (exit 0).
+- Differential fuzz (`tests/fuzz_diff.py`, worker `src/cpu/diffuzz.rs`):
+  samples census-'0' encodings → runs one instruction on our core and on a
+  Unicorn oracle (same image/regs, TB flushed per case) → compares
+  regs/PC/xPSR-NZCVQ/memhash/fault. Triage policy lives in the script
+  (unmapped / reserved / cap-invalid / DSP / STREX / Rn==Rt-WB all
+  expected-or-resampled; only mapped cap-valid value agreement is signal).
+  Current: 2700 cases, 0 divergences. Found 10 real decoder bugs (SSAT/USAT
+  shift fields, logical-carry `nzc`, T3-literal, EA/EB bit15, long-mul
+  sub-opcode, bitfield width, LDM writeback/SRS-space/Rn-list, LDRD-PC,
+  BLX order, STRD-PC-writeback, ADDW/SUBW-PC) plus the Bcc.W model
+  (J1=`o2[11]`, J2=`o2[13]`, direct — unlike B.W's `NOT(J^S)`).
+- Probe battery (`src/cpu/isa_tests.rs`, 29 tests): Capstone-locked
+  encodings with exact regs/flags/mem asserts, incl. the fuzz-derived
+  `bcc_w_forward_s0`/`bcc_w_backward_s1` and `unpredictable_shapes_fault`.
+
 ## Tests
 
 - `cargo test --release --lib cpu::smoke` — blinky, echo, periph39 39/39 in

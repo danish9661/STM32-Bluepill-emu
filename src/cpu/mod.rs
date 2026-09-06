@@ -20,6 +20,8 @@ mod core_tests;
 mod isa_tests;
 #[cfg(test)]
 mod census;
+#[cfg(test)]
+mod diffuzz;
 
 pub use regs::Regs;
 pub use mem::Memory;
@@ -385,7 +387,8 @@ impl Cpu {
         true
     }
 
-    pub fn run(&mut self, sys: &WasmSystem, mem: &mut dyn Memory, budget: u32) -> u32 {        let mut done = 0;
+    pub fn run(&mut self, sys: &WasmSystem, mem: &mut dyn Memory, budget: u32) -> u32 {
+        let mut done = 0;
         while done < budget {
             if self.fault.is_some() {
                 break;
@@ -422,7 +425,6 @@ impl Cpu {
                 }
                 break;
             }
-            done += 1;
             // Keep the inactive... no — keep the CURRENT stack bank in sync
             // with r13 after every thread-mode instruction. PUSH/POP/ADD-SP
             // and LDM/STM writeback move r13 directly; without this the bank
@@ -438,6 +440,7 @@ impl Cpu {
                     self.regs.msp = self.regs.r[13];
                 }
             }
+            done += 1;
             self.cycles += 1;
             // Inline interrupt delivery (no JS pump needed): take the next
             // deliverable exception with PRIMASK clear — in thread mode AND

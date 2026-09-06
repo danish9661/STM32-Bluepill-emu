@@ -93,6 +93,19 @@ fn nz(c: &mut Cpu, v: u32) {
         | if v == 0 { 0x40000000 } else { 0 }
         | if v & 0x80000000 != 0 { 0x80000000 } else { 0 };
 }
+/// Flag-setting logical op: N/Z from the result, C = shifter carry-out,
+/// V unchanged (ARM ARM). Differential fuzz caught the missing C write
+/// (orrs-imm kept a stale C=1 where the oracle cleared it).
+#[inline]
+fn nzc(c: &mut Cpu, v: u32, co: u32) {
+    if c.it_suppress {
+        return;
+    }
+    c.regs.xpsr = (c.regs.xpsr & !0xE0000000)
+        | if v == 0 { 0x40000000 } else { 0 }
+        | if v & 0x80000000 != 0 { 0x80000000 } else { 0 }
+        | if co != 0 { 0x20000000 } else { 0 };
+}
 fn add_flags(c: &mut Cpu, a: u32, b: u32, ci: u32) -> u32 {
     let r = a.wrapping_add(b).wrapping_add(ci);
     let carry = (a as u64) + (b as u64) + (ci as u64) > 0xFFFF_FFFF;
@@ -351,12 +364,11 @@ pub fn exec16(cpu: &mut Cpu, sys: &WasmSystem, mem: &mut dyn Memory, op: u16, pc
         // Predicated (in-IT) T1 MOVS preserves flags (matches silicon and
         // GCC's expectation: D_PageTicker's `itt lt; movlt; strlt` needs N
         // live for strlt; clobbering it hangs the title forever). Bare movs
-        // still sets N/Z (V cleared, C preserved). it_suppress covers the
-        // last-slot case too (it_n is already cleared there when it_ok runs).
+        // sets N/Z via nz(); C and V are UNCHANGED (differential fuzz
+        // caught a stray V-clear here).
+        // it_suppress covers the last-slot case too (it_n is already
+        // cleared there when it_ok runs).
         nz(cpu, o & 0xFF);
-        if !cpu.it_suppress {
-            cpu.regs.xpsr &= !0x10000000;
-        }
         adv(cpu, pc, 2);
         return true;
     }
@@ -530,6 +542,14 @@ pub fn exec16(cpu: &mut Cpu, sys: &WasmSystem, mem: &mut dyn Memory, op: u16, pc
             _ => {
                 let t = rr(cpu, rs, pc);
                 if o & 0x80 != 0 {
+                    // BLX reg: bits[2:0] are reserved 000 on Cortex-M3
+                    // (v8-M blxns space) — validate BEFORE writing LR, or
+                    // a faulting BLX corrupts LR (differential fuzz: LR
+                    // written, oracle faults cleanly). Target must stay
+                    // Thumb (branch faults even targets like HW).
+                    if o & 7 != 0 {
+                        return fault(cpu, pc, op, 0, 2);
+                    }
                     // BLX reg: LR = next addr; target must stay Thumb
                     cpu.regs.r[14] = (pc + 2) | 1;
                 }
@@ -863,7 +883,7 @@ fn alu_op(
         0 => {
             let r = a & b;
             if s {
-                nz(cpu, r);
+                nzc(cpu, r, co);
             }
             if rd_is_test {
                 None
@@ -874,28 +894,28 @@ fn alu_op(
         1 => {
             let r = a & !b;
             if s {
-                nz(cpu, r);
+                nzc(cpu, r, co);
             }
             Some(r)
         }
         2 => {
             let r = a | b;
             if s {
-                nz(cpu, r);
+                nzc(cpu, r, co);
             }
             Some(r)
         }
         3 => {
             let r = a | !b;
             if s {
-                nz(cpu, r);
+                nzc(cpu, r, co);
             }
             Some(r)
         }
         4 => {
             let r = a ^ b;
             if s {
-                nz(cpu, r);
+                nzc(cpu, r, co);
             }
             if rd_is_test {
                 None
@@ -986,10 +1006,50 @@ pub fn exec32(
         // USAT shift type lives in o1[5] (0=LSL 0xF380, 1=ASR 0xF3A0); the
         // ASR form previously fell into modified-imm data-proc and computed
         // garbage (silent mis-decode of a valid encoding).
+        // Shift amount is imm3:imm2 = o2[14:12]:o2[7:6] (NOT o2[14:10]:
+        // o2[11:8] is Rd — differential fuzz caught LSL-by-16-vs-17 here).
+        // Dual-halfword forms take the ASR hw1 with o2[15:12]==0 AND
+        // o2[7:4]==0 (capstone-verified: anything else with those hw1
+        // bytes is single-shift or INVALID, never USAT16/SSAT16).
         if (o1 & 0xFFF0 == 0xF380 || o1 & 0xFFF0 == 0xF3A0) && o2 < 0x8000 {
             // USAT Rd, #sat, Rn [, LSL/ASR #sh]
+            let rd = ((o2 >> 8) & 0xF) as usize;
+            let rn = (o1 & 0xF) as usize;
+            let asr = (o1 & 0xFFF0) == 0xF3A0;
+            if asr && (o2 & 0xF000) == 0 && (o2 & 0x00F0) == 0 {
+                // USAT16 Rd, #sat, Rn: per-halfword unsigned saturate, sat
+                // direct from o2[3:0] (0-15, no +1 unlike SSAT16).
+                let sat = (o2 & 0xF) as u32;
+                let max: u64 = if sat >= 32 { 0xFFFF_FFFF } else { (1u64 << sat) - 1 };
+                let a = rr(cpu, rn, pc);
+                let mut r = 0u32;
+                let mut q = false;
+                for half in 0..2 {
+                    let v = ((a >> (half * 16)) & 0xFFFF) as u64;
+                    if v > max {
+                        r |= (max as u32) << (half * 16);
+                        q = true;
+                    } else {
+                        r |= (v as u32) << (half * 16);
+                    }
+                }
+                if q {
+                    cpu.regs.xpsr |= 0x08000000; // Q sticky
+                }
+                cpu.regs.r[rd] = r;
+                adv(cpu, pc, 4);
+                return true;
+            }
             let sat = (o2 & 0x1F) as u32;
-            let sh = ((o2 >> 10) & 0x1F) as u32;
+            // Reserved o2[5] (capstone-INVALID, e.g. F380:0020): fault.
+            // ASR #0 is UNPREDICTABLE (F3A0:0010 INVALID); LSL #0 = no shift.
+            if (o2 & 0x20) != 0 {
+                return fault(cpu, pc, op1, op2, 4);
+            }
+            let sh = (((o2 >> 12) & 7) << 2) | ((o2 >> 6) & 3);
+            if asr && sh == 0 {
+                return fault(cpu, pc, op1, op2, 4);
+            }
             let a = rr(cpu, (o1 & 0xF) as usize, pc);
             let v = if (o1 >> 5) & 1 == 0 {
                 a.wrapping_shl(sh)
@@ -1005,13 +1065,52 @@ pub fn exec32(
             adv(cpu, pc, 4);
             return true;
         }
-        if o1 & 0xFFC0 == 0xF300 && o2 < 0x8000 {
+        if (o1 & 0xFFF0 == 0xF300 || o1 & 0xFFF0 == 0xF320) && o2 < 0x8000 {
             // SSAT Rd, #sat, Rn [, LSL/ASL #sh] (sh-type is o1[5]).
+            // Exact hw1 bytes: the 0xFFC0 mask also swallowed PKHBT/PKHTB
+            // (0xF31x, DSP) as SSAT-garbage (differential fuzz caught it).
             // o2[15]==0 keeps B.W/Bcc.W/BL (op2[15]=1) falling through.
             // Unlike USAT, the sat field encodes N-1 (GAS: ssat#8=o2:0x07,
             // ssat#16=0x0F; usat#16=0x10 direct).
+            // Dual-halfword SSAT16 takes the ASR hw1 (0xF320|Rn) with
+            // o2[15:12]==0 AND o2[7:4]==0 (capstone-verified: F320:0010 and
+            // F320:0110 are INVALID, F328:4141 is single-ASR#17).
+            if (o1 & 0xFFF0) == 0xF320 && (o2 & 0xF000) == 0 && (o2 & 0x00F0) == 0 {
+                let rd = ((o2 >> 8) & 0xF) as usize;
+                let rn = (o1 & 0xF) as usize;
+                let sat = ((o2 & 0xF) + 1) as u32;
+                let (lo, hi): (i64, i64) = if sat >= 32 {
+                    (i64::MIN, i64::MAX)
+                } else {
+                    (-(1i64 << (sat - 1)), (1i64 << (sat - 1)) - 1)
+                };
+                let a = rr(cpu, rn, pc);
+                let mut r = 0u32;
+                let mut q = false;
+                for half in 0..2 {
+                    let s = ((a >> (half * 16)) & 0xFFFF) as i16 as i64;
+                    let c = (s.clamp(lo, hi) as i32 as u32) & 0xFFFF;
+                    if s < lo || s > hi {
+                        q = true;
+                    }
+                    r |= c << (half * 16);
+                }
+                if q {
+                    cpu.regs.xpsr |= 0x08000000; // Q sticky
+                }
+                cpu.regs.r[rd] = r;
+                adv(cpu, pc, 4);
+                return true;
+            }
             let sat = ((o2 & 0x1F) + 1) as u32;
-            let sh = ((o2 >> 10) & 0x1F) as u32;
+            // Reserved o2[5] and ASR #0 are UNPREDICTABLE (capstone-INVALID).
+            if (o2 & 0x20) != 0 {
+                return fault(cpu, pc, op1, op2, 4);
+            }
+            let sh = (((o2 >> 12) & 7) << 2) | ((o2 >> 6) & 3);
+            if (o1 >> 5) & 1 == 1 && sh == 0 {
+                return fault(cpu, pc, op1, op2, 4);
+            }
             let a = rr(cpu, (o1 & 0xF) as usize, pc);
             let v = if (o1 >> 5) & 1 == 0 {
                 a.wrapping_shl(sh)
@@ -1122,6 +1221,11 @@ pub fn exec32(
                 let rd = ((o2 >> 8) & 0xF) as usize;
                 let lsb = (((o2 >> 12) & 7) << 2) | ((o2 >> 6) & 3);
                 let w = (o2 & 0x1F) + 1;
+                // lsb+width > 32 is UNPREDICTABLE (differential fuzz: the
+                // oracle faults sbfx #29,#17 while we extracted garbage).
+                if lsb + w > 32 {
+                    return fault(cpu, pc, op1, op2, 4);
+                }
                 let v = rr(cpu, rn, pc).wrapping_shr(lsb);
                 let v = if w >= 32 { v } else { v & ((1u32 << w) - 1) };
                 cpu.regs.r[rd] = if o1 & 0xFFF0 == 0xF340 { sx(v, w) } else { v };
@@ -1175,13 +1279,21 @@ pub fn exec32(
                 return branch(cpu, sys, mem, pc.wrapping_add(4).wrapping_add(off) | 1, pc, op1, op2, 4);
             }
             // Bcc.W: cond in op1[9:6]. 21-bit offset S:J1:J2:imm6:imm11:0
-            // with J used DIRECTLY as the offset bits (no S inversion —
-            // GAS-verified incl. an S=1 backward bne.w: I1=I2=J1=J2=1).
+            // where J1=o2[11], J2=o2[13], used DIRECTLY with no S inversion
+            // — unlike B.W above (NOT(J^S) + J1=o2[13]/J2=o2[11]).
+            // Oracle+capstone+GCC-firmware triple-verified: F000:A880 ->
+            // +0xC0100 (NOT-form would give +0x100); F416:8C8C ->
+            // 0x1ff9891c; F47F:A741 -> 0x1ff81e86; firmware F040:80CA ->
+            // 0x80013d2. (A "B.W-style inversion fix" here broke firmware
+            // boot: for S=0 it differs from direct exactly when J is set,
+            // i.e. on every real forward wide conditional.)
             let cc = (o1 >> 6) & 0xF;
             if cc == 0xF {
                 return fault(cpu, pc, op1, op2, 4);
             }
             let imm6 = o1 & 0x3F;
+            let j1 = (o2 >> 11) & 1;
+            let j2 = (o2 >> 13) & 1;
             let off = sx(
                 (s << 20) | (j1 << 19) | (j2 << 18) | (imm6 << 12) | (imm11 << 1),
                 21,
@@ -1209,9 +1321,14 @@ pub fn exec32(
             // BLX-imm (Exxx) targets ARM state, Cxxx/Dxxx unallocated here.
             return fault(cpu, pc, op1, op2, 4);
         }
-        // MOVW / MOVT (F2 group, exact masks so F6/F7 never match)
+        // MOVW / MOVT (F2 group, exact masks so F6/F7 never match).
+        // Rd==PC is UNPREDICTABLE (the adv() below would silently swallow
+        // the write and fall through): fault loudly like the oracle.
         if o1 & 0xFBF0 == 0xF240 {
             let rd = ((o2 >> 8) & 0xF) as usize;
+            if rd == 15 {
+                return fault(cpu, pc, op1, op2, 4);
+            }
             let i = (o1 >> 10) & 1;
             let imm = (i << 11) | ((o1 & 0xF) << 12) | (((o2 >> 12) & 7) << 8) | (o2 & 0xFF);
             cpu.regs.r[rd] = imm;
@@ -1220,6 +1337,9 @@ pub fn exec32(
         }
         if o1 & 0xFBF0 == 0xF2C0 {
             let rd = ((o2 >> 8) & 0xF) as usize;
+            if rd == 15 {
+                return fault(cpu, pc, op1, op2, 4);
+            }
             let i = (o1 >> 10) & 1;
             let imm = (i << 11) | ((o1 & 0xF) << 12) | (((o2 >> 12) & 7) << 8) | (o2 & 0xFF);
             cpu.regs.r[rd] = (cpu.regs.r[rd] & 0xFFFF) | (imm << 16);
@@ -1235,6 +1355,11 @@ pub fn exec32(
             let sub = (o1 & 0xFBF0) == 0xF2A0;
             let rn = (o1 & 0xF) as usize;
             let rd = ((o2 >> 8) & 0xF) as usize;
+            // Rd==PC is UNPREDICTABLE (differential fuzz: subw pc silently
+            // wrote PC where the oracle faults): fault loudly.
+            if rd == 15 {
+                return fault(cpu, pc, op1, op2, 4);
+            }
             let imm = (((o1 >> 10) & 1) << 11) | (((o2 >> 12) & 7) << 8) | (o2 & 0xFF);
             cpu.regs.r[rd] = if sub {
                 rr(cpu, rn, pc).wrapping_sub(imm)
@@ -1286,7 +1411,7 @@ pub fn exec32(
                 }
                 cpu.regs.r[rd] = imm;
                 if s {
-                    nz(cpu, imm);
+                    nzc(cpu, imm, co);
                 }
                 adv(cpu, pc, 4);
                 return true;
@@ -1297,7 +1422,7 @@ pub fn exec32(
                 }
                 cpu.regs.r[rd] = !imm;
                 if s {
-                    nz(cpu, !imm);
+                    nzc(cpu, !imm, co);
                 }
                 adv(cpu, pc, 4);
                 return true;
@@ -1415,6 +1540,39 @@ pub fn exec32(
                     _ => mem.write32(addr, v),
                 }
             }
+            adv(cpu, pc, 4);
+            return true;
+        }
+        // T3 literal pool (Rn==PC, c<8): ALWAYS the negative form —
+        // positive literals encode as c>=8 (F89F/F8BF/F8DF), so U is
+        // hardwired 0 here and o2 is Rt:imm12 (not P:U:W:imm8). Routing
+        // these into the PUW path below read a garbage imm8 (differential
+        // fuzz: ldrb.w [pc,#-0x757] loaded base+0x57 instead of base-0x757).
+        // Literal stores have no encoding (UNDEFINED): fault loudly.
+        if rn == 15 {
+            if !is_load {
+                return fault(cpu, pc, op1, op2, 4);
+            }
+            let addr = ((pc + 4) & !3).wrapping_sub(o2 & 0xFFF);
+            if rt == 15 {
+                if !signed && size != 4 {
+                    adv(cpu, pc, 4); // PLD: pure hint
+                    return true;
+                }
+                if signed {
+                    adv(cpu, pc, 4); // PLI: no literal-into-PC signed load
+                    return true;
+                }
+                let v = mem.read32(addr);
+                cpu.regs.r[15] = v;
+                return branch(cpu, sys, mem, v, pc, op1, op2, 4);
+            }
+            let v = match size {
+                1 => mem.read8(addr) as u32,
+                2 => mem.read16(addr) as u32,
+                _ => mem.read32(addr),
+            };
+            cpu.regs.r[rt] = if signed { sx(v, size * 8) } else { v };
             adv(cpu, pc, 4);
             return true;
         }
@@ -1740,6 +1898,11 @@ pub fn exec32(
         let rm = (o2 & 0xF) as usize;
         match op {
             0 => {
+                // PC operands are UNPREDICTABLE here (unlike ADD etc.);
+                // fault loudly like the oracle does.
+                if rn == 15 || rm == 15 {
+                    return fault(cpu, pc, op1, op2, 4);
+                }
                 let sub = (o2 >> 4) & 0xF;
                 if sub == 0 {
                     if ra == 15 {
@@ -1841,6 +2004,15 @@ pub fn exec32(
                 return true;
             }
             8 => {
+                // SMULL. Word form needs o2[7:4]==0 (differential fuzz:
+                // nonzero selects DSP smlald etc., which the oracle
+                // advances past without writing — we fault, triaged).
+                if o2 & 0xF0 != 0 {
+                    return fault(cpu, pc, op1, op2, 4);
+                }
+                if rn == 15 || rm == 15 {
+                    return fault(cpu, pc, op1, op2, 4); // UNPREDICTABLE
+                }
                 // SMULL
                 let a = rr(cpu, rn, pc) as i32 as i64;
                 let b = rr(cpu, rm, pc) as i32 as i64;
@@ -1871,6 +2043,13 @@ pub fn exec32(
                 return fault(cpu, pc, op1, op2, 4);
             }
             10 => {
+                // UMULL (word form needs o2[7:4]==0; see SMULL).
+                if o2 & 0xF0 != 0 {
+                    return fault(cpu, pc, op1, op2, 4);
+                }
+                if rn == 15 || rm == 15 {
+                    return fault(cpu, pc, op1, op2, 4); // UNPREDICTABLE
+                }
                 // UMULL
                 let p = (rr(cpu, rn, pc) as u64).wrapping_mul(rr(cpu, rm, pc) as u64);
                 cpu.regs.r[((o2 >> 12) & 0xF) as usize] = p as u32;
@@ -1879,21 +2058,14 @@ pub fn exec32(
                 return true;
             }
             11 => {
-                // UDIV (1111_Rd_1111_Rm) or UMLAL
-                if o2 & 0xF0F0 == 0xF0F0 {
-                    let b = rr(cpu, rm, pc);
-                    cpu.regs.r[rd] = if b == 0 { 0 } else { rr(cpu, rn, pc) / b };
-                    adv(cpu, pc, 4);
-                    return true;
+                // UDIV (1111_Rd_1111_Rm). Plain (non-F:F) op-0xB has no
+                // UMLAL encoding (that lives at op 0xE) — fault it instead
+                // of accumulating, mirroring the arm-9 SDIV/SMLAL split.
+                if o2 & 0xF0F0 != 0xF0F0 {
+                    return fault(cpu, pc, op1, op2, 4);
                 }
-                let lo = ((o2 >> 12) & 0xF) as usize;
-                let hi = ((o2 >> 8) & 0xF) as usize;
-                let acc = ((cpu.regs.r[hi] as u64) << 32) | cpu.regs.r[lo] as u64;
-                let p = acc.wrapping_add(
-                    (rr(cpu, rn, pc) as u64).wrapping_mul(rr(cpu, rm, pc) as u64),
-                );
-                cpu.regs.r[lo] = p as u32;
-                cpu.regs.r[hi] = (p >> 32) as u32;
+                let b = rr(cpu, rm, pc);
+                cpu.regs.r[rd] = if b == 0 { 0 } else { rr(cpu, rn, pc) / b };
                 adv(cpu, pc, 4);
                 return true;
             }
@@ -1903,6 +2075,13 @@ pub fn exec32(
                 return fault(cpu, pc, op1, op2, 4);
             }
             12 => {
+                // SMLAL word form needs o2[7:4]==0 (see SMULL).
+                if o2 & 0xF0 != 0 {
+                    return fault(cpu, pc, op1, op2, 4);
+                }
+                if rn == 15 || rm == 15 {
+                    return fault(cpu, pc, op1, op2, 4); // UNPREDICTABLE
+                }
                 // SMLAL (signed 32x32 + 64 accumulate). Op 0xC is its only
                 // home (the old arm-9 fallback accepted invalid op-9 shapes
                 // as SMLAL instead).
@@ -1918,6 +2097,13 @@ pub fn exec32(
                 return true;
             }
             14 => {
+                // UMLAL word form needs o2[7:4]==0 (see SMULL).
+                if o2 & 0xF0 != 0 {
+                    return fault(cpu, pc, op1, op2, 4);
+                }
+                if rn == 15 || rm == 15 {
+                    return fault(cpu, pc, op1, op2, 4); // UNPREDICTABLE
+                }
                 // UMLAL (unsigned 32x32 + 64 accumulate). Op 0xE is its only
                 // home (UDIV lives at op 0xB). Missing this faulted the
                 // soft-float __muldf3 helper, killing CoreMark result prints.
@@ -1936,6 +2122,13 @@ pub fn exec32(
         }
         // ---- EA/EB: shifted-register data processing ----
     } else if o1 & 0xFF00 == 0xEA00 || o1 & 0xFF00 == 0xEB00 {
+        // hw2[15] is reserved 0 here (the shift amount is imm3:imm2 =
+        // o2[14:12]:o2[7:6]); o2[15]==1 is UNPREDICTABLE — the oracle
+        // faults INSN_INVALID while we executed garbage-agreeing values
+        // (differential fuzz: adc/sbc/rsb/and with 0x8xxx op2).
+        if o2 & 0x8000 != 0 {
+            return fault(cpu, pc, op1, op2, 4);
+        }
         let b8 = (o1 >> 8) & 1;
         let b7 = (o1 >> 7) & 1;
         let b6 = (o1 >> 6) & 1;
@@ -1986,7 +2179,7 @@ pub fn exec32(
             }
             cpu.regs.r[rd] = !sv;
             if s {
-                nz(cpu, !sv);
+                nzc(cpu, !sv, co);
             }
             adv(cpu, pc, 4);
             return true;
@@ -2070,16 +2263,34 @@ pub fn exec32(
             let u = o1 & 0x0080 != 0;
             let w = o1 & 0x0020 != 0;
             let l = o1 & 0x0010 != 0;
+            // P==U (IB/DA shapes) is the SRS/RFE space (Rn==SP selects the
+            // banked form, which needs banked stacks we don't model):
+            // UNDEFINED for Rn!=SP — the oracle (INSN_INVALID) and
+            // Capstone both reject, so fault loudly instead of running
+            // SRS-space as LDM.
+            if p == u {
+                return fault(cpu, pc, op1, op2, 4);
+            }
             let list = o2;
             let n = list.count_ones() as u32;
             if n == 0 {
+                return fault(cpu, pc, op1, op2, 4);
+            }
+            // Writeback with Rn itself in a LOAD list is UNPREDICTABLE
+            // (differential fuzz: the oracle faults INSN_INVALID while a
+            // late check let the loaded values win) — fault BEFORE any
+            // state change. (Stores with Rn in the list keep the original
+            // value, which is silicon-plausible.)
+            if w && l && (list >> rn) & 1 == 1 {
                 return fault(cpu, pc, op1, op2, 4);
             }
             let mut a = cpu.regs.r[rn];
             if p && u {
                 a = a.wrapping_add(4); // IB: first transfer at Rn+4
             } else if !u {
-                a = a.wrapping_sub(n * 4); // DA/DB: first transfer below Rn
+                // DB: first transfer 4n below Rn (DA faulted above as
+                // SRS-space, so !u here is always DB).
+                a = a.wrapping_sub(n * 4);
             }
             let mut newpc: Option<u32> = None;
             for i in 0..16 {
@@ -2100,12 +2311,13 @@ pub fn exec32(
                     a += 4;
                 }
             }
-            // Writeback: loads end at the final address in all modes; stores
-            // end there only when incrementing (IA/IB) — decrementing stores
-            // (DA/DB, e.g. every stmdb sp! push) write back the START address.
-            // Suppressed when Rn itself is in a load list (loaded value wins).
-            if w && !(l && (list >> rn) & 1 == 1) {
-                cpu.regs.r[rn] = if !l && !u {
+            // Writeback: incrementing modes (IA/IB) end at the final
+            // address; decrementing modes (DA/DB) write back the START
+            // address — for loads AND stores (differential fuzz: LDMDB
+            // wrote back base instead of base-4n). Rn-in-list loads
+            // faulted above, so no suppression case remains here.
+            if w {
+                cpu.regs.r[rn] = if !u {
                     a.wrapping_sub(n * 4)
                 } else {
                     a
@@ -2137,8 +2349,26 @@ pub fn exec32(
                 base
             };
             if l {
-                cpu.regs.r[rt] = mem.read32(addr);
-                cpu.regs.r[rt2] = mem.read32(addr.wrapping_add(4));
+                let v0 = mem.read32(addr);
+                let v1 = mem.read32(addr.wrapping_add(4));
+                cpu.regs.r[rt] = v0;
+                cpu.regs.r[rt2] = v1;
+                // LDRD into PC interworks like LDR-pc (differential fuzz:
+                // we adv-clobbered the loaded PC while the oracle branched).
+                // Falls through to the shared writeback first when the
+                // destination isn't PC.
+                if rt == 15 || rt2 == 15 {
+                    if w || !p {
+                        cpu.regs.r[rn] = if p {
+                            addr
+                        } else if u {
+                            base.wrapping_add(off)
+                        } else {
+                            base.wrapping_sub(off)
+                        };
+                    }
+                    return branch(cpu, sys, mem, cpu.regs.r[15], pc, op1, op2, 4);
+                }
             } else {
                 mem.write32(addr, rr(cpu, rt, pc));
                 mem.write32(addr.wrapping_add(4), rr(cpu, rt2, pc));
@@ -2151,6 +2381,12 @@ pub fn exec32(
                 } else {
                     base.wrapping_sub(off)
                 };
+                // Writeback into PC stands as the final PC (no adv past
+                // it): differential fuzz shows the oracle keeping the
+                // written-back value (STRD-post-indexed with Rn==PC).
+                if rn == 15 {
+                    return true;
+                }
             }
             adv(cpu, pc, 4);
             return true;

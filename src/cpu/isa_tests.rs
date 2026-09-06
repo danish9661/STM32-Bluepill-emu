@@ -341,22 +341,18 @@ fn ldmdb_forms() {
     assert_eq!(cpu.regs.r[1], 0);
     assert_eq!(cpu.regs.r[2], 0);
     assert_eq!(cpu.regs.r[0], 0x20003008, "no-WB must not move Rn");
-    // ldmdb r0!,{r1,r2} (E930 0006): DB+WB ends back at Rn.
+    // ldmdb r0!,{r1,r2} (E930 0006): DB+WB writes back Rn-4n.
     let (cpu, _) = run_snippet(&[0xE930, 0x0006, 0xE7FE], &[(0, 0x20003008)]);
     assert!(cpu.fault.is_none(), "ldmdb! fault: {:?}", cpu.fault);
-    assert_eq!(cpu.regs.r[0], 0x20003008);
-    // ldmib r0!,{r1} (E9B0 0002): first transfer at Rn+4, WB to Rn+8.
-    // (Capstone-MCLASS rejects all IB/DA forms, so this encoding is manual-
-    // derived: P=[8],U=[7],W=[5],L=[4] — cross-checked against LDMIA/LDMDB.)
-    let (cpu, mem) = run_snippet(&[0xE9B0, 0x0002, 0xE7FE], &[(0, 0x20003000)]);
-    assert!(cpu.fault.is_none(), "ldmib! fault: {:?}", cpu.fault);
-    assert_eq!(cpu.regs.r[1], mem.read32(0x20003004));
-    assert_eq!(cpu.regs.r[0], 0x20003008);
-    // ldmda r0!,{r1} (E830 0002): first transfer at Rn-4, WB back to Rn.
-    let (cpu, mem) = run_snippet(&[0xE830, 0x0002, 0xE7FE], &[(0, 0x20003000)]);
-    assert!(cpu.fault.is_none(), "ldmda! fault: {:?}", cpu.fault);
-    assert_eq!(cpu.regs.r[1], mem.read32(0x20002FFC));
     assert_eq!(cpu.regs.r[0], 0x20003000);
+    // IB/DA shapes (P==U) are SRS/RFE space (UNDEFINED for Rn!=SP — the
+    // oracle faults INSN_INVALID and Capstone rejects): fault loudly.
+    // (Capstone-MCLASS rejects all IB/DA forms; earlier manual-derived
+    // IB/DA execution was SRS-space mis-decoded as LDM.)
+    let (cpu, _) = run_snippet(&[0xE9B0, 0x0002, 0xE7FE], &[(0, 0x20003000)]);
+    assert!(cpu.fault.is_some(), "ldmib must fault (SRS-space)");
+    let (cpu, _) = run_snippet(&[0xE830, 0x0002, 0xE7FE], &[(0, 0x20003000)]);
+    assert!(cpu.fault.is_some(), "ldmda must fault (SRS-space)");
 }
 
 /// USAT with ASR shift (0xF3A0 form; LSL form covered by usat_ssat_q).
@@ -458,3 +454,100 @@ fn smlal_umlal_forms() {
     assert_eq!(cpu.regs.r[14], 37);
     assert_eq!(cpu.regs.r[5], 3);
 }
+
+/// SSAT16/USAT16 dual-halfword saturates (o2[15:12]==0 && o2[7:4]==0
+/// selects dual; anything else on the ASR hw1 is single-shift).
+#[test]
+fn sat16_forms() {
+    let _held = crate::test_util::lock();
+    // ssat16 r5,#6,r6 (F326 0505): halves 0x7FFF/0x8000 -> sat to
+    // [+31,-32] with Q. r6=0x7FFF8000.
+    let (cpu, _) = run_snippet(&[0xF326, 0x0505, 0xE7FE], &[(6, 0x7FFF_8000)]);
+    assert!(cpu.fault.is_none(), "ssat16 fault: {:?}", cpu.fault);
+    assert_eq!(cpu.regs.r[5], 0x001F_FFE0);
+    assert_ne!(cpu.regs.xpsr & 0x08000000, 0);
+    // usat16 r0,#0xf,r0 (F3A0 000F): halves 0xFFFF/0x1234 -> 0xF/0x1234?
+    // sat=15 direct: max 0x7FFF; 0xFFFF saturates, 0x1234 kept, Q set.
+    let (cpu, _) = run_snippet(&[0xF3A0, 0x000F, 0xE7FE], &[(0, 0xFFFF_1234)]);
+    assert!(cpu.fault.is_none(), "usat16 fault: {:?}", cpu.fault);
+    assert_eq!(cpu.regs.r[0], 0x7FFF_1234);
+    assert_ne!(cpu.regs.xpsr & 0x08000000, 0);
+}
+
+/// T1 MOVS preserves C/V (only N/Z update) — differential fuzz caught a
+/// stray V-clear here.
+#[test]
+fn movs_imm_preserves_cv() {
+    let _held = crate::test_util::lock();
+    // adds r0,r1,r2 (1888) with 0x40000000+0x40000000 overflows: V=1,C=0.
+    // movs r6,#0x3E (263E) must keep V=1,C=0 and set N=0,Z=0.
+    let (cpu, _) = run_snippet(
+        &[0x1888, 0x263E, 0xE7FE],
+        &[(1, 0x4000_0000), (2, 0x4000_0000)],
+    );
+    assert!(cpu.fault.is_none(), "movs-cv fault: {:?}", cpu.fault);
+    assert_eq!(cpu.regs.r[0], 0x8000_0000);
+    assert_eq!(cpu.regs.r[6], 0x3E);
+    assert_eq!(cpu.regs.xpsr & 0xF0000000, 0x10000000);
+}
+
+/// MOVW/MOVT with Rd==PC is UNPREDICTABLE (must fault, not silently NOP).
+#[test]
+fn movw_movt_pc_fault() {
+    let _held = crate::test_util::lock();
+    let (cpu, _) = run_snippet(&[0xF64E, 0x7F7F, 0xE7FE], &[]);
+    assert!(cpu.fault.is_some(), "movw pc should fault loudly");
+    // Sanity: normal MOVW still works (movw r0,#0x1234 = F241 2034).
+    let (cpu, _) = run_snippet(&[0xF241, 0x2034, 0xE7FE], &[]);
+    assert!(cpu.fault.is_none(), "movw fault: {:?}", cpu.fault);
+    assert_eq!(cpu.regs.r[0], 0x1234);
+}
+
+/// Bcc.W: J1=o2[11], J2=o2[13], used DIRECTLY (no B.W-style inversion).
+/// Oracle+capstone verified (Unicorn oracle + GCC firmware cross-check).
+#[test]
+fn bcc_w_forward_s0() {
+    let _held = crate::test_util::lock();
+    // beq.w +0x10 (F000 8008, cond=EQ, S=0,J1=0,J2=0) -> 0x20002016 when
+    // Z=1 (plus one overrun slot into zero-RAM: 0x20002018).
+    let (cpu, _) = run_snippet(&[0x2000, 0xF000, 0x8008], &[]);
+    assert!(cpu.fault.is_none(), "bcc.w fault: {:?}", cpu.fault);
+    assert_eq!(cpu.regs.r[15] & !1, 0x20002018);
+    // Z=0: falls through past the branch (second halfword decodes as a
+    // harmless 16-bit ldrh).
+    let (cpu, _) = run_snippet(&[0x2001, 0xF000, 0x8008], &[]);
+    assert!(cpu.fault.is_none(), "bcc.w(nt) fault: {:?}", cpu.fault);
+    assert_eq!(cpu.regs.r[15] & !1, 0x20002008);
+}
+
+/// UNPREDICTABLE shapes fault loudly (differential fuzz vs the oracle).
+#[test]
+fn unpredictable_shapes_fault() {
+    let _held = crate::test_util::lock();
+    // sbfx with lsb+width > 32 (F34A 7070: lsb=29, w=17).
+    let (cpu, _) = run_snippet(&[0xF34A, 0x7070, 0xE7FE], &[]);
+    assert!(cpu.fault.is_some(), "sbfx#29,#17 should fault");
+    // Long multiply with o2[7:4]!=0 is DSP/UMAAL space (FBE8 6A6A).
+    let (cpu, _) = run_snippet(&[0xFBE8, 0x6A6A, 0xE7FE], &[]);
+    assert!(cpu.fault.is_some(), "umlal-shape o2[7:4]!=0 should fault");
+    // LDM with writeback + Rn in list (E8B4 001A: ldmia r4!,{r1,r3,r4}).
+    let (cpu, _) = run_snippet(&[0xE8B4, 0x001A, 0xE7FE], &[(4, 0x20003000)]);
+    assert!(cpu.fault.is_some(), "ldm Rn-in-list+WB should fault");
+}
+
+/// Bcc.W with S=1 (backward): J still direct (J1=o2[11], J2=o2[13]).
+#[test]
+fn bcc_w_backward_s1() {
+    let _held = crate::test_util::lock();
+    // bne.w -0x10 (F47F AFF8, cond=NE, S=1,J1=1,J2=1) -> 0x20001FF6 when
+    // Z=0 (plus one overrun slot into zero-RAM: 0x20001FF8).
+    let (cpu, _) = run_snippet(&[0x2001, 0xF47F, 0xAFF8], &[]);
+    assert!(cpu.fault.is_none(), "bcc.w(s1) fault: {:?}", cpu.fault);
+    assert_eq!(cpu.regs.r[15] & !1, 0x20001FF8);
+    // Z=1: falls through.
+    let (cpu, _) = run_snippet(&[0x2000, 0xF47F, 0xAFF8], &[]);
+    assert!(cpu.fault.is_none(), "bcc.w(s1,nt) fault: {:?}", cpu.fault);
+    assert_eq!(cpu.regs.r[15] & !1, 0x20002008);
+}
+
+

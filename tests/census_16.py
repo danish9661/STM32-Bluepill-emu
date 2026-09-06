@@ -39,6 +39,23 @@ ACCEPTED_GAPS = [
     (0x477C, 0x477F, 'bxns: v8-M only'),
     (0x47EC, 0x47EF, 'blxns: v8-M only'),
     (0x47FC, 0x47FF, 'blxns: v8-M only'),
+    # BLX with reserved bit2 set: Capstone reads v8-M blxns (valid),
+    # UNDEFINED on v7-M — our fault is correct (fuzz: oracle faults
+    # INSN_INVALID while a late check corrupted LR).
+    (0x4784, 0x4787, 'blxns-shape: v8-M only'),
+    (0x478C, 0x478F, 'blxns-shape: v8-M only'),
+    (0x4794, 0x4797, 'blxns-shape: v8-M only'),
+    (0x479C, 0x479F, 'blxns-shape: v8-M only'),
+    (0x47A4, 0x47A7, 'blxns-shape: v8-M only'),
+    (0x47AC, 0x47AF, 'blxns-shape: v8-M only'),
+    (0x47B4, 0x47B7, 'blxns-shape: v8-M only'),
+    (0x47BC, 0x47BF, 'blxns-shape: v8-M only'),
+    (0x47C4, 0x47C7, 'blxns-shape: v8-M only'),
+    (0x47CC, 0x47CF, 'blxns-shape: v8-M only'),
+    (0x47D4, 0x47D7, 'blxns-shape: v8-M only'),
+    (0x47DC, 0x47DF, 'blxns-shape: v8-M only'),
+    (0x47E4, 0x47E7, 'blxns-shape: v8-M only'),
+    (0x47F4, 0x47F7, 'blxns-shape: v8-M only'),
     # 0xBF6x-0xBFFx low-nibble-0: IT with zero mask = UNPREDICTABLE on v7-M
     # (v8-M redefined the space as HINTs); loud fault is the safe choice.
     (0xBF60, 0xBF60, 'UNPREDICTABLE IT-zero-mask on v7-M'),

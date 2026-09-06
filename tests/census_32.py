@@ -46,6 +46,11 @@ ACCEPTED_MN = {
     'qadd', 'qsub', 'qdadd', 'qdsub', 'qasx', 'qsax', 'sadd16',
     'ssub16', 'uadd16', 'usub16', 'sxtab', 'sxtab16', 'uxtab',
     'uxtab16', 'smladx', 'smlsdx', 'smuadx',
+    # Long-multiply DSP halfword forms + UMAAL (all UNDEFINED on M3;
+    # word SMULL/UMULL/SMLAL/UMLAL need o2[7:4]==0, enforced in the
+    # decoder; the oracle advances past DSP without writing, we fault).
+    'smlalbb', 'smlalbt', 'smlaltb', 'smlaltt',
+    'umlalbb', 'umlalbt', 'umlaltb', 'umlaltt', 'umaal',
     # MVE loop tail predication (v8.1-M) + MVE-FP selects.
     'dlstp.8', 'dlstp.16', 'dlstp.32', 'dlstp.64', 'letp', 'lctp',
     'vseleq.f16', 'vselvs.f16', 'vselgt.f16', 'vselge.f16',
@@ -71,6 +76,11 @@ T3_DP = {
     'teq', 'lsl', 'lsls', 'lsr', 'lsrs', 'asr', 'asrs', 'ror', 'rors',
     'rrx',
 }
+
+# Wide-immediate forms with Rd==PC: UNPREDICTABLE (oracle faults), so our
+# fault is correct. (Plain T3_DP covers the Rd==PC even-target case above;
+# these never compute a branch target at all.)
+WIDE_IMM_PC = {'movw', 'movt', 'addw', 'subw', 'adr'}
 
 # Valid MRS/MSR SYSm values; anything else is UNPREDICTABLE -> fault correct.
 MRS_VALID_SYSM = {0, 1, 2, 3, 5, 6, 7, 8, 9, 16, 17, 18, 20}
@@ -100,6 +110,13 @@ def accepted_gap(first, second, mnemonic, op_str):
         return True  # Capstone-loose: BLX-imm needs ARM-state half
     if mn in T3_DP and ((second >> 8) & 0xF) == 0xF:
         return True  # Rd==PC with even computed target faults like HW
+    if mn in WIDE_IMM_PC and ((second >> 8) & 0xF) == 0xF:
+        return True  # movw/movt/addw/subw with Rd==PC: UNPREDICTABLE
+    if mn in T3_DP and 0xEA00 <= first <= 0xEBFF and (second & 0x8000):
+        return True  # EA/EB shifted-reg with reserved o2[15]=1: the shift
+        # amount is imm3:imm2 = o2[14:12]:o2[7:6], bit15 is hardwired 0
+        # (oracle faults INSN_INVALID, we fault; B.W/Bcc.W/BL keep their
+        # legit o2[15]=1 via other mnemonics)
     if mn == 'mrs' and (second & 0xFF) not in MRS_VALID_SYSM:
         return True  # reserved SYSm: UNPREDICTABLE -> fault correct
     if mn == 'msr' and (second & 0xFF) not in MSR_VALID_SYSM:
@@ -115,6 +132,67 @@ def accepted_gap(first, second, mnemonic, op_str):
     if mn in ('sbfx', 'ubfx') and not (
             0xF340 <= first <= 0xF34F or 0xF3C0 <= first <= 0xF3CF):
         return True  # Capstone-loose (e.g. 0xF740 SMLAD shape as sbfx)
+    if mn in ('sbfx', 'ubfx'):
+        # lsb+width > 32 is UNPREDICTABLE (oracle faults, we fault;
+        # Capstone prints the shape as if valid anyway).
+        try:
+            hashes = [p.strip() for p in op_str.split(',')[-2:]]
+            lsb = int(hashes[0].lstrip('#'), 0)
+            wid = int(hashes[1].lstrip('#'), 0)
+            if lsb + wid > 32:
+                return True
+        except (ValueError, IndexError):
+            pass
+    if mn in ('ldm', 'ldmia', 'ldmdb', 'ldmib', 'ldmda',
+              'stm', 'stmia', 'stmdb', 'stmib', 'stmda'):
+        # Writeback with Rn itself in a LOAD list is UNPREDICTABLE
+        # (oracle faults INSN_INVALID, we fault; stores keep the
+        # original Rn value and execute on both sides).
+        try:
+            if '!' in op_str:
+                rn = op_str.split()[0].rstrip('!,')
+                lst = op_str.split('{')[1].split('}')[0]
+                regs = [x.strip() for x in lst.split(',')]
+                alias = {'sp': 'r13', 'lr': 'r14', 'pc': 'r15'}
+                regs = [alias.get(x, x) for x in regs]
+                rn = alias.get(rn, rn)
+                if rn.startswith('r') and rn in regs:
+                    return True
+        except (ValueError, IndexError):
+            pass
+    if mn == 'pop':
+        # POP with SP in its own list (Rn==SP implicit + writeback):
+        # UNPREDICTABLE, oracle faults INSN_INVALID, we fault.
+        try:
+            lst = op_str.split('{')[1].split('}')[0]
+            regs = [x.strip() for x in lst.split(',')]
+            if 'sp' in regs:
+                return True
+        except (ValueError, IndexError):
+            pass
+    if mn in ('ldrd', 'strd'):
+        # LDRD/STRD with Rn==PC plus writeback (post-index or `!`):
+        # UNPREDICTABLE writeback-to-PC (oracle faults on the fetch,
+        # we fault on the even branch target). Pre-indexed no-WB with
+        # Rn==PC executes on both sides (no gap arise there).
+        try:
+            if '],' in op_str or '!' in op_str:
+                inside = op_str.split('[')[1].split(']')[0]
+                base = inside.split(',')[0].strip()
+                if base == 'pc':
+                    return True
+        except (ValueError, IndexError):
+            pass
+    if mn == 'ldrd':
+        # LDRD into PC from unmapped data: we load 0 (design) then fault
+        # on the even branch target; the oracle faults on the read.
+        # Both fault; mapped cases execute identically (fuzz-verified).
+        try:
+            dests = [p.split('[')[0].strip() for p in op_str.split(',')[:2]]
+            if 'pc' in dests:
+                return True
+        except (ValueError, IndexError):
+            pass
     if mn in ('bfi', 'bfc'):
         # UNPREDICTABLE msb<lsb: Capstone renders it as if valid anyway.
         lsb = (((second >> 12) & 7) << 2) | ((second >> 6) & 3)
