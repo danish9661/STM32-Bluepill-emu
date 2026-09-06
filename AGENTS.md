@@ -303,6 +303,13 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - **Verified**: fuzz 2700 cases (200/s1 + 500/s7 + 1000/s11 + 1000/s42) 0 divergences; cpu 42/42 (incl. 3 new probes: bcc_w_backward_s1, unpredictable_shapes_fault, fixed ldmdb_forms); census gates green; test_all 399; canary 39/39; cli + emulator.js 200M 39/39 @ ~2.9s (~69 MIPS, perf intact); coremark 5/5; all 16 event/unit suites; browser 4/4.
 - **Known backlog (single sub-threshold census sample, out of scope)**: E8DF LDREXB/STREXB shapes decode as STRD/LDRD on our side (values agree where it matters; census-blind since it only checks faults, fuzz-clean over 2700 cases).
 
+### 28. Two more demo firmware: RTC clock + servo sweep (`tests/arduino_rtc_clock/`, `tests/arduino_servo/`, `site/index.html`) [this sprint]
+- **`arduino_rtc_clock`**: register-level RTC (PRL=1M → 1 CNT/sec), preset 12:00:00, prints `HH:MM:SS  rtc=N` every tick + PC13 blink. **`arduino_servo`**: TIM3 CH1 (PA6) 50Hz PWM, 1–2ms pulse sweep 0→180°, prints `deg=`/`pulse=` + turn markers.
+- Both use `Serial` (= USART1 → `getUartOutput`), no ext devices. Headless tests `tests/test_rtc_clock.mjs` (4: banner, ≥3 clock lines, starts 12:00:00, monotonic) + `tests/test_servo.mjs` (6: banner, ≥5 steps, starts 0, rising-or-180, pulse range, turn marker), both wired into `.github/workflows/test.yml`.
+- Page: `rtc_clock` + `servo` preset options + loader branches (plain `initEmulator`, no devices); `tests/test_browser_demos.mjs` drives both presets live in Chromium (terminal shows `12:00:01` / `deg=10`).
+- Ship `site/arduino_rtc_clock.elf` + `site/arduino_servo.elf` (force-add, `*.elf` is ignored); build dirs ignored in `.gitignore`. Rebuild: `arduino-cli compile --fqbn STMicroelectronics:stm32:GenF1:pnum=BLUEPILL_F103C8 --build-path tests/arduino_<name>/build tests/arduino_<name>`.
+- **Verified**: rtc 4/4, servo 6/6, browser presets 2/2.
+
 
 
 ## Next Phase — Long-term Optimizations

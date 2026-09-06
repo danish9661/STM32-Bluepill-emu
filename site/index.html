@@ -314,6 +314,8 @@ select:focus { outline: none; border-color: #0ea5e9; }
                     <option value="flash_demo">SPI flash + I2C (JEDEC/EEPROM/OLED)</option>
                     <option value="showcase">Peripheral Showcase (OLED·LCD·7-seg·RGB·buzzer·button)</option>
                     <option value="ws2812">WS2812 Strip (SPI1·DMA1 CH3, 8 LEDs)</option>
+                    <option value="rtc_clock">RTC Clock (HH:MM:SS on UART)</option>
+                    <option value="servo">Servo Sweep (TIM3 PWM on PA6)</option>
                 </select>
                 <select id="chipSelect" title="Chip / board (rp2040js-style: pick the peripheral map)">
                     <option value="stm32f103c8">STM32F103C8 (builtin map)</option>
@@ -1185,6 +1187,14 @@ $('loadPresetBtn').addEventListener('click', async () => {
             emu.onPeriphWrite(wsWatch);
             $('wsCard').hidden = false;
             log('Press Run — an 8-LED WS2812 strip (rainbow chase, 800kHz) streams from SPI1 via DMA1 CH3; the LEDs light live as frames decode.', 't-in');
+        } else if (preset === 'rtc_clock') {
+            const buf = await fetch('arduino_rtc_clock.elf').then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(buf), 'arduino_rtc_clock.elf (RTC wall clock)');
+            log('Press Run — HH:MM:SS ticks every emulated second from the RTC counter (PRL=1M); PC13 blinks each tick.', 't-in');
+        } else if (preset === 'servo') {
+            const buf = await fetch('arduino_servo.elf').then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(buf), 'arduino_servo.elf (servo sweep)');
+            log('Press Run — a 50Hz TIM3 PWM on PA6 sweeps 0→180° (1–2ms pulses); watch PA6 toggle in the pin grid.', 't-in');
         }
     } catch (e) {
         log(`Failed to load preset: ${e.message || e}`, 't-err');
