@@ -19,15 +19,19 @@ impl IntrDispatch {
     }
 
     /// Return the next pending IRQ number, honoring the 64-IRQ-per-batch
-    /// fairness cap (-255 when exhausted or nothing pending).
+    /// fairness cap (-255 when exhausted or nothing pending). The cap counts
+    /// TAKES, not polls, so a hot-but-masked pending bit can't burn it.
     pub fn next(&mut self, sys: &WasmSystem) -> i32 {
         if self.budget >= 64 {
             return -255;
         }
-        self.budget += 1;
-        sys.p.nvic.borrow_mut()
+        let irq = sys.p.nvic.borrow_mut()
             .get_next_pending_intr()
-            .unwrap_or(-255)
+            .unwrap_or(-255);
+        if irq > -100 {
+            self.budget += 1;
+        }
+        irq
     }
 }
 

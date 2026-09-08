@@ -105,6 +105,10 @@ pub struct Timer {
     rcr: u32,
     dcr: u32,
     dmar: u32,
+    /// DMA-burst window position: each DMAR write lands in the register at
+    /// DBA+idx and advances idx (wraps every DBL+1 transfers). Matches HW
+    /// sequencing for both DMA-paced and CPU-driven burst writes.
+    burst_idx: u8,
     or_: u32,
     // Extended
     ccmr3: u32,
@@ -162,7 +166,7 @@ impl Timer {
                 cr1: 0, cr2: 0, smcr: 0, dier: 0, sr: 0, egr: 0,
                 ccmr1: 0, ccmr2: 0, ccer: 0, cnt: 0, psc: 0,
                 arr: 0xFFFF_FFFF,
-                ccr: [0; 4], rcr: 0, dcr: 0, dmar: 0, or_: 0,
+                ccr: [0; 4], rcr: 0, dcr: 0, dmar: 0, burst_idx: 0, or_: 0,
                  ccmr3: 0, ccr5: 0, ccr6: 0, pwm_duty: [0; 4],
                 bdtr: 0,
                  last_tick: instruction_count(),
@@ -679,8 +683,25 @@ impl Peripheral for Timer {
                     *ccr = value & 0xFFFF;
                 }
             }
-            0x48 => self.dcr = value & 0x1F1F,
-            0x4C => self.dmar = value,
+            0x48 => {
+                self.dcr = value & 0x1F1F;
+                self.burst_idx = 0; // reprogramming the window restarts it
+            }
+            0x4C => {
+                self.dmar = value;
+                // DMA burst: route the write into the DBA window
+                // (DBL+1 transfers, DBA counts 32-bit words from CR1).
+                let dba = (self.dcr & 0x1F) as usize;
+                let count = ((self.dcr >> 8) & 0x1F) as usize + 1;
+                let off = ((dba + self.burst_idx as usize) * 4) as u32;
+                self.burst_idx = (self.burst_idx as usize + 1) as u8 % count.max(1) as u8;
+                // Known register map only (CR1..CCR6); anything else
+                // (incl. the DMAR alias itself) is store-only. Recursion
+                // depth is 1: routed offsets never re-enter this arm.
+                if off != 0x4C && off <= 0x5C {
+                    self.write(sys, off, value);
+                }
+            }
             0x50 => self.or_ = value & 0xFF,
             0x54 => self.ccmr3 = value,
             0x58 => self.ccr5 = value & 0xFFFF,

@@ -26,6 +26,12 @@ fn run_handler_to_return(cpu: &mut Cpu, mem: &mut FlatMemory) -> bool {
 /// Dispatch all pending interrupts within the shared per-batch budget.
 fn dispatch_interrupts(cpu: &mut Cpu, mem: &mut FlatMemory) -> bool {
     let sys = sys();
+    // Re-sync the mask statics from live CPU state: intr_next() consults
+    // them, and they were snapshotted at slice start — a slice ending inside
+    // a noInterrupts() critical section would otherwise dispatch into it
+    // (real HW blocks on live PRIMASK). This exact shape broke the EXTI
+    // SWIER-vs-PR race once SysTick phase made the alignment land there.
+    crate::set_intr_masks(cpu.regs.primask, 0);
     loop {
         let irq = intr_next();
         if irq <= -100 {

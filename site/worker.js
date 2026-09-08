@@ -32,6 +32,10 @@ let oledOff = null, lcdOff = null, oledCtx = null, lcdCtx = null;
 
 // Pin activity buffer drained per frame
 let pinBuf = [];
+// USB host taps (page CDC preset): when usbListen, each frame drains the
+// VmEvent queue and forwards UsbIn (type 18) packets to the main thread.
+let usbListen = false;
+let usbAck = null;
 
 function post(type, extra = {}) {
   self.postMessage({ type, ...extra });
@@ -48,6 +52,8 @@ async function handleMessage(e) {
       totalInstBase = 0;
       autoBytes = msg.autoBytes ? msg.autoBytes.slice() : [];
       canInjected = false;
+      usbListen = !!msg.usbListen;
+      usbAck = null;
       // Main thread resolves 'canRxArmed' from the ELF symbols (hardcoded
       // addresses go stale on rebuild); fall back for hex/bin firmware.
       canFlagAddr = msg.canFlagAddr || CAN_RAM_FLAG;
@@ -93,6 +99,18 @@ async function handleMessage(e) {
     }
     case 'gpioSetInput': {
       if (emu) emu.gpioSetInput(msg.port, msg.pin, !!msg.value);
+      break;
+    }
+    case 'usbSetup': {
+      let a = false;
+      try { a = !!emu.usbInjectSetup(msg.bytes); } catch {}
+      usbAck = a;
+      break;
+    }
+    case 'usbOut': {
+      let a = false;
+      try { a = !!emu.usbInjectOut(msg.ep, msg.bytes); } catch {}
+      usbAck = a;
       break;
     }
     case 'setSymbols': {
@@ -143,6 +161,37 @@ function loop() {
   const regs = emu.getRegisters();
   const uartOut = emu.getUartOutput();
   const pins = pinBuf.splice(0);
+  // USB tap: forward UsbIn packets (skip other discriminants by length).
+  let usbIn = null;
+  if (usbListen) {
+    try {
+      const flat = emu.drainEvents();
+      const pkts = [];
+      let i = 0;
+      const skipLen = (t, j) => {
+        switch (t) {
+          case 1: return 3 + (flat[j+2]||0) + (flat[j+3]||0);
+          case 14: case 15: return 12;
+          case 16: return 4; case 17: return 6;
+          case 18: return 3 + (flat[j+2]||0);
+          case 2: case 3: case 6: case 8: case 10: return 3;
+          default: return 2; // 4,5,7,9,11,12,13: single-arg events
+        }
+      };
+      while (i < flat.length) {
+        const t = flat[i];
+        if (t === 18) {
+          const ep = flat[i+1], len = flat[i+2] || 0;
+          pkts.push([ep, Array.from(flat.slice(i+3, i+3+len))]);
+        }
+        const adv = skipLen(t, i);
+        if (adv <= 0) break;
+        i += adv;
+      }
+      if (pkts.length) usbIn = pkts;
+    } catch {}
+  }
+  const usbAckOut = usbAck; usbAck = null;
   // OffscreenCanvas: render directly in worker if transferred, else send FB to main
   let oledFb = null, lcdFb = null, rgbDuty = null, buzz = null;
   if (oledCtx) {
@@ -198,6 +247,7 @@ function loop() {
     buzz,
     gpio: gpioSnap,
     stopped: lastResult ? lastResult.stopped : false,
+    usbIn, usbAck: usbAckOut,
   });
 
   if (lastResult && lastResult.stopped) {

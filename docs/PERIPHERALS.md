@@ -15,7 +15,7 @@ including interrupt generation, status flags, and timing. Support levels:
 |---|---|---|
 | Cortex-M3 (Thumb-2) | Full | Native Rust interpreter (`src/cpu/`): full integer Thumb-2 incl. IT blocks, DSP faults (M3-correct), FPU/coprocessor faults, SVC/WFI/MSP-PSP banking, DWT CYCCNT. |
 | NVIC | Full | 68 IRQs, priority-based dispatch, pending/active sets, PRIMASK/BASEPRI gating, `last_popped` fairness so hot IRQs don't starve others. ISR return is one Rust call (`finish_interrupt(irq)`) that pops the active-priority stack **and** drains SysTick debt ticks internally — no JS re-pend loop. |
-| SysTick | Full | 1 ms debt accrual, multiple 1 ms IRQs per batch, COUNTFLAG, calibration register. `millis()`/`delay()` work. |
+| SysTick | Full | 1 ms debt accrual with phase-preserving trigger (no overshoot loss at any batch size), one re-pend per delivery (whole-debt drains coalesce into the single pending bit and lose ticks), COUNTFLAG, calibration register. `millis()`/`delay()` run at exact instruction rate. |
 | SCB | Full | Core system control block registers. |
 
 ## Power, reset, clock
@@ -54,7 +54,7 @@ including interrupt generation, status flags, and timing. Support levels:
 
 | Unit | Level | Notes |
 |---|---|---|
-| TIM1–7 | Full | PSC/ARR/CNT with instruction-delta advance (no `ticks.min()` cap — ALL accumulated ticks processed per batch), PWM1/2 output compare (duty exposed via `pwm_duty()`), input capture, update events, UIE/CCIE interrupts, CCR1–4. TIM6/7 basic timers included. |
+| TIM1–7 | Full | PSC/ARR/CNT with instruction-delta advance (no `ticks.min()` cap — ALL accumulated ticks processed per batch), PWM1/2 output compare (duty exposed via `pwm_duty()`), input capture, update events, UIE/CCIE interrupts, CCR1–4, DMA burst (DCR DBA/DBL window — each DMAR write lands in the next window register and wraps; DCR reprogram restarts). TIM6/7 basic timers included. |
 | RTC | Full | Calendar registers, **alarm with IRQ** (custom `RTC_IRQHandler` works), BKP interface. |
 | DAC | Full | DHR/DOR registers, output value readback. |
 

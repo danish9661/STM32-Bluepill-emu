@@ -361,10 +361,12 @@ impl Cpu {
         // for dispatched IRQs, the caller's push_active for synchronous
         // takes (SVC). A standalone SVC on an empty stack is a safe no-op.
         sys.p.nvic.borrow_mut().clear_current_interrupt();
-        // SysTick debt drain (mirrors finish_interrupt()): re-pend each
-        // unconsumed 1ms tick so millis() tracks instruction time.
+        // SysTick debt: re-pend exactly ONE unconsumed 1ms tick per return
+        // so the dispatch loop delivers it next iteration. Draining the
+        // whole debt here coalesces into the single pending bit and loses
+        // ticks (millis() ran ~14x slow at 1M batches).
         if irq == Some(crate::peripherals::nvic::irq::SYSTICK) {
-            while sys.p.nvic.borrow_mut().systick_take() {}
+            sys.p.nvic.borrow_mut().systick_take();
         }
         // Chained PendSV/SVC tail? No tail-chaining in v1; the run loop
         // delivers the next pending exception on the next iteration.
@@ -402,6 +404,7 @@ impl Cpu {
                 break;
             }
             let pc = self.regs.r[15] & !1;
+
             // MPU execute-never (no-op unless enabled): fault loudly instead
             // of silently running forbidden code. Outlined cold so the hot
             // fetch skeleton stays JIT-friendly (see MPU_ON docs).
@@ -454,18 +457,22 @@ impl Cpu {
             // get_next_pending_intr, so same-priority re-pends never nest and
             // depth is bounded by priority levels. Stacking is exact, so the
             // store completes, PC advances, then we stack the next PC.
+            // Budget: route through intr_next() (shared 64-IRQ batch cap),
+            // not the raw pop — a level-storming IRQ (e.g. CAN TX with its
+            // flag uncleared) would otherwise take unboundedly every slice
+            // and starve the firmware, a shape the lazy path already caps.
             if self.deliver_irqs && self.regs.primask == 0 {
                 let pending = sys.p.nvic.borrow().has_pending();
                 if pending {
                     // Bind first: `if let` would extend the borrow_mut guard
                     // through the body and take_exception would re-borrow.
-                    // get_next_pending_intr() pops the highest-priority
-                    // pending IRQ (PRIMASK/BASEPRI via the INTR_MASK statics
-                    // the driver maintains), clears it and pushes the active
-                    // stack entry that exception_return balances.
-                    let next = sys.p.nvic.borrow_mut().get_next_pending_intr();
-                    if let Some(irq) = next {
-                        self.take_exception(sys, mem, irq);
+                    // intr_next() pops the highest-priority pending IRQ
+                    // (PRIMASK/BASEPRI via the INTR_MASK statics the driver
+                    // maintains) within the batch budget, and pushes the
+                    // active stack entry that exception_return balances.
+                    let next = crate::interrupts::intr_next();
+                    if next > -100 {
+                        self.take_exception(sys, mem, next);
                     }
                 }
             }

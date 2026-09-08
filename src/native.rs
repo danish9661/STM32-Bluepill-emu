@@ -117,6 +117,12 @@ fn run_handler_to_return(cpu: &mut Cpu, mem: &mut FlatMemory) -> u32 {
 pub fn rustcpu_dispatch() -> u32 {
     let emu = native_mut();
     let sys = crate::sys();
+    // Honor live PRIMASK (not the stale INTR_MASK snapshot): intr_next()
+    // consults the statics, and a batch ending inside a noInterrupts()
+    // critical section must not dispatch into it (real HW blocks on live
+    // PRIMASK). Stale snapshots broke the EXTI SWIER-vs-PR race once the
+    // SysTick phase fix moved the alignment onto the window.
+    crate::system::INTR_MASK_PRIMASK.store(emu.cpu.regs.primask, std::sync::atomic::Ordering::Relaxed);
     let mut n = 0u32;
     loop {
         let irq = crate::interrupts::intr_next();

@@ -645,6 +645,31 @@ assert_eq(bdtr & 0xFF, 0x35, 'TIM1 BDTR DTG frozen by LOCK');
 assert_eq(bdtr & (1 << 15), 0, 'TIM1 BDTR MOE writable under LOCK');
 // BDTR absent on general timers: TIM2 read 0, write ignored
 assert_eq(periph_read(TIM2 + 0x44, 4), 0, 'TIM2 has no BDTR');
+
+// TIM DMA burst (DCR @ 0x48: DBL[12:8] + DBA[4:0]; DMAR @ 0x4C sequences
+// each write through DBA..DBA+DBL, wrapping)
+periph_write(TIM1 + 0x48, 4, (3 << 8) | 0x0D); // DBL=3 (4 transfers), DBA=CCR1
+assert_eq(periph_read(TIM1 + 0x48, 4), (3 << 8) | 0x0D, 'TIM1 DCR stored');
+periph_write(TIM1 + 0x4C, 4, 100);
+periph_write(TIM1 + 0x4C, 4, 200);
+periph_write(TIM1 + 0x4C, 4, 300);
+periph_write(TIM1 + 0x4C, 4, 400);
+assert_eq(periph_read(TIM1 + 0x34, 4), 100, 'TIM1 burst lands CCR1');
+assert_eq(periph_read(TIM1 + 0x38, 4), 200, 'TIM1 burst lands CCR2');
+assert_eq(periph_read(TIM1 + 0x3C, 4), 300, 'TIM1 burst lands CCR3');
+assert_eq(periph_read(TIM1 + 0x40, 4), 400, 'TIM1 burst lands CCR4');
+periph_write(TIM1 + 0x4C, 4, 111); // wraps to DBA
+assert_eq(periph_read(TIM1 + 0x34, 4), 111, 'TIM1 burst wraps to CCR1');
+assert_eq(periph_read(TIM1 + 0x4C, 4), 111, 'TIM1 DMAR readback stores last');
+// Single-register burst (DBL=0): every write hits CCR1
+periph_write(TIM1 + 0x48, 4, 0x0D);
+periph_write(TIM1 + 0x4C, 4, 222);
+periph_write(TIM1 + 0x4C, 4, 333);
+assert_eq(periph_read(TIM1 + 0x34, 4), 333, 'TIM1 single-burst repeats CCR1');
+// DCR reprogram restarts the window
+periph_write(TIM1 + 0x48, 4, (1 << 8) | 0x0D);
+periph_write(TIM1 + 0x4C, 4, 444);
+assert_eq(periph_read(TIM1 + 0x34, 4), 444, 'TIM1 DCR reprogram restarts window');
 reset();
 
 // ============================================================

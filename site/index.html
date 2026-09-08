@@ -320,6 +320,8 @@ select:focus { outline: none; border-color: #0ea5e9; }
                     <option value="i2c_scan">I2C Scanner (finds OLED+EEPROM)</option>
                     <option value="can_chat">CAN Chat (loopback self-talk)</option>
                     <option value="stopwatch">Stopwatch (PB13 button + TIM2)</option>
+                    <option value="usb_cdc">USB CDC Serial (enumerate + echo)</option>
+                    <option value="pwm_wave">TIM DMA-Burst PWM Wave (TIM3+DMA1)</option>
                 </select>
                 <select id="chipSelect" title="Chip / board (rp2040js-style: pick the peripheral map)">
                     <option value="stm32f103c8">STM32F103C8 (builtin map)</option>
@@ -379,6 +381,17 @@ select:focus { outline: none; border-color: #0ea5e9; }
             <div class="ws-led" id="ws-led-6"></div><div class="ws-led" id="ws-led-7"></div>
         </div>
         <div class="ws-count" id="wsFrameCount">0 frames</div>
+    </div>
+</div>
+<div class="fullrow">
+    <div class="card" id="usbCard" hidden>
+        <h2>USB CDC · host driver</h2>
+        <div class="toolbar">
+            <button id="usbEnumBtn" class="primary">Enumerate USB device</button>
+            <input id="usbEchoInput" placeholder="Type to send bulk OUT on EP1…" disabled>
+            <button id="usbEchoBtn" disabled>Send</button>
+        </div>
+        <div class="ws-count" id="usbStatus">not enumerated</div>
     </div>
 </div>
 </div>
@@ -481,6 +494,9 @@ function handleWorkerMsg(e) {
       }
       if (stick) terminal.scrollTop = terminal.scrollHeight;
     }
+    // USB CDC host tap
+    if (m.usbIn) for (const p of m.usbIn) usbInbox.push(p);
+    if (usbEnum || usbEchoWait) usbEnumAdvance();
     // showcase canvases from worker snapshot
     if (m.oledFb) {
       try {
@@ -560,6 +576,83 @@ let autoBytes = [];        // bytes to auto-inject (one at a time, when UART RX 
 let canInjected = false;   // CAN autopilot: true after the single frame is injected
 const CAN_RAM_FLAG = 0x200000b8;  // fallback when the ELF has no symbols (hex/bin)
 let canFlagAddr = CAN_RAM_FLAG;   // resolved per load from ELF 'canRxArmed' symbol
+
+// USB CDC host driver (page usb_cdc preset): plays host over
+// usbInjectSetup/usbInjectOut and reads UsbIn packets from the event tap.
+let usbListenMain = false; // main-thread event drain (worker drains in worker.js)
+let usbInbox = [];         // collected [ep, bytes[]]
+let usbEnum = null;        // active enumeration {step, frames, cfg}
+let usbEnumerated = false;
+let usbEchoWait = null;    // pending echo {text, frames}
+const USB_S_DEV = [0x80,0x06,0x00,0x01,0x00,0x00,0x12,0x00];
+const USB_S_ADDR = [0x00,0x05,0x05,0x00,0x00,0x00,0x00,0x00];
+const USB_S_CFG = [0x80,0x06,0x00,0x02,0x00,0x00,68,0x00];
+const USB_S_SETCFG = [0x00,0x09,0x01,0x00,0x00,0x00,0x00,0x00];
+const USB_S_LINE = [0x21,0x20,0x00,0x00,0x00,0x00,0x07,0x00];
+const USB_S_STATE = [0x21,0x22,0x03,0x00,0x00,0x00,0x00,0x00];
+function usbTake(ep) {
+  const i = usbInbox.findIndex(e => e[0] === ep);
+  return i < 0 ? null : usbInbox.splice(i, 1)[0][1];
+}
+function usbSendSetup(bytes) {
+  if (useWorker && worker) { worker.postMessage({ type: 'usbSetup', bytes }); return null; }
+  try { return emu ? !!emu.usbInjectSetup(bytes) : false; } catch { return false; }
+}
+function usbSendOut(ep, bytes) {
+  if (useWorker && worker) { worker.postMessage({ type: 'usbOut', ep, bytes }); return null; }
+  try { return emu ? !!emu.usbInjectOut(ep, bytes) : false; } catch { return false; }
+}
+function usbDrainMain() {
+  if (!usbListenMain || !emu) return;
+  try {
+    const flat = emu.drainEvents();
+    let i = 0;
+    while (i < flat.length) {
+      const t = flat[i];
+      let adv = 2;
+      if (t === 1) adv = 3 + (flat[i+2]||0) + (flat[i+3]||0);
+      else if (t === 14 || t === 15) adv = 12;
+      else if (t === 16) adv = 4; else if (t === 17) adv = 6;
+      else if (t === 18) {
+        const len = flat[i+2] || 0;
+        usbInbox.push([flat[i+1], Array.from(flat.slice(i+3, i+3+len))]);
+        adv = 3 + len;
+      } else if (t === 2 || t === 3 || t === 6 || t === 8 || t === 10) adv = 3;
+      if (adv <= 0) break;
+      i += adv;
+    }
+  } catch {}
+}
+function usbEnumAdvance() {
+  if (usbEnum) {
+    const st = usbEnum;
+    st.frames++;
+    let d;
+    switch (st.step) {
+      case 0: d = usbTake(0); if (d && d.length === 18) { log('USB: device descriptor (18B, CDC-ACM).', 't-ok'); usbSendOut(0, []); st.step = 1; st.frames = 0; } break;
+      case 1: if (st.frames > 3) { usbSendSetup(USB_S_ADDR); st.step = 2; st.frames = 0; } break;
+      case 2: d = usbTake(0); if (d && d.length === 0) { log('USB: address 5 assigned.', 't-ok'); usbSendSetup(USB_S_CFG); st.step = 3; st.frames = 0; st.cfg = []; } break;
+      case 3: d = usbTake(0); if (d) { st.cfg = st.cfg.concat(d); if (st.cfg.length >= 68) { log(`USB: config descriptor (${st.cfg.length}B, 2 packets).`, 't-ok'); usbSendOut(0, []); st.step = 4; st.frames = 0; } } break;
+      case 4: if (st.frames > 3) { usbSendSetup(USB_S_SETCFG); st.step = 5; st.frames = 0; } break;
+      case 5: d = usbTake(0); if (d) { log('USB: configured.', 't-ok'); usbSendSetup(USB_S_LINE); st.step = 6; st.frames = 0; } break;
+      case 6: if (st.frames > 3) { usbSendOut(0, [0x00,0xC2,0x01,0x00,0x00,0x00,0x08]); st.step = 7; st.frames = 0; } break;
+      case 7: d = usbTake(0); if (d) { log('USB: line coding 115200 8N1.', 't-ok'); usbSendSetup(USB_S_STATE); st.step = 8; st.frames = 0; } break;
+      case 8: d = usbTake(0); if (d) {
+        log('USB: enumerated — CDC serial live; EP1 echoes.', 't-ok');
+        $('usbStatus').textContent = 'enumerated (addr 5, CDC-ACM)';
+        $('usbEchoInput').disabled = false; $('usbEchoBtn').disabled = false;
+        usbEnumerated = true; usbEnum = null;
+      } break;
+    }
+    if (st.frames > 600) { log('USB: enumeration stalled — press Run, then Enumerate again.', 't-err'); usbEnum = null; }
+  }
+  if (usbEchoWait) {
+    const w = usbEchoWait; w.frames++;
+    const e = usbTake(1);
+    if (e) { log(`USB EP1 echo: "${String.fromCharCode(...e)}"`, 't-out'); usbEchoWait = null; }
+    else if (w.frames > 600) { log('USB: echo timeout.', 't-err'); usbEchoWait = null; }
+  }
+}
 
 // Timer channels driving GPIO pins, for PWM glow rendering (fade demo).
 const PWM_PINS = { 'PA0': { base: 0x40000000, ch: 0 } };  // TIM2 CH1 -> PA0
@@ -922,12 +1015,14 @@ function pollUart() {
     } catch (e) {}
 }
 
-async function initEmulator(data, name, extDevices = {}, needsMainThread = false) {
+async function initEmulator(data, name, extDevices = {}, needsMainThread = false, opts = {}) {
     if (emu) { try { emu.close(); } catch {} emu = null; }
     if (worker) { try { worker.postMessage({type:'stop'}); } catch {} }
     cancelAnimationFrame(animId);
     running = false;
     autopilot = false;
+    usbListenMain = false;
+    usbInbox = []; usbEnum = null; usbEnumerated = false;
     runSteps = 0;
     autoBytes = [];
     canInjected = false;
@@ -939,6 +1034,10 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
     $('avgMips').textContent = '—';
     $('showcaseCard').hidden = true;
     $('wsCard').hidden = true;
+    $('usbCard').hidden = true;
+    $('usbEchoInput').disabled = true;
+    $('usbEchoBtn').disabled = true;
+    $('usbStatus').textContent = 'not enumerated';
     const ph = $('gpioPlaceholder'); if (ph) ph.style.display = '';
     $('gpioGrid').querySelectorAll('.gpio-port').forEach(e => e.remove());
     runStartTs = 0;
@@ -974,7 +1073,7 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
         const svdForWorker = (chipSel === 'stm32f103c8' && svdXml) ? svdXml : undefined;
         // autoBytes for periph_test autopilot
         const ab = (name.includes('periph_test') || name.includes('arduino_periph_test')) ? [0x41, 0x42] : [];
-        worker.postMessage({ type: 'init', firmware: data, chip, svd: svdForWorker, ext_devices: extDevices, autoBytes: ab, canFlagAddr });
+        worker.postMessage({ type: 'init', firmware: data, chip, svd: svdForWorker, ext_devices: extDevices, autoBytes: ab, canFlagAddr, usbListen: !!opts.usbListen });
         // Try OffscreenCanvas transfer for showcase (worker renders directly, no copy)
         try {
           if (typeof OffscreenCanvas !== 'undefined' && $('oledCanvas')?.transferControlToOffscreen) {
@@ -1007,6 +1106,7 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
             ext_devices: extDevices,
         });
         emu.onPinChange(onPinActivity);
+        usbListenMain = !!opts.usbListen;
         log(`Loaded ${name} on ${chipSel === 'stm32f105' ? 'STM32F105' : 'STM32F103C8'} (${data.length} bytes). PC=0x${emu.getRegisters().PC.toString(16).padStart(8, '0')}`);
         if (symbolsData) emu.setSymbols(symbolsData);
         $('runBtn').disabled = false;
@@ -1079,6 +1179,7 @@ function runLoop() {
         updateVisuals();
     }
     pollUart();
+    if (usbListenMain) { usbDrainMain(); if (usbEnum || usbEchoWait) usbEnumAdvance(); }
     if (autopilot) {
         const termText = terminal.textContent;
         const sumM = termText.match(/SUMMARY\s+pass=(\d+)\s+fail=(\d+)/);
@@ -1221,6 +1322,16 @@ $('loadPresetBtn').addEventListener('click', async () => {
             const buf = await fetch('arduino_stopwatch.elf').then(r => r.arrayBuffer());
             await initEmulator(new Uint8Array(buf), 'arduino_stopwatch.elf (stopwatch)');
             log('Press Run — then click the PB13 button widget to run/stop; elapsed prints on UART.', 't-in');
+        } else if (preset === 'usb_cdc') {
+            const buf = await fetch('arduino_usb_cdc.elf').then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(buf), 'arduino_usb_cdc.elf (USB CDC serial)', {}, false, { usbListen: true });
+            usbListenMain = true;
+            $('usbCard').hidden = false;
+            log('Press Run — then Enumerate USB device: the page plays host (descriptors, address, line coding) and EP1 echoes.', 't-in');
+        } else if (preset === 'pwm_wave') {
+            const buf = await fetch('arduino_pwm_wave.elf').then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(buf), 'arduino_pwm_wave.elf (TIM DMA-burst PWM wave)');
+            log('Press Run — TIM3 CH1 duty follows an 8-step triangle; each step is burst-DMAed from RAM (duty=N ccr=N).', 't-in');
         }
     } catch (e) {
         log(`Failed to load preset: ${e.message || e}`, 't-err');
@@ -1229,6 +1340,25 @@ $('loadPresetBtn').addEventListener('click', async () => {
 });
 
 const btnWidget = $('btn-widget');
+$('usbEnumBtn').addEventListener('click', () => {
+    if (!running) { log('Press Run first — the device must be polling.', 't-err'); return; }
+    usbInbox = []; usbEnumerated = false; usbEchoWait = null;
+    $('usbStatus').textContent = 'enumerating…';
+    $('usbEchoInput').disabled = true; $('usbEchoBtn').disabled = true;
+    usbSendSetup(USB_S_DEV);
+    usbEnum = { step: 0, frames: 0, cfg: [] };
+    log('USB: host enumeration started (device descriptor request).', 't-in');
+});
+const usbEchoSend = () => {
+    const v = $('usbEchoInput').value;
+    if (!usbEnumerated || !v) return;
+    const bytes = Array.from(v).map(c => c.charCodeAt(0) & 0xFF).slice(0, 64);
+    usbSendOut(1, bytes);
+    usbEchoWait = { text: v, frames: 0 };
+    $('usbEchoInput').value = '';
+};
+$('usbEchoBtn').addEventListener('click', usbEchoSend);
+$('usbEchoInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') usbEchoSend(); });
 btnWidget.addEventListener('mousedown', () => { if (useWorker && worker) worker.postMessage({ type: 'gpioSetInput', port: 1, pin: 13, value: true }); else if (emu) emu.gpioSetInput(1, 13, true); });
 const btnUp = () => { if (useWorker && worker) worker.postMessage({ type: 'gpioSetInput', port: 1, pin: 13, value: false }); else if (emu) emu.gpioSetInput(1, 13, false); };
 btnWidget.addEventListener('mouseup', btnUp);
