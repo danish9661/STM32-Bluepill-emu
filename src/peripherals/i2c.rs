@@ -40,6 +40,10 @@ pub struct I2c {
     /// Clock stretching: instruction count until SCL is released by the slave.
     /// If non-zero, interrupts are deferred until the stretch period expires.
     stretch_until: u64,
+    /// SMBus packet-error-code accumulator (CRC-8/SMBus, poly 0x07, init 0).
+    /// Covers address+R/W + data bytes while PECEN (CR1.5) is set; readable
+    /// via PECR. SMBALERT pin (CR1.13/SMBALERT) is register-only (no pin).
+    pec: u8,
 }
 
 impl Default for I2c {
@@ -51,6 +55,7 @@ impl Default for I2c {
             irq_ev: 0, irq_er: 0,
             dma_channel_tx: 0, dma_channel_rx: 0,
             stretch_until: 0,
+            pec: 0,
         }
     }
 }
@@ -79,7 +84,27 @@ impl I2c {
         self.sr1 = 0; self.sr2 = 0;
         self.active_device = None; self.state = I2cState::Idle;
         self.sr1_addr_flag = false;
+        self.pec = 0;
     }
+
+    /// SMBus PEC update (CRC-8, poly x^8+x^2+x+1 = 0x07, init 0, MSB-first).
+    fn pec_feed(&mut self, byte: u8) {
+        let mut crc = self.pec;
+        let mut v = byte;
+        for _ in 0..8 {
+            let msb = (crc ^ v) & 0x80;
+            crc = (crc << 1) & 0xFF;
+            v <<= 1;
+            if msb != 0 {
+                crc ^= 0x07;
+            }
+        }
+        self.pec = crc;
+    }
+
+    fn pec_enabled(&self) -> bool { self.cr1 & (1 << 5) != 0 }
+    fn pec_xfer(&self) -> bool { self.cr1 & (1 << 12) != 0 }
+    fn engc(&self) -> bool { self.cr1 & (1 << 6) != 0 }
 
     /// Resolves the DMA channel to use, accounting for AFIO remap.
     /// I2C1 default: TX=ch4, RX=ch5. AFIO remap (MAPR bit 1): TX=ch6, RX=ch7.
@@ -111,7 +136,7 @@ impl I2c {
 
         let ev_flags = self.sr1 & 0x17;
         let buf_flags = self.sr1 & 0xC0;
-        let err_flags = self.sr1 & 0x0E00;
+        let err_flags = self.sr1 & 0x1E00; // BERR/AF/ARLO/OVR + PECERR(12)
 
         if ev_flags != 0 && itevten != 0 {
             sys.p.nvic.borrow_mut().set_intr_pending(self.irq_ev);
@@ -138,14 +163,28 @@ impl Peripheral for I2c {
             0x0C => self.oar2,
             0x1C => self.ccr,
             0x20 => self.trise,
+            0x30 => self.pec as u32, // PECR: computed packet error code
                 0x10 => {
                     let v = self.dr;
                     self.sr1 &= !(1 << 6); // Clear RXNE on DR read
                     self.sr1 &= !(1 << 2); // BTF clears on DR read (byte taken)
                     if let Some(idx) = self.active_device {
                         if matches!(self.state, I2cState::Active { is_read: true }) {
-                            let mut d = self.devices[idx].device.borrow_mut();
-                            let byte = sys.i2c_take_rx(self.i2c_channel()).unwrap_or_else(|| d.read(sys, ()) as u8);
+                            let byte = {
+                                let mut d = self.devices[idx].device.borrow_mut();
+                                sys.i2c_take_rx(self.i2c_channel()).unwrap_or_else(|| d.read(sys, ()) as u8)
+                            };
+                            if self.pec_enabled() {
+                                if self.pec_xfer() {
+                                    // PEC byte itself: compare, NACK-equivalent
+                                    // error flag on mismatch (no accumulate).
+                                    if byte != self.pec {
+                                        self.sr1 |= 1 << 12; // PECERR
+                                    }
+                                } else {
+                                    self.pec_feed(byte);
+                                }
+                            }
                             self.dr = byte as u32;
                             self.sr1 |= 1 << 6; // RXNE
                             sys.push_event(crate::system::VmEvent::I2cRead { channel: self.i2c_channel() });
@@ -281,11 +320,27 @@ impl Peripheral for I2c {
                         sys.push_event(crate::system::VmEvent::I2cStart { channel: self.i2c_channel(), addr });
                         let found = self.devices.iter().position(|d| d.address == addr);
 
-                        if let Some(idx) = found {
+                        if addr == 0 && found.is_none() && self.engc() {
+                            // General call (ENGC): ACK with no device; the
+                            // GENCALL flag (SR2 bit 4) marks it, bytes go
+                            // nowhere (documented).
+                            self.active_device = None;
+                            self.sr1 = 1 << 1; // ADDR
+                            self.sr2 = (1 << 0) | (1 << 1) | (1 << 4); // BUSY|MSL|GENCALL
+                            if self.pec_enabled() {
+                                self.pec = 0;
+                                self.pec_feed(value as u8);
+                            }
+                            self.state = I2cState::AddrSent { is_read };
+                        } else if let Some(idx) = found {
                             self.active_device = Some(idx);
                             self.devices[idx].device.borrow_mut().reset();
                             self.sr1 = 1 << 1; // ADDR
                             self.sr2 = (1 << 0) | (1 << 1); // BUSY=1, MSL=1
+                            if self.pec_enabled() {
+                                self.pec = 0;
+                                self.pec_feed(value as u8);
+                            }
                             if is_read {
                                 let mut d = self.devices[idx].device.borrow_mut();
                                 self.dr = d.read(sys, ()) as u32;
@@ -304,11 +359,21 @@ impl Peripheral for I2c {
                         self.fire_interrupts(sys);
                     }
                     I2cState::Active { is_read: false } => {
-                        // Master transmitter: push byte
+                        // Master transmitter: push byte (or the PEC value
+                        // when a PEC transfer is armed via CR1.12; the
+                        // accumulator covers address + data only).
+                        let txb = if self.pec_enabled() && self.pec_xfer() {
+                            self.pec
+                        } else {
+                            value as u8
+                        };
                         if let Some(idx) = self.active_device {
                             let mut d = self.devices[idx].device.borrow_mut();
-                            d.write(sys, (), value as u8);
-                            sys.push_event(crate::system::VmEvent::I2cWrite { channel: self.i2c_channel(), byte: value as u8 });
+                            d.write(sys, (), txb);
+                            sys.push_event(crate::system::VmEvent::I2cWrite { channel: self.i2c_channel(), byte: txb });
+                        }
+                        if self.pec_enabled() && !self.pec_xfer() {
+                            self.pec_feed(value as u8);
                         }
                         self.sr1 |= 1 << 7; // TXE
                         self.sr1 &= !(1 << 2); // BTF clears on DR write

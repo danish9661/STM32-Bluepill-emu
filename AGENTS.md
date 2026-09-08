@@ -319,6 +319,13 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - **CI**: census gates (`capstone==6.0.0`, dump + both `.py`) + fuzz canary (200/seed1, `unicorn==2.1.4`) wired after unit tests.
 - **Verified**: track-2 fuzz 2700 (200/s1 + 500/s7 + 1000/s11 + 1000/s42) 0 divs; cpu 43/43; census green; test_all 401/401; canary + 200M 39/39; coremark 5/5; all suites; browser demos 4/4.
 
+### 30. Depth gaps closed + track-3 fuzz + CAN/stopwatch demos + version-proof CI [this sprint]
+- **Peripheral depth** (each with unit tests in `tests/test_all.mjs`, docs in `docs/COVERAGE.md`): TIM BDTR/MOE/break/LOCK (MOE gates `pwm_duty`, BKIN PB12 clears MOE + BIF/BIE IRQ, AOE re-arms; DTG stored — no edge surface); ADC dual-simultaneous (DUALMOD=6 fans out, DR packs, lockstep force-complete); SPI CRC-8/16 (CRCNEXT phase + CRCERR); I2C PEC (CRC-8/SMBus + PECR + PECERR) + general-call ACK (GENCALL); USART LIN (SBK + LBD/LBDIE + FE, `uart_inject_break` export, EIE error IRQ); CAN TTCM timestamps (TXRQ/RX stamp TIME); FSMC NAND ECC accumulator (ECCR2/3, self-consistent); FLASH WRPRTERR (4KB blocks); GPIOE registered; RCC CSS (`rcc_fail_hse` → CSSF+NMI+HSI fallback, SWS-based clocks, STOP-exit HSI hook with `core_tests` wake test).
+- **Fuzz track 3**: branch pairs (Bcond/B/CBZ/Bcc.W with NOP landing pads — cond evaluation now differential) + multi-slot IT (executed multi-slot verified exact on oracle; only preset is broken). Found: UDIV/SDIV-PC raw-write, F9-signed-RtPC genuine loads (not PLI), word-LDR-PC genuine (not PLD), T-form (o2[11:8]==0xE) loads, F9-register-RtPC hints, SBFX-family oracle gap (resample: Unicorn lacks the bitfield unit), T-form triage names, `.w`-suffix + `#0x` + alias triage robustness.
+- **Demos**: `arduino_can_chat` (CAN1 LBKM loopback self-talk; needed a BTR LBKM mask fix — mask had stripped bit 30) + `arduino_stopwatch` (PB13 EXTI + TIM2, headless button-press test with the idle-high-first harness note). Headless 4/4 + 5/5, page presets, browser 6/6, CI lines; tests use `site/*.elf`.
+- **CI reality check**: local capstone is a mutated 5.0.9→6.0.0 install (PyPI has no 6.0.0 final!) — stock 5.0.9 differs (UDF decode, sb/sl/fp/ip aliases, `msreq`/`mrseq`, `#0x` targets). Gates now pass on BOTH (alias normalization, msreq/mrseq/adr/UDF accepts, `#`-tolerant parse); CI pins stock `capstone==5.0.9` + `unicorn==2.1.4`. `docs/summary.md` left frozen (declares itself historical).
+- **Verified**: track-3 fuzz 2700+1700 (all seeds incl. branch pairs) 0 divs; cpu 44/44; census green both versions; test_all 464/464; canary + 200M 39/39; coremark 5/5; all suites; browser 6/6 + page.
+
 
 
 ## Next Phase — Long-term Optimizations

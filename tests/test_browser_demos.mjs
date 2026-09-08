@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 test.describe('New demo presets', () => {
-  for (const [preset, needle] of [['rtc_clock', '12:00:01'], ['servo', 'deg=10'], ['dac_sine', 'adc='], ['i2c_scan', 'found=2']]) {
+  for (const [preset, needle] of [['rtc_clock', '12:00:01'], ['servo', 'deg=10'], ['dac_sine', 'adc='], ['i2c_scan', 'found=2'], ['can_chat', 'rx id=100'], ['stopwatch', 'Stopwatch demo']]) {
     test(`${preset} loads and prints`, async ({ page }) => {
       page.on('console', msg => { if (msg.type() === 'error') console.log('BROWSER ERR:', msg.text()); });
       await page.goto('http://localhost:8765/');

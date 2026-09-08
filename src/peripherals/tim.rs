@@ -110,6 +110,11 @@ pub struct Timer {
     ccmr3: u32,
     ccr5: u32,
     ccr6: u32,
+    /// Break-and-dead-time register (advanced timers: TIM1/TIM8 on F103
+    /// only TIM1 exists). DTG is stored (no edge-shaping surface: PWM
+    /// output is duty-value only); MOE gates all outputs, break clears
+    /// MOE + raises BIF, LOCK freezes DTG/BKE/BKP/AOE once set.
+    bdtr: u32,
     pwm_duty: [u32; 4],
     last_tick: u64,
     irq_num: i32,
@@ -159,6 +164,7 @@ impl Timer {
                 arr: 0xFFFF_FFFF,
                 ccr: [0; 4], rcr: 0, dcr: 0, dmar: 0, or_: 0,
                  ccmr3: 0, ccr5: 0, ccr6: 0, pwm_duty: [0; 4],
+                bdtr: 0,
                  last_tick: instruction_count(),
                  irq_num: irq,
                  base: timer_base(name),
@@ -290,7 +296,31 @@ impl Timer {
             }
         }
 
+        self.sample_break(sys);
         self.update_interrupt(sys);
+    }
+
+    /// Break input (advanced timers only): TIM1 BKIN defaults to PB12.
+    /// A level matching BKP polarity with BKE set clears MOE in hardware,
+    /// raises BIF (SR bit 7) and IRQs when BIE is set. Sampled once per
+    /// batch (level-sensitive, like silicon).
+    fn sample_break(&mut self, sys: &System) {
+        if self.name != "TIM1" || self.bdtr & (1 << 12) == 0 {
+            return; // BKE clear
+        }
+        if self.bdtr & (1 << 15) == 0 {
+            return; // MOE already off
+        }
+        let level = sys.p.gpio.borrow_mut().read_pin_effective(sys, 1, 12);
+        let active = level == (self.bdtr & (1 << 13) != 0); // BKP: 1 = active high
+        if !active {
+            return;
+        }
+        self.bdtr &= !(1 << 15); // MOE cleared by hardware
+        self.sr |= 1 << 7; // BIF
+        if self.dier & (1 << 7) != 0 {
+            sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
+        }
     }
 
     /// Encoder mode: read TI1/TI2 pins and count edges per SMS[1:0] mode.
@@ -440,6 +470,10 @@ impl Timer {
     fn generate_update(&mut self, sys: &System) {
         self.cnt = 0;
         self.sr |= 1; // UIF
+        // AOE re-arms MOE on every update (advanced timers).
+        if self.bdtr & (1 << 14) != 0 {
+            self.bdtr |= 1 << 15;
+        }
         self.update_event_trigger(sys);
         sys.push_event(crate::system::VmEvent::TimUpdate { tim: self.tim_num() });
         if self.dier & 1 != 0 {
@@ -527,6 +561,10 @@ impl Peripheral for Timer {
     }
 
     fn pwm_duty(&self, channel: u32) -> Option<u32> {
+        // Advanced-timer outputs die with MOE (break or SW clear).
+        if self.name == "TIM1" && self.bdtr & (1 << 15) == 0 {
+            return Some(0);
+        }
         self.pwm_duty.get(channel as usize).copied()
     }
 
@@ -561,6 +599,8 @@ impl Peripheral for Timer {
             0x28 => self.psc,
             0x2C => self.arr,
             0x30 => self.rcr,
+            // BDTR exists only on advanced timers (TIM1/TIM8).
+            0x44 if self.name == "TIM1" || self.name == "TIM8" => self.bdtr,
             0x34..=0x40 => {
                 let i = ((offset - 0x34) / 4) as usize;
                 self.ccr.get(i).copied().unwrap_or(0)
@@ -614,6 +654,25 @@ impl Peripheral for Timer {
             0x28 => self.psc = value & 0xFFFF,
             0x2C => self.arr = value & 0xFFFFFFFF,
             0x30 => self.rcr = value & 0xFF,
+            // BDTR exists only on advanced timers (TIM1/TIM8); general
+            // timers ignore the write.
+            0x44 if self.name == "TIM1" || self.name == "TIM8" => {
+                // BDTR with LOCK: once LOCK[9:8] is raised it can only go
+                // up (never down) without reset, and DTG/BKE/BKP/AOE
+                // freeze while LOCK != 0. OSSI/OSSR/MOE stay writable
+                // (MOE must remain SW-settable and HW-clearable).
+                let old_lock = (self.bdtr >> 8) & 3;
+                let new_lock = (value >> 8) & 3;
+                let mut v = value & 0xFFFF;
+                if new_lock < old_lock {
+                    v = (v & !(3 << 8)) | (self.bdtr & (3 << 8));
+                }
+                if (self.bdtr >> 8) & 3 != 0 {
+                    v = (v & !(0xFF | (1 << 12) | (1 << 13) | (1 << 14)))
+                        | (self.bdtr & (0xFF | (1 << 12) | (1 << 13) | (1 << 14)));
+                }
+                self.bdtr = v;
+            }
             0x34..=0x40 => {
                 let i = ((offset - 0x34) / 4) as usize;
                 if let Some(ccr) = self.ccr.get_mut(i) {

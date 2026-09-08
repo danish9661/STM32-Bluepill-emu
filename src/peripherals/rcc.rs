@@ -39,12 +39,35 @@ impl Rcc {
         }
     }
 
+    /// HSE clock failure injection (test/firmware entry point): the crystal
+    /// dies (HSERDY clears). With CSSON (CR.19) this raises CSSF (CIR.7),
+    /// pends an NMI, and falls back to HSI (SWS=00, SW kept); without CSSON
+    /// only HSERDY clears. Returns true when CSS fired.
+    pub fn fail_hse(&mut self, sys: &crate::system::System) -> bool {
+        self.cr &= !(1 << 17); // HSERDY clears: the oscillator is dead
+        if self.cr & (1 << 19) == 0 {
+            return false;
+        }
+        self.cir |= 1 << 7; // CSSF
+        self.cfgr &= !(3 << 2); // SWS falls back to HSI (SW kept)
+        sys.p.nvic.borrow_mut().set_intr_pending(-14); // NMI
+        true
+    }
+
+    /// STOP-mode exit: the system clock is HSI until firmware re-selects
+    /// (SWS=00, SW kept). Called on wake from deep sleep.
+    pub fn wake_from_stop(&mut self) {
+        self.cfgr &= !(3 << 2);
+    }
+
     /// SYSCLK in Hz decoded from CFGR (SW/PLLSRC/PLLMUL). Deliberately
     /// read-only w.r.t. emulation timing: the instruction budget stays fixed
     /// (1 instr = 1 SYSCLK cycle), so this is for drivers that compute
     /// dividers/frequencies from the configured clocks (e.g. USART BRR).
+    /// Follows SWS (CFGR[3:2], the active clock), not SW: STOP wake and
+    /// CSS failure both fall back to HSI while SW keeps its setting.
     pub fn sysclk_hz(&self) -> u32 {
-        match self.cfgr & 3 {
+        match (self.cfgr >> 2) & 3 {
             0 => HSI_HZ,
             1 => HSE_HZ,
             _ => {
@@ -89,6 +112,12 @@ impl Default for Rcc {
 
 impl Peripheral for Rcc {
     fn rcc_clocks(&self) -> Option<(u32, u32, u32, u32)> { Some(self.clocks_hz()) }
+    fn rcc_fail_hse(&mut self, sys: &crate::system::System) -> bool {
+        self.fail_hse(sys)
+    }
+    fn rcc_wake_from_stop(&mut self) {
+        self.wake_from_stop()
+    }
 
     fn read(&mut self, _sys: &System, offset: u32) -> u32 {
         match offset {
@@ -118,7 +147,13 @@ impl Peripheral for Rcc {
                 self.cr = cr;
             }
             0x04 => self.cfgr = (value & 0xFFFF_FFFC) | ((value & 0x3) << 2) | (value & 0x3),
-            0x08 => self.cir = self.cir & !(value & 0x0E00_0000) | (value & 0x001F_001F),
+            0x08 => {
+                // CSSC (bit 23) clears the CSSF flag (bit 7).
+                if value & (1 << 23) != 0 {
+                    self.cir &= !(1 << 7);
+                }
+                self.cir = self.cir & !(value & 0x0E80_0000) | (value & 0x001F_001F);
+            }
             0x0C => self.apb2rstr = value,
             0x10 => self.apb1rstr = value,
             0x14 => self.ahbenr = value,

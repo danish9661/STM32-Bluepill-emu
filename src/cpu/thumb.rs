@@ -1492,7 +1492,10 @@ pub fn exec32(
                 if !is_load {
                     return fault(cpu, pc, op1, op2, 4);
                 }
-                if rt == 15 {
+                // Unsigned byte/half into PC are PLD hints, signed are
+                // PLI (no literal signed-into-PC encoding). Word LDR-pc
+                // is a genuine interworking branch (NOT a hint).
+                if rt == 15 && size != 4 {
                     adv(cpu, pc, 4); // PLD/PLI
                     return true;
                 }
@@ -1505,15 +1508,25 @@ pub fn exec32(
                     (2, true) => sx(v & 0xFFFF, 16),
                     _ => v,
                 };
+                if rt == 15 {
+                    // Word LDR-literal into PC: genuine interwork.
+                    return branch(cpu, sys, mem, v, pc, op1, op2, 4);
+                }
                 adv(cpu, pc, 4);
                 return true;
             }
             if rt == 15 {
-                if is_load {
-                    adv(cpu, pc, 4); // PLD/PLI
+                if !is_load {
+                    return fault(cpu, pc, op1, op2, 4);
+                }
+                // Genuine interworking loads: word LDR + F9 signed (T and
+                // privileged alike). Unsigned byte/half into PC are PLD.
+                if !signed && size != 4 {
+                    adv(cpu, pc, 4); // PLD
                     return true;
                 }
-                return fault(cpu, pc, op1, op2, 4);
+                // else: fall through to the load path (writes r15, then
+                // interworks at the rt==15 check below).
             }
             let addr = rr(cpu, rn, pc).wrapping_add(imm12);
             if is_load {
@@ -1593,9 +1606,15 @@ pub fn exec32(
             let addr = rr(cpu, rn, pc).wrapping_add(off);
             if is_load {
                 // Rt==PC: unsigned byte/half is PLD (pure hint); word is a
-                // genuine LDR-register branch (`ldr.w pc,[r5,r2]`);
-                // signed-RtPC has no encoding (UNPREDICTABLE, stay loud).
+                // genuine LDR-register branch (`ldr.w pc,[r5,r2]`); F9
+                // signed into PC behaves as a hint too (differential fuzz:
+                // the oracle advances past `ldrsb pc,[r0,r2]` shapes that
+                // Capstone prints as `pli`, without loading).
                 if rt == 15 && !signed && size != 4 {
+                    adv(cpu, pc, 4);
+                    return true;
+                }
+                if rt == 15 && signed {
                     adv(cpu, pc, 4);
                     return true;
                 }
@@ -1652,9 +1671,22 @@ pub fn exec32(
                 adv(cpu, pc, 4);
                 return true;
             }
+            // F9 LDRSB/LDRSH (incl. T-forms LDRSBT/LDRSHT) with Rt==PC
+            // and Rn!=PC are genuine interworking loads, NOT PLI
+            // (differential fuzz: the oracle loads and branches; PLI is
+            // literal-only, handled in the Rn==PC block above).
             if rt == 15 && signed && f9 && (c == 1 || c == 3 || c == 9 || c == 11) {
-                adv(cpu, pc, 4);
-                return true;
+                let v = match size {
+                    1 => mem.read8(addr) as u32,
+                    2 => mem.read16(addr) as u32,
+                    _ => mem.read32(addr),
+                };
+                let v = sx(v, size * 8);
+                cpu.regs.r[15] = v;
+                if w == 1 || p == 0 {
+                    cpu.regs.r[rn] = base.wrapping_add(off);
+                }
+                return branch(cpu, sys, mem, v, pc, op1, op2, 4);
             }
             let v = match size {
                 1 => mem.read8(addr) as u32,
@@ -1663,7 +1695,9 @@ pub fn exec32(
             };
             let v = if signed { sx(v, size * 8) } else { v };
             if rt == 15 {
-                if size != 4 || signed {
+                // F9 signed loads into PC (T and privileged alike) are
+                // genuine interworking loads (see the c>=8 note above).
+                if size != 4 && !(signed && f9 && (c == 1 || c == 3 || c == 9 || c == 11)) {
                     return fault(cpu, pc, op1, op2, 4);
                 }
                 cpu.regs.r[15] = v;

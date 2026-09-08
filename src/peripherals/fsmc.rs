@@ -37,7 +37,7 @@ impl Region {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Reg {
     Bcr, Btr, Bwtr,
-    Pcr, Pmem, Patt,
+    Pcr, Pmem, Patt, Eccr,
 }
 
 enum Access {
@@ -54,6 +54,12 @@ pub struct Bank {
     pcr: u32,
     pmem: u32,
     patt: u32,
+    /// NAND ECC accumulator (ECCR2/3): order-sensitive XOR-fold of every
+    /// data byte transferred while PCR.ECCEN is set. NOT silicon
+    /// Hamming-compatible (that needs an oracle to verify); it is
+    /// self-consistent, so firmware store-then-verify ECC flows pass.
+    /// Cleared on ECCEN 0->1 (fresh sector).
+    ecc: u32,
 }
 
 impl Bank {
@@ -63,7 +69,13 @@ impl Bank {
         let name = ext_device.as_ref()
             .map(|d| d.borrow_mut().connect_peripheral(&name))
             .unwrap_or(name);
-        Self { name, ext_device, bcr: 0, btr: 0, bwtr: 0, pcr: 0, pmem: 0, patt: 0 }
+        Self { name, ext_device, bcr: 0, btr: 0, bwtr: 0, pcr: 0, pmem: 0, patt: 0, ecc: 0 }
+    }
+
+    fn ecc_feed(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.ecc = self.ecc.rotate_left(1) ^ b as u32;
+        }
     }
 
     fn read_data(&mut self, sys: &System, offset: u32) -> u32 {
@@ -124,6 +136,8 @@ impl Fsmc {
                     0x00A0 => Access::Reg(Region::PcCard, Reg::Pcr),
                     0x00A8 => Access::Reg(Region::PcCard, Reg::Pmem),
                     0x00B0 => Access::Reg(Region::PcCard, Reg::Patt),
+                    0x00B4 => Access::Reg(Region::Nand(0), Reg::Eccr),
+                    0x00B8 => Access::Reg(Region::Nand(1), Reg::Eccr),
                     0x0104 => Access::Reg(Region::Nor(0), Reg::Bwtr),
                     0x010C => Access::Reg(Region::Nor(1), Reg::Bwtr),
                     0x0114 => Access::Reg(Region::Nor(2), Reg::Bwtr),
@@ -163,6 +177,14 @@ impl Peripheral for Fsmc {
                 for i in 0..(size as u32) {
                     v |= bank.read_data(sys, off + i) << (i * 8);
                 }
+                // NAND ECC: fold read bytes while ECCEN is set.
+                if matches!(region, Region::Nand(_)) && bank.pcr & (1 << 6) != 0 {
+                    let mut b = [0u8; 4];
+                    for i in 0..(size as usize) {
+                        b[i] = (v >> (i * 8)) as u8;
+                    }
+                    bank.ecc_feed(&b[..size as usize]);
+                }
                 let bank_idx = region.index() as u8 + 1;
                 sys.push_event(crate::system::VmEvent::FsmcAccess { bank: bank_idx, offset: off, write: false, size, value: v });
                 v
@@ -176,6 +198,7 @@ impl Peripheral for Fsmc {
                     Reg::Pcr => bank.pcr,
                     Reg::Pmem => bank.pmem,
                     Reg::Patt => bank.patt,
+                    Reg::Eccr => bank.ecc,
                 }
             }
         }
@@ -198,6 +221,14 @@ impl Peripheral for Fsmc {
                 for i in 0..(size as u32) {
                     bank.write_data(sys, off + i, (value >> (i * 8)) & 0xFF);
                 }
+                // NAND ECC: fold written bytes while ECCEN is set.
+                if matches!(region, Region::Nand(_)) && bank.pcr & (1 << 6) != 0 {
+                    let mut b = [0u8; 4];
+                    for i in 0..(size as usize) {
+                        b[i] = (value >> (i * 8)) as u8;
+                    }
+                    bank.ecc_feed(&b[..size as usize]);
+                }
                 let bank_idx = region.index() as u8 + 1;
                 sys.push_event(crate::system::VmEvent::FsmcAccess { bank: bank_idx, offset: off, write: true, size, value });
             }
@@ -207,9 +238,16 @@ impl Peripheral for Fsmc {
                     Reg::Bcr => bank.bcr = value,
                     Reg::Btr => bank.btr = value & 0x3FFF_FFFF,
                     Reg::Bwtr => bank.bwtr = value & 0x3FFF_FFFF,
-                    Reg::Pcr => bank.pcr = value & 0x3FFF_FFFF,
+                    Reg::Pcr => {
+                        // ECCEN 0->1 starts a fresh sector (clear ECC).
+                        if value & (1 << 6) != 0 && bank.pcr & (1 << 6) == 0 {
+                            bank.ecc = 0;
+                        }
+                        bank.pcr = value & 0x3FFF_FFFF;
+                    }
                     Reg::Pmem => bank.pmem = value & 0x3FFF_FFFF,
                     Reg::Patt => bank.patt = value & 0x3FFF_FFFF,
+                    Reg::Eccr => {} // read-only
                 }
             }
         }

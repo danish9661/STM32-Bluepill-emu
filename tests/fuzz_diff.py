@@ -147,6 +147,11 @@ def skip_oracle_limits(first, second):
     mn = mn[:-2] if mn.endswith('.w') or mn.endswith('.n') else mn
     if mn.startswith('strex'):
         return True
+    # Bitfield unit (SBFX/UBFX/BFI/BFC): this Unicorn faults INSN_INVALID
+    # on all of them (verified incl. plain sbfx/ubfx/bfi/bfc); our
+    # implementations are probe-verified (bitfield_forms etc.).
+    if mn in ('sbfx', 'ubfx', 'bfi', 'bfc'):
+        return True
     if mn in ('ldm', 'stm', 'ldmia', 'stmia', 'ldmdb', 'stmdb',
               'ldmib', 'stmib', 'ldmda', 'stmda', 'push', 'pop'):
         return False
@@ -273,14 +278,16 @@ def gen_cases(n, seed):
     while len(cases) < n and guard < n * 20:
         guard += 1
         roll = rng.random()
-        if roll < 0.50:
+        if roll < 0.45:
             case = gen_single(rng, ops16, ops32)
-        elif roll < 0.70:
+        elif roll < 0.60:
             case = gen_itpair(rng)
-        elif roll < 0.80:
+        elif roll < 0.70:
             case = gen_ldstpair(rng)
-        else:
+        elif roll < 0.85:
             case = gen_aluchain(rng)
+        else:
+            case = gen_branchpair(rng)
         if case is None:
             continue
         cases.append(case)
@@ -389,28 +396,37 @@ def any_regs(rng):
 
 
 def gen_itpair(rng):
-    """`it <cond>` + one predicable 16-bit ALU op (+ 2 NOP pads).
-    Tests predicated flag updates: the payload must set flags (and C!)
-    only when its slot condition holds — the it_suppress path both sides.
-    Single-slot mask only (0x8); multi-slot ITSTATE is mis-evaluated by
-    the oracle even when preset, so those stay hand-probe-covered.
-    Oracle counting quirk (verified): a *skipped* payload advances PC
-    without consuming a stop, so joint count=2 overruns one halfword
-    past a skipped payload (taken stops exactly). The NOP pads absorb
-    the overrun deterministically (NOPs never fault, touch no state);
-    the comparator skips r15 for pairs (counting semantics, not decoder
-    behavior) and checks regs/flags/mem exactly. Our side runs exactly
-    2 steps from zero ITSTATE."""
+    """`it <cond>` + predicable 16-bit ALU payload(s) (+ NOP pads).
+    Tests predicated flag updates: payloads must set flags (and C!)
+    only when their slot condition holds — the it_suppress path both
+    sides. Masks are free (multi-slot ITSTATE executes correctly when
+    set by a real IT insn; only *preset* multi-slot ITSTATE is broken
+    in the oracle, and we never preset). Oracle counting quirk
+    (verified): a *skipped* payload advances PC without consuming a
+    stop, so joint counts overrun into the pads past skipped payloads
+    (taken stops exactly). The NOP pads absorb the overrun
+    deterministically (NOPs never fault, touch no state); the
+    comparator skips r15 for pairs (counting semantics, not decoder
+    behavior) and checks regs/flags/mem exactly. Our side runs exact
+    steps from zero ITSTATE."""
     cond = rng.randrange(0, 14)
-    it = 0xBF00 | (cond << 4) | 0x8
-    kind = rng.choice(ALU_KINDS)
-    rd, rn, rm = (rng.randrange(0, 8) for _ in range(3))
-    imm = rng.choice([rng.randrange(0, 256), rng.randrange(0, 8),
-                      rng.randrange(1, 32)])
-    payload = alu16(kind, rd, rn, rm, imm)
+    if rng.random() < 0.7:
+        mask = 0x8
+        npay, npad, steps = 1, 2, 2
+    else:
+        mask = rng.randrange(1, 16)
+        npay, npad, steps = 2, 4, 3
+    it = 0xBF00 | (cond << 4) | mask
+    code = [it]
+    for _ in range(npay):
+        kind = rng.choice(ALU_KINDS)
+        rd, rn, rm = (rng.randrange(0, 8) for _ in range(3))
+        imm = rng.choice([rng.randrange(0, 256), rng.randrange(0, 8),
+                          rng.randrange(1, 32)])
+        code.append(alu16(kind, rd, rn, rm, imm))
+    code += [0xBF00] * npad  # NOP pads absorb the stop-count overrun
     regs, sp, lr, xpsr = any_regs(rng)
-    return ([it, payload, 0xBF00, 0xBF00], regs, sp, lr, xpsr,
-            [0, 0, 0, 0], 2)
+    return (code, regs, sp, lr, xpsr, [0, 0, 0, 0], steps)
 
 
 def gen_ldstpair(rng):
@@ -447,6 +463,55 @@ def gen_aluchain(rng):
     ins2 = alu16(k2, d2, n2, b, i2)
     regs, sp, lr, xpsr = any_regs(rng)
     return ([ins1, ins2], regs, sp, lr, xpsr, [0, 0, 0, 0], 2)
+
+
+NOP = 0xBF00
+
+
+def gen_branchpair(rng):
+    """A conditional/unconditional branch with a small MAPPED target plus
+    explicit NOP landing pads (2+ steps: branch + landing). Tests cond
+    evaluation (Bcond), CBZ/CBNZ, and wide-branch offset math
+    differentially — branches used to resample/skip entirely. Every
+    landing zone is padded with NOPs so step 2+ never runs into pattern
+    bytes; backward branches land back inside the pads (budgets cap
+    execution, no loops). Any fault or value divergence here is REAL
+    (no triage)."""
+    kind = rng.random()
+    if kind < 0.3:
+        # B<cond>.N forward +16 (imm8=8: off=imm8*2; target index 10).
+        cond = rng.randrange(0, 14)
+        code = [0xD000 | (cond << 8) | 0x08] + [NOP] * 10
+        steps = 2
+    elif kind < 0.45:
+        # B.N forward +16, unconditional (landing index 10).
+        code = [0xE008] + [NOP] * 10
+        steps = 2
+    elif kind < 0.6:
+        # B.N backward -16 (imm8=-8=0xF8): branch sits at index 6
+        # (addr +12), lands on index 0.
+        code = [NOP] * 6 + [0xE000 | 0xF8]
+        steps = 8
+    elif kind < 0.75:
+        # CBZ/CBNZ r<n>, +16 (imm5=8: off=imm5*2; target index 10).
+        rn = rng.randrange(0, 8)
+        cbnz = rng.random() < 0.5
+        code = [(0xB900 if cbnz else 0xB100) | (8 << 3) | rn] + [NOP] * 10
+        steps = 2
+    elif kind < 0.9:
+        # Bcc.W forward +0x20 (S=0,J=0,imm6=0,imm11=0x10; bit12=0 valid
+        # conditional shape; target index 18).
+        cond = rng.randrange(0, 14)
+        code = [0xF000 | (cond << 6), 0x8010] + [NOP] * 17
+        steps = 2
+    else:
+        # Bcc.W backward -0x10 (S=1,J=1,imm6=0x3F,imm11=0x7F8; branch at
+        # index 6-7, lands on index 0).
+        cond = rng.randrange(0, 14)
+        code = [NOP] * 6 + [0xF000 | (1 << 10) | (cond << 6) | 0x3F, 0xAFF8]
+        steps = 8
+    regs, sp, lr, xpsr = any_regs(rng)
+    return (code, regs, sp, lr, xpsr, [0, 0, 0, 0], steps)
 
 
 def relax_alignment(rng, first, second, regs):
@@ -543,7 +608,8 @@ def branch_target_mapped(first, second, regs, sp):
                                    and bm not in ('bx', 'blx', 'bic',
                                                   'bfi', 'bfc')):
         try:
-            return mapped(int(ops.split(',')[0].strip(), 16))
+            # Capstone 5.x prefixes targets with '#' (6.x prints bare).
+            return mapped(int(ops.split(',')[0].strip().lstrip('#'), 16))
         except ValueError:
             return None
     if m in ('bx', 'blx'):
@@ -605,12 +671,15 @@ def branch_target_mapped(first, second, regs, sp):
                 pass
         addr = (base + 4 * (len(items) - 1)) & 0xFFFFFFFF
         return mapped(pattern_word(addr) & ~1)
-    if m in ('ldr', 'ldrh', 'ldrb', 'ldrsh', 'ldrsb', 'ldrt', 'ldrbt',
-             'ldrht', 'tbh', 'tbb', 'ldrd'):
+    if bm in ('ldr', 'ldrh', 'ldrb', 'ldrsh', 'ldrsb', 'ldrt', 'ldrbt',
+              'ldrht', 'tbh', 'tbb', 'ldrd', 'ldrsht', 'ldrsbt'):
         # Only interesting with Rt==pc (loads) or any tbb/tbh. LDRD can
-        # carry pc in either slot (`ldrd r4, pc, [...]`).
+        # carry pc in either slot (`ldrd r4, pc, [...]`); F9 signed
+        # T-forms (`ldrsht pc`, `ldrsbt pc`) are genuine interworking
+        # loads, not PLI (the oracle branches immediately where we
+        # advance-then-fault-on-fetch for unmapped targets).
         dests = [p.split('[')[0].strip() for p in ops.split(',')[:2]]
-        if m in ('tbh', 'tbb') or 'pc' in ops.split(',')[0] or (m == 'ldrd' and 'pc' in dests):
+        if bm in ('tbh', 'tbb') or 'pc' in ops.split(',')[0] or (bm == 'ldrd' and 'pc' in dests):
             if 'pc' in ops and '[' not in ops:
                 return None
             # Approximate: resolve base+index via regs, read pattern word.
@@ -629,22 +698,37 @@ def branch_target_mapped(first, second, regs, sp):
                         baddr = None
                     if baddr is None:
                         return None
-                if m in ('tbh', 'tbb'):
+                if bm in ('tbh', 'tbb'):
                     idx = regs[['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6',
                                 'r7', 'r8'].index(parts[1])] if parts[1] in [
                         'r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7',
                         'r8'] else 0
-                    if m == 'tbh':
+                    if bm == 'tbh':
                         raw = (pattern_byte(baddr + idx * 2)
                                | (pattern_byte(baddr + idx * 2 + 1) << 8))
                         return mapped((baddr + raw * 2) & 0xFFFFFFFF & ~1)
                     raw = pattern_byte(baddr + idx)
                     return mapped((baddr + raw * 2) & 0xFFFFFFFF & ~1)
-                if m == 'ldrd':
+                if bm == 'ldrd':
                     # PC value comes from the second word when Rt2==pc.
                     pw = 4 if dests[1] == 'pc' else 0
                     return mapped(pattern_word((baddr + pw) & 0xFFFFFFFF) & ~1)
-                return mapped(pattern_word(baddr) & ~1)
+                # Offset forms ([Rn, #off]): resolve the effective address
+                # (literals have no offset part, unchanged).
+                off = 0
+                for p in parts[1:]:
+                    p = p.strip()
+                    if p.startswith('#'):
+                        try:
+                            off += int(p[1:], 0)
+                        except ValueError:
+                            pass
+                    elif p.startswith('-'):
+                        try:
+                            off -= int(p[2:] if p[1] == '#' else p[1:], 0)
+                        except ValueError:
+                            pass
+                return mapped(pattern_word((baddr + off) & 0xFFFFFFFF) & ~1)
             except (IndexError, ValueError, KeyError):
                 return None
         return None
@@ -718,7 +802,8 @@ def data_addrs_mapped(first, second, regs, sp):
     m, ops = r[0].mnemonic, r[0].op_str
     base = m[:-2] if m.endswith('.w') or m.endswith('.n') else m
     if base in ('ldrb', 'ldrh', 'ldr', 'ldrsb', 'ldrsh', 'strb', 'strh',
-                'str', 'ldrd', 'strd', 'ldrex', 'strex'):
+                'str', 'ldrd', 'strd', 'ldrex', 'strex', 'ldrt', 'ldrbt',
+                'ldrht', 'strt', 'strbt', 'strht'):
         # UNPREDICTABLE-but-decodable edges the oracle strict-faults:
         # - store/load with Rt==PC handled by callers; byte/half loads
         #   into PC and stores from PC have no valid encoding;
@@ -944,7 +1029,7 @@ def main():
         # 0xFFFFF1E8). Regs/mem must still agree (fault = no state
         # change on either side). IT pairs also skip r15 (oracle
         # stop-counting quirk, documented in gen_itpair).
-        is_itpair = (len(code) == 4 and (code[0] & 0xFF00) == 0xBF00)
+        is_itpair = (len(code) > 2 and (code[0] & 0xFF00) == 0xBF00)
         for ri in range(16):
             if ri == 15 and (is_itpair or (ofault == 1 and fault == 1)):
                 continue

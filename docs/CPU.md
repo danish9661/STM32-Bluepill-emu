@@ -189,6 +189,11 @@ all delta peripherals key off it).
   UDIV/SDIV-PC and 16-bit mov/add-PC handling. Backlog closed: LDREXB/H +
   STREXB/H (`E8D0`/`E8C0`, exact-address reservations) and NVIC STIR
   (`0xE000EF00` routed in `Peripherals`, both maps).
+- Track 3: branch pairs (cond evaluation differential) + executed
+  multi-slot IT; found UDIV/SDIV-PC raw-write, F9-signed/word-LDR-PC
+  genuine loads (not PLI/PLD), T-form loads, F9-register-RtPC hints.
+  Census + fuzz gates pass on stock PyPI capstone 5.0.9 and the local
+  mutated 6.0.0 (alias/msreq/`#0x`/UDF normalization).
 
 ## Tests
 

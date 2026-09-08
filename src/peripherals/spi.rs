@@ -15,6 +15,9 @@ pub struct Spi {
     pub rx_buffer: u32,
     pub txe: bool,
     pub rxne: bool,
+    /// CRC error latch (SR bit 4): set on CRCNEXT-phase mismatch, cleared
+    /// on the next DR read (documented choice; HW says "cleared by SW").
+    pub crcerr: bool,
     pub i2s_sr_toggle: bool,
     pub i2scfgr: u32,
     pub i2spr: u32,
@@ -69,6 +72,9 @@ impl Spi {
 
     pub fn is_16bits(&self) -> bool { self.cr1 & (1 << 11) != 0 }
 
+    fn crc_enabled(&self) -> bool { self.cr1 & (1 << 13) != 0 }
+    fn crc_next(&self) -> bool { self.cr1 & (1 << 12) != 0 }
+
     fn spi_channel(&self) -> u8 {
         self.name.trim_start_matches("SPI").parse::<u8>().unwrap_or(0)
     }
@@ -114,6 +120,21 @@ impl Spi {
     }
 }
 
+/// STM32 SPI CRC update, MSB-first, no reflection: 8-bit frames use
+/// poly[7:0] with init 0xFF, 16-bit frames poly[15:0] with init 0xFFFF
+/// (CRCPR reset 0x0007). Returns the updated running value (masked).
+fn spi_crc_update(mut crc: u32, bytes: &[u8], poly: u32, bits: u32) -> u32 {
+    let mask = if bits >= 32 { 0xFFFF_FFFF } else { (1u32 << bits) - 1 };
+    for &b in bytes {
+        for i in (0..8).rev() {
+            let bit = (b as u32 >> i) & 1;
+            let msb = (crc >> (bits - 1)) & 1;
+            crc = ((crc << 1) ^ if msb ^ bit != 0 { poly } else { 0 }) & mask;
+        }
+    }
+    crc & mask
+}
+
 impl Peripheral for Spi {
     fn periph_remap(&self, sys: &System) -> Option<u32> {
         sys.p.afio_remap_status(&self.name)
@@ -128,7 +149,8 @@ impl Peripheral for Spi {
                     self.i2s_sr_toggle = !self.i2s_sr_toggle;
                     if self.i2s_sr_toggle { 0b11 } else { 0 }
                 } else {
-                    let sr = (if self.txe { 2 } else { 0 }) | (if self.rxne { 1 } else { 0 });
+                    let sr = (if self.txe { 2 } else { 0 }) | (if self.rxne { 1 } else { 0 })
+                        | (if self.crcerr { 1 << 4 } else { 0 });
                     self.fire_interrupts(sys);
                     sr
                 }
@@ -140,6 +162,7 @@ impl Peripheral for Spi {
                     let v = self.rx_buffer;
                     self.rx_buffer = 0;
                     self.rxne = false;
+                    self.crcerr = false; // CRCERR clears on DR read
                     v
                 }
             }
@@ -154,7 +177,15 @@ impl Peripheral for Spi {
 
     fn write(&mut self, sys: &System, offset: u32, value: u32) {
         match offset {
-            0x0000 => self.cr1 = value,
+            0x0000 => {
+                // CRCEN 0->1 resets both calculators to all-ones.
+                if value & (1 << 13) != 0 && self.cr1 & (1 << 13) == 0 {
+                    self.txcrcr = 0xFFFF;
+                    self.rxcrcr = 0xFFFF;
+                    self.crcerr = false;
+                }
+                self.cr1 = value;
+            }
             0x0004 => {
                 self.cr2 = value;
                 self.fire_interrupts(sys);
@@ -166,23 +197,61 @@ impl Peripheral for Spi {
                     self.txe = false;
                     let channel = self.spi_channel();
                     let device = self.active_device(sys);
+                    let crc_phase = self.crc_enabled() && self.crc_next();
+                    // In a CRCNEXT phase the shifter clocks out TXCRC
+                    // instead of data (per DFF width, MSB first).
+                    let tx_word = if crc_phase {
+                        if self.is_16bits() { self.txcrcr & 0xFFFF } else { self.txcrcr & 0xFF }
+                    } else {
+                        value
+                    };
                     if let Some(ref d) = device {
                         let mut d = d.borrow_mut();
                         if self.is_16bits() {
-                            d.write(sys, (), (value >> 8) as u8);
+                            d.write(sys, (), (tx_word >> 8) as u8);
                             let rb_hi = sys.spi_take_miso(channel).unwrap_or_else(|| d.read(sys, ()) as u8);
                             self.rx_buffer = (rb_hi as u32) << 8;
-                            d.write(sys, (), value as u8);
+                            d.write(sys, (), tx_word as u8);
                             let rb_lo = sys.spi_take_miso(channel).unwrap_or_else(|| d.read(sys, ()) as u8);
                             self.rx_buffer |= rb_lo as u32;
                         } else {
-                            let v = value as u8;
+                            let v = tx_word as u8;
                             d.write(sys, (), v);
                             let rb = sys.spi_take_miso(channel).unwrap_or_else(|| d.read(sys, ()) as u8);
                             self.rx_buffer = rb as u32;
                         }
                     } else {
                         self.rx_buffer = 0xFF;
+                    }
+                    // CRC calculators (RM0008 §25.3.7): normal transfers
+                    // feed TX then RX; the CRCNEXT transfer compares the
+                    // received check word against RXCRC (no accumulate)
+                    // and re-arms both calculators.
+                    if self.crc_enabled() {
+                        let bits = if self.is_16bits() { 16 } else { 8 };
+                        let poly = self.crcpr & if self.is_16bits() { 0xFFFF } else { 0xFF };
+                        if crc_phase {
+                            let rxw = self.rx_buffer & if self.is_16bits() { 0xFFFF } else { 0xFF };
+                            let expect = self.rxcrcr & if self.is_16bits() { 0xFFFF } else { 0xFF };
+                            if rxw != expect {
+                                self.crcerr = true;
+                            }
+                            self.txcrcr = 0xFFFF;
+                            self.rxcrcr = 0xFFFF;
+                        } else {
+                            // 16-bit frames feed the whole word MSB-first.
+                            if self.is_16bits() {
+                                let txb = [(tx_word >> 8) as u8, tx_word as u8];
+                                self.txcrcr = spi_crc_update(self.txcrcr, &txb, poly, bits);
+                                let rxb = [(self.rx_buffer >> 8) as u8, self.rx_buffer as u8];
+                                self.rxcrcr = spi_crc_update(self.rxcrcr, &rxb, poly, bits);
+                            } else {
+                                let txb = [tx_word as u8];
+                                self.txcrcr = spi_crc_update(self.txcrcr, &txb, poly, bits);
+                                let rxb = [self.rx_buffer as u8];
+                                self.rxcrcr = spi_crc_update(self.rxcrcr, &rxb, poly, bits);
+                            }
+                        }
                     }
                     self.txe = true;
                     self.rxne = true;

@@ -90,9 +90,31 @@ impl Usart {
         // TXEIE once the ring empties, so no storm is possible.
         if self.cr1 & (1 << 7) != 0 && self.sr & (1 << 7) != 0 { pending = true; }
         if self.cr1 & (1 << 5) != 0 && self.sr & (1 << 5) != 0 { pending = true; } // RXNEIE + RXNE
+        if self.cr2 & (1 << 6) != 0 && self.sr & (1 << 8) != 0 { pending = true; } // LBDIE + LBD
+        if self.cr3 & 1 != 0 && self.sr & 0x0F != 0 { pending = true; } // EIE + PE/FE/NE/ORE
         if pending {
             sys.p.nvic.borrow_mut().set_intr_pending(self.irq_num);
         }
+    }
+
+    /// LIN break reception (RM0008 §27.6.5): in LIN mode (CR2.14) sets LBD
+    /// (SR.8, IRQ via LBDIE); otherwise a framing error (FE, SR.1, IRQ via
+    /// EIE) with a 0x00 framing byte. LBD/FE clear on the next DR read
+    /// (documented choice; HW clears FE via SR+DR, LBD by SW).
+    fn rx_break(&mut self, sys: &System) {
+        if self.cr2 & (1 << 14) != 0 {
+            self.sr |= 1 << 8; // LBD
+        } else {
+            self.sr |= 1 << 1; // FE
+        }
+        self.rx_buf.push(0x00);
+        if self.rx_buf.len() > 16 {
+            self.rx_buf.remove(0);
+            self.sr |= 1 << 3; // ORE on overflow (same as rx_push)
+        }
+        self.sr |= 1 << 5; // RXNE
+        self.sr |= 0x40; // TC stays set
+        self.update_interrupt(sys);
     }
 
     fn read_sr(&mut self) -> u32 {
@@ -121,6 +143,8 @@ impl Usart {
             self.sr &= !(1 << 3);
         }
         self.sr_read_armed = false;
+        // LBD (break received) and FE (framing error) clear on DR read.
+        self.sr &= !((1 << 8) | (1 << 1));
         self.sr |= 0x40; // TC stays set
         self.update_interrupt(sys);
         dr
@@ -186,6 +210,10 @@ impl Peripheral for Usart {
         if self.sr & 0x80 == 0 && self.txe_ready() {
             self.sr |= 0x80;
         }
+        // A transmitted break occupies one batch, then SBK self-clears.
+        if self.cr1 & 1 != 0 {
+            self.cr1 &= !1;
+        }
         self.update_interrupt(sys);
     }
 
@@ -216,7 +244,19 @@ impl Peripheral for Usart {
             0x04 => self.write_dr(value, sys),
             0x08 => self.brr = value,
             0x0C => {
+                // SBK (bit 0) rising edge: transmit a break (13 low bits).
+                // The break occupies one batch (cleared in tick); TC asserts
+                // and IRQs as usual. In half-duplex loopback the break
+                // returns to our own receiver (LBD in LIN mode, FE + 0x00
+                // byte otherwise).
+                let sbk = value & 1 != 0 && self.cr1 & 1 == 0;
                 self.cr1 = value & 0xFFFF;
+                if sbk {
+                    self.sr |= 0x40; // TC
+                    if self.is_loopback() {
+                        self.rx_break(sys);
+                    }
+                }
                 self.update_interrupt(sys);
             }
             0x10 => self.cr2 = value & 0xFFFF,
@@ -228,6 +268,10 @@ impl Peripheral for Usart {
 
     fn rx_byte(&mut self, sys: &System, byte: u8) {
         self.rx_push(byte, sys);
+    }
+
+    fn rx_break(&mut self, sys: &System) {
+        self.rx_break(sys);
     }
 
     fn rx_pending(&self) -> u32 {

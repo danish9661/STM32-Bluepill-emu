@@ -526,6 +526,14 @@ pub fn uart_rx_byte(addr: u32, byte: u8) -> bool {
     sys().p.rx_byte(&*sys(), addr, byte)
 }
 
+/// Inject a LIN break (13 low bits) into the UART at the given peripheral
+/// base address: LBD in LIN mode, framing error + 0x00 byte otherwise.
+/// Returns true if a peripheral was found at that address.
+#[wasm_bindgen]
+pub fn uart_inject_break(addr: u32) -> bool {
+    sys().p.rx_break(&*sys(), addr)
+}
+
 /// Number of unread bytes still queued in the UART RX buffer at addr.
 #[wasm_bindgen]
 pub fn uart_rx_pending(addr: u32) -> u32 {
@@ -537,6 +545,14 @@ pub fn uart_rx_pending(addr: u32) -> u32 {
 #[wasm_bindgen]
 pub fn can_inject_message(addr: u32, tir: u32, tdtr: u32, tdlr: u32, tdhr: u32) -> bool {
     sys().p.can_inject_message(&*sys(), addr, tir, tdtr, tdlr, tdhr)
+}
+
+/// Inject an HSE clock failure (test entry point for the CSS path):
+/// HSERDY clears; with CSSON set this raises CSSF, pends an NMI and falls
+/// back to HSI. Returns true when CSS fired.
+#[wasm_bindgen]
+pub fn rcc_fail_hse() -> bool {
+    sys().p.rcc_fail_hse(&*sys())
 }
 
 /// Collect UART output since last call.

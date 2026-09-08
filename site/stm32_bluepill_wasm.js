@@ -589,6 +589,17 @@ export function raise_fault(kind, addr) {
 }
 
 /**
+ * Inject an HSE clock failure (test entry point for the CSS path):
+ * HSERDY clears; with CSSON set this raises CSSF, pends an NMI and falls
+ * back to HSI. Returns true when CSS fired.
+ * @returns {boolean}
+ */
+export function rcc_fail_hse() {
+    const ret = wasm.rcc_fail_hse();
+    return ret !== 0;
+}
+
+/**
  * Configured SYSCLK in Hz decoded from RCC CFGR (HSE assumed 8 MHz).
  * Timing stays instruction-budget based; for drivers computing dividers.
  * @returns {number}
@@ -833,6 +844,18 @@ export function touchscreen_set_touch(peripheral, x, y, pressure) {
     const ptr0 = passStringToWasm0(peripheral, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     wasm.touchscreen_set_touch(ptr0, len0, x, y, pressure);
+}
+
+/**
+ * Inject a LIN break (13 low bits) into the UART at the given peripheral
+ * base address: LBD in LIN mode, framing error + 0x00 byte otherwise.
+ * Returns true if a peripheral was found at that address.
+ * @param {number} addr
+ * @returns {boolean}
+ */
+export function uart_inject_break(addr) {
+    const ret = wasm.uart_inject_break(addr);
+    return ret !== 0;
 }
 
 /**

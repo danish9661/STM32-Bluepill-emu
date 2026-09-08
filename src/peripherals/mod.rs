@@ -50,6 +50,9 @@ pub trait Peripheral {
     }
     fn rx_byte(&mut self, _sys: &System, _byte: u8) {}
     fn rx_pending(&self) -> u32 { 0 }
+    /// LIN break reception (also used for TX-break loopback): in LIN mode
+    /// sets LBD, otherwise a framing error with a 0x00 byte.
+    fn rx_break(&mut self, _sys: &System) {}
     fn can_inject_message(&mut self, _sys: &System, _tir: u32, _tdtr: u32, _tdlr: u32, _tdhr: u32) -> bool { false }
     /// Returns the GPIO port letter for the given EXTI line, if this is AFIO.
     fn exti_port(&self, _line: u32) -> Option<char> { None }
@@ -78,6 +81,17 @@ pub trait Peripheral {
     fn adc_timer_trigger(&mut self, _sys: &System, _tim_base: u32, _ch: u8) {}
     /// ADC external trigger from an EXTI line (regular: 11, injected: 15).
     fn adc_exti_trigger(&mut self, _sys: &System, _line: u32) {}
+    /// Dual-mode slave start: ADC1 in regular-simultaneous mode fans out to
+    /// ADC2, which converts its own sequence in lockstep (no-op default).
+    fn adc_dual_slave_start(&mut self, _sys: &System) {}
+    /// Force-complete an in-flight slave conversion now (dual lockstep).
+    fn adc_dual_slave_complete(&mut self, _sys: &System) {}
+    /// HSE clock failure injection (CSS path): true when CSS fired.
+    fn rcc_fail_hse(&mut self, _sys: &System) -> bool { false }
+    /// STOP-mode exit: fall back to HSI (SWS=00, SW kept).
+    fn rcc_wake_from_stop(&mut self) {}
+    /// Last regular conversion result (for dual-mode DR packing).
+    fn adc_data_reg(&self) -> u32 { 0 }
     /// 12-bit voltage a peripheral drives on a GPIO pin (DAC output), if any.
     fn dac_output(&self, _port: u8, _pin: u8) -> Option<u32> { None }
     /// True when the CPU is in a deep-sleep mode (STOP/STANDBY), gating peripheral ticks.
@@ -307,6 +321,7 @@ impl Peripherals {
             (0x4001_0000, "AFIO"), (0x4001_0400, "EXTI"),
             (0x4001_0800, "GPIOA"), (0x4001_0C00, "GPIOB"),
             (0x4001_1000, "GPIOC"), (0x4001_1400, "GPIOD"),
+            (0x4001_1800, "GPIOE"),
             (0x4001_2400, "ADC1"), (0x4001_2800, "ADC2"),
             (0x4001_2C00, "TIM1"),
             (0x4001_3000, "SPI1"),
@@ -568,6 +583,16 @@ impl Peripherals {
         } else { false }
     }
 
+    /// Inject a LIN break (13 low bits) into the UART at addr. Test and
+    /// firmware entry point for the LBD path (also used by TX-break
+    /// loopback in half-duplex mode).
+    pub fn rx_break(&self, sys: &System, addr: u32) -> bool {
+        if let Some(p) = self.bus.borrow().get(addr) {
+            p.peripheral.borrow_mut().rx_break(sys);
+            true
+        } else { false }
+    }
+
     pub fn rx_pending(&self, addr: u32) -> u32 {
         if let Some(p) = self.bus.borrow().get(addr) {
             p.peripheral.borrow().rx_pending()
@@ -669,6 +694,47 @@ impl Peripherals {
         if let Some(slot) = self.bus.borrow().get(0x4001_2800) {
             slot.peripheral.borrow_mut().adc_exti_trigger(sys, line);
         }
+    }
+
+    /// Dual-mode slave start (ADC1 regular-simultaneous fans out to ADC2)
+    /// + ADC2 data register readback (for DR packing on ADC1 completion).
+    pub fn adc_dual_slave_start(&self, sys: &System) {
+        if let Some(slot) = self.bus.borrow().get(0x4001_2800) {
+            slot.peripheral.borrow_mut().adc_dual_slave_start(sys);
+        }
+    }
+
+    /// Force-complete an in-flight slave conversion now (dual lockstep:
+    /// same start tick and rate, so this only collapses sub-tick order —
+    /// ADC1's slot ticks before ADC2's and would otherwise pack stale data).
+    pub fn adc_dual_slave_complete(&self, sys: &System) {
+        if let Some(slot) = self.bus.borrow().get(0x4001_2800) {
+            slot.peripheral.borrow_mut().adc_dual_slave_complete(sys);
+        }
+    }
+
+    /// Inject an HSE clock failure (test/firmware entry point for the CSS
+    /// path). Returns true when CSS fired (CSSON set).
+    pub fn rcc_fail_hse(&self, sys: &System) -> bool {
+        if let Some(slot) = self.bus.borrow().get(0x4002_1000) {
+            return slot.peripheral.borrow_mut().rcc_fail_hse(sys);
+        }
+        false
+    }
+
+    /// STOP-mode exit hook (called on wake from deep sleep): HSI fallback.
+    pub fn rcc_wake_from_stop(&self, _sys: &System) {
+        if let Some(slot) = self.bus.borrow().get(0x4002_1000) {
+            slot.peripheral.borrow_mut().rcc_wake_from_stop();
+        }
+    }
+
+    pub fn adc_slave_data_reg(&self) -> u32 {
+        if let Some(slot) = self.bus.borrow().get(0x4001_2800) {
+            // Borrow dance: read without holding across returns.
+            return slot.peripheral.borrow().adc_data_reg();
+        }
+        0
     }
 
     /// Analog voltage driven on a pin by a peripheral (DAC output), if any.

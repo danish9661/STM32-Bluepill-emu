@@ -50,6 +50,13 @@ impl Can {
 
     fn can_num(&self) -> u8 { if self.irq_base == 19 { 1 } else { 2 } }
 
+    /// Time-triggered stamp: low 16 bits of the instruction counter stand
+    /// in for the CAN bit-time counter (monotonic, deterministic; full
+    /// TTCM sync/calibration frames are out of scope).
+    fn time_stamp() -> u32 {
+        (crate::system::instruction_count() & 0xFFFF) as u32
+    }
+
     /// Inject a received message into the CAN peripheral, matching filters.
     /// Returns true if the message was accepted into a FIFO.
     pub fn inject_message(&mut self, sys: &System, tir: u32, tdtr: u32, tdlr: u32, tdhr: u32) -> bool {
@@ -63,7 +70,12 @@ impl Can {
             let fmp = *rfxr & 0x3;
             if fmp < 2 {
                 fifo.tir = tir;
-                fifo.tdtr = tdtr;
+                // TTCM: stamp arrival time into RDTxR TIME[31:16].
+                fifo.tdtr = if self.mcr & (1 << 7) != 0 {
+                    (tdtr & 0xFFFF) | (Self::time_stamp() << 16)
+                } else {
+                    tdtr
+                };
                 fifo.tdlr = tdlr;
                 fifo.tdhr = tdhr;
                 *rfxr = (*rfxr & !0x3) | (fmp + 1);
@@ -235,7 +247,7 @@ impl Peripheral for Can {
                 self.ier = value & 0x7FF;
                 self.fire_interrupts(sys);
             }
-            0x01C => self.btr = value & 0x3FFF_FFFF,
+            0x01C => self.btr = value, // incl. SILM/LBKM (reserved bits stored, as before)
             0x180..=0x1AC => {
                 let i = ((offset - 0x180) / 0x10) as usize;
                 if i >= 3 { return; }
@@ -252,9 +264,20 @@ impl Peripheral for Can {
                     let rqcp = (self.tsr >> 26) & 7;
                     self.tsr = (self.tsr & !(7 << 26)) | ((rqcp & !(1 << i)) << 26);
                     self.tsr |= 1 << (16 + i);
+                    // TTCM: capture transmit time into TDTxR TIME[31:16].
+                    if self.mcr & (1 << 7) != 0 {
+                        let t = self.tx[i].tdtr;
+                        self.tx[i].tdtr = (t & 0xFFFF) | (Self::time_stamp() << 16);
+                    }
                     let mb = self.tx[i];
                     let (id, len, data) = msg_fields(mb.tir, mb.tdtr, mb.tdlr, mb.tdhr);
                     sys.push_event(crate::system::VmEvent::CanTx { can: self.can_num(), id, len, data });
+                    // Loopback mode (LBKM, BTR.30, without SILM.31): the
+                    // transmitted frame is received into our own FIFOs
+                    // (through the filters, like silicon).
+                    if self.btr & (1 << 30) != 0 && self.btr & (1u32 << 31) == 0 {
+                        self.inject_message(sys, mb.tir, mb.tdtr, mb.tdlr, mb.tdhr);
+                    }
                     self.fire_interrupts(sys);
                 }
             }

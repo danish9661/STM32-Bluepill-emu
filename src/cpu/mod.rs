@@ -203,6 +203,11 @@ impl Cpu {
             n: self.it_n,
             idx: self.it_idx,
         });
+        // STOP exit (was in deep sleep): the system clock falls back to
+        // HSI until firmware re-selects (SWS=00, SW kept).
+        if self.sleeping && sys.p.in_deep_sleep() {
+            sys.p.rcc_wake_from_stop(sys);
+        }
         self.it_n = 0;
         self.it_idx = 0;
         self.sleeping = false;

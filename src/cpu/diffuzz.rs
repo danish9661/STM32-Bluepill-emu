@@ -67,7 +67,7 @@ fn diffuzz_exec() {
         }
         let f: Vec<&str> = line.split_whitespace().collect();
         let ncode: usize = f[0].parse().unwrap_or(0);
-        if ncode == 0 || ncode > 4 || f.len() < 1 + ncode + 21 {
+        if ncode == 0 || ncode > 24 || f.len() < 1 + ncode + 21 {
             continue; // malformed: skip, driver counts lines
         }
         let mut code: Vec<u8> = Vec::with_capacity(ncode * 2);

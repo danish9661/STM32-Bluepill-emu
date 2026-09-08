@@ -253,6 +253,12 @@ impl Adc {
             cycles,
             cap_start: self.cap_voltage,
         });
+        // Regular simultaneous mode (ADC1 CR1 DUALMOD == 0110): ADC2
+        // converts its own sequence in lockstep; ADC1_DR packs both on
+        // completion below. Slave start is a no-op unless idle+on.
+        if self.dma_channel == 1 && (self.cr1 >> 16) & 0xF == 6 {
+            sys.p.adc_dual_slave_start(sys);
+        }
     }
 
     fn start_injected(&mut self, sys: &System) {
@@ -289,6 +295,13 @@ impl Adc {
         } else {
             target
         };
+        // Dual simultaneous pack: ADC1_DR = ADC2_DR:ADC1_DR (RM0008 §11.7).
+        // The slave converts in lockstep but ticks after us; force its
+        // completion first so the packed half is fresh, not stale.
+        if self.dma_channel == 1 && (self.cr1 >> 16) & 0xF == 6 {
+            sys.p.adc_dual_slave_complete(sys);
+            self.dr = (sys.p.adc_slave_data_reg() << 16) | (self.dr & 0xFFFF);
+        }
         let last = c.pos + 1 >= c.len;
         // EOC: per conversion unless EOCS (CR2 bit 10) moves it to sequence end
         if self.cr2 & (1 << 10) == 0 || last {
@@ -368,6 +381,22 @@ impl Adc {
 }
 
 impl Peripheral for Adc {
+    fn adc_dual_slave_start(&mut self, sys: &System) {
+        // Slave follows the master unconditionally (own DUALMOD/EXTSEL
+        // ignored); start_regular no-ops unless on and idle.
+        self.start_regular(sys);
+    }
+    fn adc_dual_slave_complete(&mut self, sys: &System) {
+        // Complete an in-flight conversion immediately (dual lockstep:
+        // same start and rate as the master, so only sub-tick order).
+        if let Some(c) = self.conv.clone() {
+            let now = instruction_count();
+            self.advance_regular(sys, &c, now);
+        }
+    }
+    fn adc_data_reg(&self) -> u32 {
+        self.dr & 0xFFFF
+    }
     fn adc_timer_trigger(&mut self, sys: &System, tim_base: u32, ch: u8) {
         if self.cr2 & (1 << 20) != 0 { // EXTTRIG
             let sel = (self.cr2 >> 17) & 7;

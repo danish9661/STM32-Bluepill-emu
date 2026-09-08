@@ -318,6 +318,8 @@ select:focus { outline: none; border-color: #0ea5e9; }
                     <option value="servo">Servo Sweep (TIM3 PWM on PA6)</option>
                     <option value="dac_sine">DAC Sine + ADC Loopback (PA4)</option>
                     <option value="i2c_scan">I2C Scanner (finds OLED+EEPROM)</option>
+                    <option value="can_chat">CAN Chat (loopback self-talk)</option>
+                    <option value="stopwatch">Stopwatch (PB13 button + TIM2)</option>
                 </select>
                 <select id="chipSelect" title="Chip / board (rp2040js-style: pick the peripheral map)">
                     <option value="stm32f103c8">STM32F103C8 (builtin map)</option>
@@ -1211,6 +1213,14 @@ $('loadPresetBtn').addEventListener('click', async () => {
                 i2c_oled: [{ peripheral: 'I2C1', address: 0x3C, width: 128, height: 64 }],
             });
             log('Press Run — every 7-bit address is probed; expect found 0x3C (OLED) and 0x50 (EEPROM).', 't-in');
+        } else if (preset === 'can_chat') {
+            const buf = await fetch('arduino_can_chat.elf').then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(buf), 'arduino_can_chat.elf (CAN loopback chat)');
+            log('Press Run — CAN1 talks to itself in loopback mode; tx/rx id+data pairs print.', 't-in');
+        } else if (preset === 'stopwatch') {
+            const buf = await fetch('arduino_stopwatch.elf').then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(buf), 'arduino_stopwatch.elf (stopwatch)');
+            log('Press Run — then click the PB13 button widget to run/stop; elapsed prints on UART.', 't-in');
         }
     } catch (e) {
         log(`Failed to load preset: ${e.message || e}`, 't-err');

@@ -4,11 +4,11 @@ periph.initSync({ module: readFileSync(new URL('../pkg/stm32_bluepill_wasm_bg.wa
 
 const { init, init_svd, periph_read, periph_write, tick, step_batch, has_pending_interrupt,
         get_next_pending_interrupt, clear_current_interrupt, gpio_read_output, gpio_set_input,
-        gpio_read_input, get_uart_output, uart_rx_byte, adc_set_sim_value,
+        gpio_read_input, get_uart_output, uart_rx_byte, uart_inject_break, adc_set_sim_value,
         is_watchdog_reset_requested, can_inject_message, gpio_set_slew, raise_fault,
         add_fsmc_bank, gpio_set_analog, adc_set_rc_tau, register_js_peripheral,
-        add_sd_card, reset_ext_devices, rcc_sysclk_hz, add_i2c_eeprom,
-        drain_events, usb_inject_setup, usb_inject_out,
+        add_sd_card, reset_ext_devices, rcc_sysclk_hz, rcc_fail_hse, add_i2c_eeprom,
+        drain_events, usb_inject_setup, usb_inject_out, pwm_duty,
         gpio_take_pin_events } = periph;
 
 let passed = 0, failed = 0;
@@ -74,6 +74,16 @@ assert_eq(gpio_read_input(0, 0), false, 'GPIO PA0 input set low');
 // BSRR should only affect set bits — verify no stray change
 periph_write(0x40011010, 4, 0);
 assert_eq(periph_read(0x4001100C, 4) & 0x2000, 0, 'GPIO BSRR=0 no change');
+
+// GPIOE (0x40011800, full 16-bit port like A-D): output + input loop
+let gpioe_crl = periph_read(0x40011800, 4);
+gpioe_crl = (gpioe_crl & ~0xF) | 0x3; // PE0 = output push-pull
+periph_write(0x40011800, 4, gpioe_crl);
+periph_write(0x40011810, 4, 1);       // BSRR: PE0 set
+assert_eq(periph_read(0x4001180C, 4) & 1, 1, 'GPIO PE0 set via BSRR');
+assert_eq(gpio_read_output(4, 0), true, 'gpio_read_output PE0 after set');
+gpio_set_input(4, 1, true);           // PE1 driven high (default input)
+assert_eq(gpio_read_input(4, 1), true, 'GPIO PE1 input set high');
 
 // ============================================================
 // GPIO pin-change events (gpio_take_pin_events)
@@ -210,6 +220,34 @@ uart_rx_byte(USART1, 0x7A); // 'z'
 sr = periph_read(USART1 + 0x00, 4);
 assert_eq(sr & (1 << 5), 1 << 5, 'USART RXNE after post-ORE byte');
 assert_eq(periph_read(USART1 + 0x04, 4) & 0xFF, 0x7A, 'USART RX post-ORE byte z');
+
+// LIN break (RM0008 27.6.5): HDSEL loopback + LINEN, SBK transmits a break
+// that returns to our own receiver as LBD (SR.8) with a 0x00 framing byte.
+periph_write(USART1 + 0x14, 4, 1 << 2); // CR3 HDSEL (loopback)
+periph_write(USART1 + 0x10, 4, (1 << 14) | (1 << 6)); // CR2 LINEN + LBDIE
+periph_write(0xE000E100 + 0x04, 4, 1 << 5); // ISER1: USART1 IRQ 37 enable
+periph_write(USART1 + 0x0C, 4, (1 << 13) | (1 << 3) | (1 << 2) | 1); // UE/TE/RE + SBK
+sr = periph_read(USART1 + 0x00, 4);
+assert_eq(sr & (1 << 8), 1 << 8, 'USART SR LBD after looped break');
+assert_eq(sr & (1 << 5), 1 << 5, 'USART SR RXNE after looped break');
+assert_eq(periph_read(USART1 + 0x04, 4) & 0xFF, 0x00, 'USART DR break framing byte 0x00');
+sr = periph_read(USART1 + 0x00, 4);
+assert_eq(sr & (1 << 8), 0, 'USART SR LBD cleared by DR read');
+assert_eq(has_pending_interrupt(), true, 'USART LBDIE pends IRQ on break');
+assert_eq(get_next_pending_interrupt(), 37, 'USART break IRQ = 37');
+clear_current_interrupt();
+// SBK self-clears after one batch (break occupies the line briefly)
+step_batch(1);
+assert_eq(periph_read(USART1 + 0x0C, 4) & 1, 0, 'USART CR1 SBK self-clears');
+// Break outside LIN mode: framing error (FE) instead of LBD
+periph_write(USART1 + 0x10, 4, 0); // LINEN off
+assert_eq(uart_inject_break(USART1), true, 'uart_inject_break routes');
+sr = periph_read(USART1 + 0x00, 4);
+assert_eq(sr & (1 << 1), 1 << 1, 'USART SR FE after injected break');
+assert_eq(sr & (1 << 8), 0, 'USART SR no LBD outside LIN mode');
+assert_eq(periph_read(USART1 + 0x04, 4) & 0xFF, 0x00, 'USART DR break byte 0x00');
+sr = periph_read(USART1 + 0x00, 4);
+assert_eq(sr & (1 << 1), 0, 'USART SR FE cleared by DR read');
 
 // ============================================================
 // ADC
@@ -392,6 +430,27 @@ for (let i = 0; i < 6 && !trig_eoc; i++) {
 }
 assert(trig_eoc, 'ADC starts from EXTI11 rising edge');
 
+// Dual regular-simultaneous mode (ADC1 CR1 DUALMOD=0110): ADC1 SWSTART
+// converts ADC2 in lockstep; ADC1_DR packs ADC2:ADC1 on completion.
+reset();
+periph_write(0x40021018, 4, (1 << 9));   // APB2ENR: ADC1EN
+periph_write(0x4002101C, 4, 1 << 29);    // APB1ENR: DAC1EN
+periph_write(0x40007400, 4, 0x1);        // DAC CR: EN1
+periph_write(0x40007408, 4, 0x800);      // DHR12R1 = 2048 -> PA4
+gpio_set_analog(0, 5, 0x400);            // PA5 = 1024 (ADC2 CH5 source)
+adc_set_rc_tau(1);                       // fast cap: samples land on target
+periph_write(ADC1 + 0x34, 4, 4);         // ADC1 SQ1 = ch4 (DAC loopback)
+periph_write(ADC1 + 0x04, 4, 6 << 16);   // CR1 DUALMOD = regular simultaneous
+periph_write(0x40012800 + 0x34, 4, 5);   // ADC2 SQ1 = ch5 (analog wire)
+periph_write(0x40012800 + 0x08, 4, 1);   // ADC2 ADON
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 22)); // ADON + SWSTART
+step_batch(30);
+const dual = periph_read(ADC1 + 0x4C, 4);
+assert_eq(dual & 0xFFFF, 0x800, `dual ADC1 half = DAC value (${(dual & 0xFFFF).toString(16)})`);
+assert_eq((dual >> 16) & 0xFFFF, 0x400, `dual ADC2 half = analog wire (${((dual >> 16) & 0xFFFF).toString(16)})`);
+// ADC2 converted too (its own EOC set)
+assert_eq(periph_read(0x40012800 + 0x00, 4) & 2, 2, 'dual ADC2 EOC set');
+
 // ============================================================
 // RCC
 // ============================================================
@@ -447,6 +506,25 @@ periph_write(RCC + 0x1C, 4, (1 << 0) | (1 << 21));
 let apb1 = periph_read(RCC + 0x1C, 4);
 assert_eq(apb1 & (1 << 0), 1 << 0, 'RCC APB1ENR TIM2EN');
 assert_eq(apb1 & (1 << 21), 1 << 21, 'RCC APB1ENR I2C1EN');
+
+// Clock security system: HSE on + CSSON, then inject a crystal failure.
+// CSSF (CIR.7) raises, NMI pends, SWS falls back to HSI (SW kept).
+periph_write(RCC + 0x00, 4, (1 << 16) | (1 << 19)); // HSEON + CSSON
+periph_write(RCC + 0x04, 4, 1);                     // CFGR SW=HSE (SWS follows)
+assert_eq((periph_read(RCC + 0x04, 4) >> 2) & 3, 1, 'RCC SWS=HSE before failure');
+assert_eq(rcc_fail_hse(), true, 'rcc_fail_hse fires with CSSON');
+assert_eq(periph_read(RCC + 0x00, 4) & (1 << 17), 0, 'RCC HSERDY cleared by failure');
+assert_eq(periph_read(RCC + 0x08, 4) & (1 << 7), 1 << 7, 'RCC CIR CSSF set');
+assert_eq((periph_read(RCC + 0x04, 4) >> 2) & 3, 0, 'RCC SWS falls back to HSI');
+assert_eq(periph_read(RCC + 0x04, 4) & 3, 1, 'RCC SW request kept (HSE)');
+assert_eq(get_next_pending_interrupt(), -14, 'RCC CSS failure pends NMI');
+clear_current_interrupt();
+periph_write(RCC + 0x08, 4, 1 << 23);               // CSSC clears CSSF
+assert_eq(periph_read(RCC + 0x08, 4) & (1 << 7), 0, 'RCC CIR CSSF cleared by CSSC');
+// Without CSSON the failure only kills HSERDY (no CSSF, no NMI)
+periph_write(RCC + 0x00, 4, 1 << 16);               // HSEON, CSSON off
+assert_eq(rcc_fail_hse(), false, 'rcc_fail_hse quiet without CSSON');
+assert_eq(periph_read(RCC + 0x08, 4) & (1 << 7), 0, 'RCC CIR no CSSF without CSSON');
 
 // ============================================================
 // SysTick
@@ -531,6 +609,43 @@ assert_eq(periph_read(TIM2 + 0x00, 4) & 1, 1, 'TIM2 CR1 CEN');
 // Read SR — UIF (bit 0) initially 0
 let tim_sr = periph_read(TIM2 + 0x10, 4);
 assert_eq(tim_sr & 1, 0, 'TIM2 SR UIF initial');
+
+// TIM1 break-and-dead-time (BDTR @ 0x44, advanced-timer only)
+reset();
+const TIM1 = 0x40012C00;
+periph_write(0x40021018, 4, 1 << 11); // APB2 TIM1EN
+periph_write(TIM1 + 0x28, 4, 0);      // PSC
+periph_write(TIM1 + 0x2C, 4, 999);    // ARR
+periph_write(TIM1 + 0x18, 4, (0b110 << 4)); // CH1 PWM1
+periph_write(TIM1 + 0x20, 4, 1);      // CC1E
+periph_write(TIM1 + 0x34, 4, 500);    // CCR1 50%
+periph_write(TIM1 + 0x00, 4, 1);      // CEN
+periph_write(TIM1 + 0x44, 4, 0x35);   // BDTR: DTG=0x35, MOE=0
+assert_eq(periph_read(TIM1 + 0x44, 4) & 0xFF, 0x35, 'TIM1 BDTR DTG stored');
+step_batch(2000);
+assert_eq(pwm_duty(TIM1, 0), 0, 'TIM1 PWM dead with MOE=0');
+periph_write(TIM1 + 0x44, 4, 0x35 | (1 << 15)); // MOE=1
+step_batch(2000);
+assert_eq(pwm_duty(TIM1, 0), 50, 'TIM1 PWM 50% with MOE=1');
+// Break: BKE=1, drive BKIN (PB12) low (active-low default) -> MOE clears + BIF
+periph_write(TIM1 + 0x44, 4, 0x35 | (1 << 15) | (1 << 12)); // BKE
+gpio_set_input(1, 12, false); // PB12 low = break active
+step_batch(100);
+assert_eq(periph_read(TIM1 + 0x44, 4) & (1 << 15), 0, 'TIM1 MOE cleared by break');
+assert_eq(periph_read(TIM1 + 0x10, 4) & (1 << 7), 1 << 7, 'TIM1 SR BIF set by break');
+assert_eq(pwm_duty(TIM1, 0), 0, 'TIM1 PWM dead after break');
+gpio_set_input(1, 12, true); // release BKIN
+periph_write(TIM1 + 0x10, 4, ~(1 << 7)); // W0C BIF
+assert_eq(periph_read(TIM1 + 0x10, 4) & (1 << 7), 0, 'TIM1 SR BIF write-0-clears');
+// LOCK: raise to level 3, DTG/BKE freeze, MOE still writable
+periph_write(TIM1 + 0x44, 4, (1 << 15) | (3 << 8) | 0x35);
+periph_write(TIM1 + 0x44, 4, 0x40);   // try DTG=0x40, MOE=0
+let bdtr = periph_read(TIM1 + 0x44, 4);
+assert_eq(bdtr & 0xFF, 0x35, 'TIM1 BDTR DTG frozen by LOCK');
+assert_eq(bdtr & (1 << 15), 0, 'TIM1 BDTR MOE writable under LOCK');
+// BDTR absent on general timers: TIM2 read 0, write ignored
+assert_eq(periph_read(TIM2 + 0x44, 4), 0, 'TIM2 has no BDTR');
+reset();
 
 // ============================================================
 // IWDG (Independent Watchdog)
@@ -657,6 +772,22 @@ assert_eq(periph_read(SPI1 + 0x0C, 4), 0xFF, 'SPI1 DR xfer returns 0xFF (no devi
 periph_write(SPI1 + 0x10, 4, 0x07);
 assert_eq(periph_read(SPI1 + 0x10, 4), 0x07, 'SPI1 CRCPR');
 
+// Hardware CRC (RM0008 25.3.7): CRCEN arms all-ones calculators; each
+// transfer feeds TX then RX (no device: RX=0xFF).
+periph_write(SPI1 + 0x00, 4, (3 << 3) | (1 << 2) | (1 << 6) | (1 << 13)); // +CRCEN
+periph_write(SPI1 + 0x0C, 4, 0xFF);
+assert_eq(periph_read(SPI1 + 0x18, 4) & 0xFF, 0x00, 'SPI1 TXCRC([0xFF]) = 0x00 (poly 0x07)');
+assert_eq(periph_read(SPI1 + 0x14, 4) & 0xFF, 0x00, 'SPI1 RXCRC([0xFF]) = 0x00');
+periph_write(SPI1 + 0x0C, 4, 0x01);
+periph_write(SPI1 + 0x0C, 4, 0x02);
+assert_eq(periph_read(SPI1 + 0x18, 4) & 0xFF, 0x1B, 'SPI1 TXCRC([0xFF,0x01,0x02]) = 0x1B');
+// CRCNEXT phase with wrong peer CRC (0xFF vs computed 0x24) -> CRCERR + SR bit 4
+periph_write(SPI1 + 0x00, 4, (3 << 3) | (1 << 2) | (1 << 6) | (1 << 13) | (1 << 12)); // +CRCNEXT
+periph_write(SPI1 + 0x0C, 4, 0x00); // clocks out TXCRC, receives 0xFF
+assert_eq(periph_read(SPI1 + 0x08, 4) & (1 << 4), 1 << 4, 'SPI1 SR CRCERR on CRC mismatch');
+assert_eq(periph_read(SPI1 + 0x0C, 4), 0xFF, 'SPI1 DR read clears CRCERR');
+assert_eq(periph_read(SPI1 + 0x08, 4) & (1 << 4), 0, 'SPI1 SR CRCERR cleared');
+
 // ============================================================
 // I2C
 // ============================================================
@@ -712,6 +843,36 @@ assert_eq(periph_read(I2C1 + 0x14, 4) & 1, 1, 'I2C bus recovered: SB set again')
 reset_ext_devices(); // leave no devices behind for later groups
 reset();
 
+// SMBus PEC + general call (RM0008 26.4.7): PECEN accumulates CRC-8/SMBus
+// (poly 0x07, init 0) over address+R/W and data; PECR reads it back.
+add_i2c_eeprom('I2C1', 0x50, new Uint8Array(256).fill(0));
+reset();
+periph_write(0x4002101C, 4, 1 << 21); // I2C1 clock
+periph_write(I2C1 + 0x00, 4, 1 | (1 << 5)); // PE + PECEN
+periph_write(I2C1 + 0x00, 4, 1 | (1 << 5) | (1 << 8)); // START
+periph_write(I2C1 + 0x10, 4, 0xA0); // address 0x50 + write
+assert_eq(periph_read(I2C1 + 0x30, 4) & 0xFF, 0x69, 'I2C PECR([0xA0]) = 0x69');
+periph_read(I2C1 + 0x14, 4); periph_read(I2C1 + 0x18, 4); // clear ADDR
+periph_write(I2C1 + 0x10, 4, 0x00); // mem-address byte
+periph_write(I2C1 + 0x10, 4, 0x42); // data byte
+assert_eq(periph_read(I2C1 + 0x30, 4) & 0xFF, 0x81, 'I2C PECR([0xA0,0x00,0x42]) = 0x81');
+// PEC transfer: arm CR1.12, send (device gets PEC byte)
+periph_write(I2C1 + 0x00, 4, 1 | (1 << 5) | (1 << 12)); // +PEC
+periph_write(I2C1 + 0x10, 4, 0x00); // clocks out 0x81
+assert_eq(periph_read(I2C1 + 0x30, 4) & 0xFF, 0x81, 'I2C PECR unchanged by PEC transfer');
+periph_write(I2C1 + 0x00, 4, 1 | (1 << 9)); // STOP
+// General call: ENGC + address 0x00 ACKs with GENCALL flag, no device
+reset_ext_devices();
+reset();
+periph_write(0x4002101C, 4, 1 << 21); // I2C1 clock
+periph_write(I2C1 + 0x00, 4, 1 | (1 << 6)); // PE + ENGC
+periph_write(I2C1 + 0x00, 4, 1 | (1 << 6) | (1 << 8)); // START
+periph_write(I2C1 + 0x10, 4, 0x00); // general-call address
+assert_eq(periph_read(I2C1 + 0x14, 4) & (1 << 1), 1 << 1, 'I2C GCA: ADDR set (no NACK)');
+assert_eq(periph_read(I2C1 + 0x18, 4) & (1 << 4), 1 << 4, 'I2C SR2 GENCALL set');
+periph_write(I2C1 + 0x00, 4, 1 | (1 << 9)); // STOP
+reset();
+
 // ============================================================
 // RTC
 // ============================================================
@@ -759,6 +920,19 @@ acr = periph_read(FLASH + 0x00, 4);
 assert_eq(acr & (1 << 2), 1 << 2, 'FLASH ACR PRFTEN');
 assert_eq(acr & (1 << 3), 1 << 3, 'FLASH ACR ICEN');
 assert_eq(acr & (1 << 4), 1 << 4, 'FLASH ACR DCEN');
+
+// Write protection: WRPR bit n guards 4KB block n; PG+STRT at a protected
+// page raises WRPRTERR (SR.4) instead of going busy.
+periph_write(FLASH + 0x20, 4, 1);               // WRPR: protect block 0
+periph_write(FLASH + 0x10, 4, 0x08000000);      // AR: page in block 0
+periph_write(FLASH + 0x0C, 4, (1 << 0) | (1 << 6)); // PG + STRT
+assert_eq(periph_read(FLASH + 0x08, 4) & (1 << 4), 1 << 4, 'FLASH SR WRPRTERR on protected page');
+periph_write(FLASH + 0x08, 4, periph_read(FLASH + 0x08, 4) & ~(1 << 4)); // clear
+assert_eq(periph_read(FLASH + 0x08, 4) & (1 << 4), 0, 'FLASH SR WRPRTERR write-clears');
+periph_write(FLASH + 0x20, 4, 0);               // unprotect
+periph_write(FLASH + 0x10, 4, 0x08000000);
+periph_write(FLASH + 0x0C, 4, (1 << 0) | (1 << 6));
+assert_eq(periph_read(FLASH + 0x08, 4) & (1 << 4), 0, 'FLASH SR no WRPRTERR unprotected');
 
 // ============================================================
 // CAN
@@ -1119,6 +1293,31 @@ assert_eq(rx_tdtr, 8, 'CAN RX TDTR DLC=8');
 let unmatched = can_inject_message(0x40006400, (0x999 << 21) | 1, 4, 0, 0);
 assert_eq(unmatched, false, 'CAN message STDID=0x999 rejected by filter');
 
+// Time-triggered timestamps (TTCM, MCR.7): TXRQ stamps TDTxR TIME[31:16],
+// RX arrival stamps RDTxR TIME. Stamps advance with instruction count.
+periph_write(0x40006400 + 0x00, 4, 1 << 7); // MCR TTCM
+periph_write(0x40006400 + 0x180, 4, 0); // TIR0 ID 0
+periph_write(0x40006400 + 0x184, 4, 2); // DLC=2, TIME=0
+periph_write(0x40006400 + 0x188, 4, 0xBEAD);
+periph_write(0x40006400 + 0x180, 4, 1); // TXRQ
+const tdt0a = periph_read(0x40006400 + 0x184, 4);
+step_batch(70000);
+periph_write(0x40006400 + 0x180, 4, 1); // TXRQ again
+const tdt0b = periph_read(0x40006400 + 0x184, 4);
+assert_eq(tdt0a & 0xFFFF, 2, 'CAN TDT0R DLC preserved under TTCM stamp');
+assert((tdt0b >> 16) !== (tdt0a >> 16), `CAN TX timestamps advance (${(tdt0a >> 16).toString(16)} -> ${(tdt0b >> 16).toString(16)})`);
+// Without TTCM the TIME field is left alone
+periph_write(0x40006400 + 0x00, 4, 0); // TTCM off
+periph_write(0x40006400 + 0x184, 4, (0xAB << 16) | 2);
+periph_write(0x40006400 + 0x180, 4, 1); // TXRQ
+assert_eq(periph_read(0x40006400 + 0x184, 4) >> 16, 0xAB, 'CAN TDT0R TIME untouched without TTCM');
+// RX stamp: inject with TTCM on (filter bank 0 still matches 0x555)
+periph_write(0x40006400 + 0x00, 4, 1 << 7); // TTCM on
+assert_eq(can_inject_message(0x40006400, msg_tir, 8, 0xDEADBEEF, 0x12345678), true, 'CAN RX inject for timestamp');
+const rdt = periph_read(0x40006400 + 0x1B4, 4);
+assert_eq(rdt & 0xF, 8, 'CAN RDT0R DLC preserved under RX stamp');
+assert_eq((rdt >> 16) & 0xFFFF, (tdt0b >> 16) & 0xFFFF, 'CAN RX timestamp matches inject time');
+
 // ============================================================
 // AFIO Register Test
 // ============================================================
@@ -1444,6 +1643,27 @@ assert_eq(periph_read(NE1 + 1, 1), 0xAB, 'FSMC NE1 byte read');
 periph_write(FSMC_BCR1, 4, 0x1);                // MBKEN only
 periph_write(NE1, 4, 0xDEADBEEF);
 assert_eq(periph_read(NE1, 4), 0x4433AB11, 'FSMC NE1 write ignored without WREN');
+
+// NAND ECC (ECCR2 @ 0xB4): XOR-fold accumulator over data bytes while
+// PCR.ECCEN is set; cleared on ECCEN 0->1. Self-consistent (not silicon
+// Hamming-compatible) so firmware store-then-verify flows pass.
+const NAND2 = 0x70000000;
+const PCR2 = 0xA0000060, ECCR2 = 0xA00000B4;
+assert_eq(periph_read(ECCR2, 4), 0, 'FSMC ECCR2 reset 0');
+periph_write(PCR2, 4, 1 << 6);                  // ECCEN
+periph_write(NAND2, 1, 0xAB);
+periph_write(NAND2 + 1, 1, 0xCD);
+const ecc1 = periph_read(ECCR2, 4);
+assert(ecc1 !== 0, `FSMC ECCR2 accumulates NAND bytes (${ecc1.toString(16)})`);
+periph_write(NAND2, 1, 0xAB);                   // same bytes, same ECC?
+periph_write(NAND2 + 1, 1, 0xCD);
+assert(ecc1 !== periph_read(ECCR2, 4), 'FSMC ECCR2 accumulates (length-sensitive)');
+periph_write(PCR2, 4, 0);                       // ECCEN off
+periph_write(PCR2, 4, 1 << 6);                  // ECCEN on: fresh sector
+assert_eq(periph_read(ECCR2, 4), 0, 'FSMC ECCR2 cleared on ECCEN re-arm');
+periph_write(NAND2, 1, 0xAB);
+periph_write(NAND2 + 1, 1, 0xCD);
+assert_eq(periph_read(ECCR2, 4), ecc1, 'FSMC ECC deterministic for same bytes');
 
 // ============================================================
 // Sleep state timing (STOP/STANDBY gating)

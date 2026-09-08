@@ -58,17 +58,35 @@ present — the audit claim was wrong, caught by the compiler).
 
 ## 2. Depth gaps inside "Full" peripherals (all minor)
 
-- TIM: DMA-burst (DMAR/DCR store only), complementary dead-time shaping.
-- ADC: dual simultaneous mode; channels 16-18 nominal internal values.
-- SPI: CRC values not computed (registers store); TI frame format.
-- I2C: SMBus/PEC, general-call responses.
-- USART: LIN/IrDA/smartcard modes (registers decode).
-- CAN: time-triggered (TTCM bit accepted).
-- FSMC: NAND ECC bytes not computed; fixed access timing.
-- RTC: second tick IRQ, tamper pin.
-- FLASH: write-protection enforcement (unlock model is permissive, like RCC gating).
-- GPIO: C8 exposes only A/B/C.13-15/D.0-1 — full ports are a superset.
-- RCC/PWR: no PVD, no CSS failure injection, no stop-mode clock switch.
+- TIM: DMA-burst (DMAR/DCR store only). BDTR/MOE/break/LOCK now modeled
+  (MOE gates outputs incl. PWM duty readback, break via BKIN PB12 clears
+  MOE + BIF/BIE IRQ, AOE re-arms on update; DTG stored — no edge-shaping
+  surface since PWM output is duty-value only).
+- ADC: dual simultaneous mode now modeled (ADC1 CR1 DUALMOD=0110 fans out
+  to ADC2, ADC1_DR packs ADC2:ADC1 on completion); channels 16-18 nominal
+  internal values.
+- SPI: CRC values now computed (CRC-8/16 MSB-first over TX/RX per DFF,
+  CRCNEXT phase sends/compares with CRCERR + SR.4, cleared on DR read).
+  TI frame format not modeled.
+- I2C: PEC (CRC-8/SMBus over addr+data, PECR readable, PEC transfer +
+  PECERR) + general-call ACK (ENGC, GENCALL flag) now modeled. SMBus
+  alert pin not modeled (register bits stored).
+- USART: LIN break (SBK generation + LBD/LBDIE, FE + 0x00 byte outside
+  LIN mode, `uart_inject_break` export) now modeled; IrDA/smartcard modes
+  stay register-decode.
+- CAN: time-triggered timestamps now modeled (TXRQ/RX stamp TDTxR/RDTxR
+  TIME under TTCM); sync/calibration frames out of scope.
+- FSMC: NAND ECC accumulator on data R/W under PCR.ECCEN (ECCR2/3,
+  self-consistent though not silicon-Hamming-compatible); fixed timing.
+- FLASH: write-protection enforcement signals (WRPRTERR on PG/MER+STRT to
+  a WRPR-guarded 4KB block); unlock model permissive, contents immutable.
+- GPIO: A-E all registered (full 16-bit ports; C8 exposes a subset
+  physically).
+- RCC: CSS failure injection (`rcc_fail_hse`: HSERDY clear, CSSF+NMI+
+  HSI fallback when CSSON) + STOP-exit HSI fallback (SWS, SW kept).
+  PVD and BKP tamper already modeled (§21); no stop-mode clock switch
+  beyond SWS.
+- NVIC: STIR (0xE000EF00, WO, INTID 9 bits) now routes to pending.
 
 None of these affect the 39/39 firmware suite or any shipped demo; they matter
 only to firmware that specifically exercises them (which then sees lenient

@@ -58,6 +58,41 @@ fn wfi_sleeps_and_wakes_on_dispatch() {
     assert_eq!(cpu.regs.r[15] & !1, 0x080000C4);
 }
 
+/// STOP exit falls back to HSI: with SLEEPDEEP set and CFGR SW=HSE, waking
+/// via an exception clears SWS (CFGR[3:2]) while SW keeps requesting HSE.
+#[test]
+fn stop_wake_falls_back_to_hsi() {
+    let _held = crate::test_util::lock();
+    init();
+    let sys = sys();
+    // CFGR SW=HSE (SWS follows on write), SCR SLEEPDEEP.
+    sys.p.write(sys, 0x4002_1000 + 0x04, 4, 1);
+    sys.p.write(sys, 0xE000_ED10, 4, 4);
+    // IRQ6 vector -> 2-instruction handler (movs r0,#0x42; bx lr).
+    // Thread: wfi, then a landing pad (movs r1,#7).
+    let mut mem = FlatMemory::new(0x100, 0x100);
+    mem.load(&[0x81u8, 0x00, 0x00, 0x08], 0x08000000 + 22 * 4);
+    mem.load(&[0x42, 0x20, 0x70, 0x47], 0x08000080);
+    mem.load(&[0x30, 0xBF, 0x07, 0x21], 0x080000C0);
+    let mut cpu = Cpu::new(0x20000100, 0x080000C1);
+    cpu.dsp = false;
+    cpu.deliver_irqs = true;
+    set_intr_masks(0, 0);
+    let n = cpu.run(sys, &mut mem, 10);
+    assert!(cpu.fault.is_none(), "{:?}", cpu.fault);
+    assert_eq!(n, 1);
+    assert!(cpu.sleeping, "wfi should sleep with nothing pending");
+    sys.p.nvic.borrow_mut().enable_irq(6);
+    sys.p.nvic.borrow_mut().set_intr_pending(6);
+    let irq = sys.p.nvic.borrow_mut().get_next_pending_intr();
+    assert_eq!(irq, Some(6));
+    cpu.take_exception(sys, &mut mem, irq.unwrap());
+    assert!(!cpu.sleeping, "exception entry must wake the core");
+    let cfgr = sys.p.read(sys, 0x4002_1000 + 0x04, 4);
+    assert_eq!(cfgr & 3, 1, "SW request kept (HSE)");
+    assert_eq!((cfgr >> 2) & 3, 0, "SWS falls back to HSI on STOP exit");
+}
+
 /// Nested preemption: a low-priority handler pends a higher-priority IRQ
 /// mid-handler (EXTI SWIER, like real firmware); with inline delivery the
 /// high IRQ preempts before the low handler finishes. The shift-register log

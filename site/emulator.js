@@ -196,7 +196,7 @@ export async function createEmulator(opts = {}) {
     add_fsmc_bank, fsmc_write_byte, fsmc_read_byte,
     add_sd_card,
     register_js_peripheral,
-    init, init_svd, get_uart_output, uart_rx_byte, uart_rx_pending, gpio_read_output,
+    init, init_svd, get_uart_output, uart_rx_byte, uart_inject_break, uart_rx_pending, gpio_read_output,
     gpio_set_input, gpio_read_input,
     can_inject_message, adc_set_sim_value, gpio_set_analog, adc_set_rc_tau,
     touchscreen_set_touch, pwm_duty, raise_fault,
@@ -253,6 +253,7 @@ export async function createEmulator(opts = {}) {
     let fwAddr = flash_addr;
     let elfRegions = null;
     let symbolList = [];
+    let symSorted = null;
 
     if (typeof firmware === 'string' || (firmware instanceof Uint8Array && firmware.length > 0 && firmware[0] === 0x3A)) {
         const text = typeof firmware === 'string' ? firmware : new TextDecoder().decode(firmware);
@@ -534,6 +535,8 @@ export async function createEmulator(opts = {}) {
         uartRx(byte) { return uart_rx_byte(uart_addr, byte); },
         /** Inject a received byte into a specific USART (by base address). */
         uartRxAddr(addr, byte) { return uart_rx_byte(addr, byte); },
+        /** Inject a LIN break into a USART (LBD in LIN mode, FE otherwise). */
+        uartInjectBreak(addr) { return uart_inject_break(addr); },
         uartRxBytes(bytes) {
             let ok = false;
             for (const b of bytes) ok = uart_rx_byte(uart_addr, b) || ok;

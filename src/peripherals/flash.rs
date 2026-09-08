@@ -90,8 +90,20 @@ impl Peripheral for Flash {
                 let start_was_set = (value & (1 << 6)) != 0 && (self.cr & (1 << 6)) == 0;
                 self.cr = cr;
                 if start_was_set {
-                    if cr & ((1 << 2) | (1 << 1) | (1 << 0)) != 0 {
-                        self.sr |= 1 << 0;
+                    // Write protection: WRPR bit n guards 4KB block n
+                    // (AR[15:12]); programming/erasing a protected page
+                    // raises WRPRTERR (SR.4) instead of going busy. (Flash
+                    // contents themselves are immutable to the guest —
+                    // programming has no memory effect to gate.)
+                    let op = cr & ((1 << 2) | (1 << 1) | (1 << 0));
+                    if op != 0 {
+                        let block = (self.ar >> 12) & 0xF;
+                        let in_flash = (0x0800_0000..0x0801_0000).contains(&self.ar);
+                        if in_flash && (self.wrpr >> block) & 1 != 0 {
+                            self.sr |= 1 << 4; // WRPRTERR
+                        } else if cr & ((1 << 2) | (1 << 1) | (1 << 0)) != 0 {
+                            self.sr |= 1 << 0;
+                        }
                     }
                     self.cr &= !(1 << 6);
                 }

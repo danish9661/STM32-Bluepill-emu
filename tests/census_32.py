@@ -35,6 +35,11 @@ ACCEPTED_MN = {
     'mrrc2',
     # Hypervisor / secure monitor / permanent-undefined.
     'hvc', 'smc', 'udf', 'udf.w',
+    # Banked-register MSR (v8-M/R-profile only; M3 faults correctly).
+    # Capstone 5.x prints these as `msreq` (6.x rejects or renames).
+    'msreq',
+    # Banked-register MRS equally (5.x `mrseq`, cond-suffixed).
+    'mrseq',
     # MVE (v8.1-M) + v8-M security +
     # hints beyond NOP.W (DBG handled, rest fault).
     'wlstp.8', 'wlstp.16', 'wlstp.32', 'wlstp.64', 'vctp.8', 'vctp.16',
@@ -87,6 +92,17 @@ MRS_VALID_SYSM = {0, 1, 2, 3, 5, 6, 7, 8, 9, 16, 17, 18, 20}
 MSR_VALID_SYSM = {0, 1, 2, 3, 8, 9, 16, 17, 18, 20}
 
 
+# ARM register aliases Capstone 5.x prints instead of r9-r12 (6.x prints
+# plain rN): normalize before any reg-name comparison in accepted_gap.
+REG_ALIAS = {'sp': 'r13', 'lr': 'r14', 'pc': 'r15',
+             'sb': 'r9', 'sl': 'r10', 'fp': 'r11', 'ip': 'r12'}
+
+
+def _norm_reg(name):
+    name = name.strip()
+    return REG_ALIAS.get(name, name)
+
+
 def accepted_first(first):
     return any(a <= first <= b for (a, b, _) in ACCEPTED_FIRST)
 
@@ -94,6 +110,54 @@ def accepted_first(first):
 def base_mnemonic(mnemonic):
     # 'bic.w' -> 'bic', 'adds' stays; Capstone suffixes .w/.n on Thumb-2.
     return mnemonic[:-2] if mnemonic.endswith('.w') or mnemonic.endswith('.n') else mnemonic
+
+
+def _sterile_data_unmapped(op_str):
+    """Effective data address of a bracket operand under the census sterile
+    image (r0-r12 = 0x20000081, SP = 0x200000C0, PC base 0x08000004, RAM
+    0x20000000-0x20000100, flash 0x08000000-0x08000100). Returns True when
+    unmapped, False when mapped, None when unresolvable."""
+    try:
+        inside = op_str.split('[')[1].split(']')[0]
+        parts = [x.strip() for x in inside.split(',')]
+        raw = parts[0].strip()
+        if raw == 'pc':
+            baddr = 0x08000004
+        elif raw == 'sp':
+            baddr = 0x200000C0
+        elif raw == 'lr':
+            baddr = 0x20000081  # sterile LR matches r0-r12
+        else:
+            # r0-r12 share one sterile base; v5 aliases (sb/sl/fp/ip)
+            # normalize to r9-r12.
+            breg = _norm_reg(raw)
+            try:
+                baddr = 0x20000081 if (
+                    breg.startswith('r')
+                    and 0 <= int(breg[1:]) <= 12) else None
+            except (ValueError, IndexError):
+                baddr = None
+        if baddr is None:
+            return None
+        off = 0
+        for p in parts[1:]:
+            p = p.strip()
+            if p.startswith('#'):
+                try:
+                    off += int(p[1:], 0)
+                except ValueError:
+                    pass
+            elif p.startswith('-'):
+                try:
+                    off -= int(p[2:] if p[1] == '#' else p[1:], 0)
+                except ValueError:
+                    pass
+        a = (baddr + off) & 0xFFFFFFFF
+        if (0x08000000 <= a < 0x08000100) or (0x20000000 <= a < 0x20000100):
+            return False
+        return True
+    except (ValueError, IndexError):
+        return None
 
 
 def accepted_gap(first, second, mnemonic, op_str):
@@ -150,12 +214,9 @@ def accepted_gap(first, second, mnemonic, op_str):
         # original Rn value and execute on both sides).
         try:
             if '!' in op_str:
-                rn = op_str.split()[0].rstrip('!,')
+                rn = _norm_reg(op_str.split()[0].rstrip('!,'))
                 lst = op_str.split('{')[1].split('}')[0]
-                regs = [x.strip() for x in lst.split(',')]
-                alias = {'sp': 'r13', 'lr': 'r14', 'pc': 'r15'}
-                regs = [alias.get(x, x) for x in regs]
-                rn = alias.get(rn, rn)
+                regs = [_norm_reg(x) for x in lst.split(',')]
                 if rn.startswith('r') and rn in regs:
                     return True
         except (ValueError, IndexError):
@@ -191,6 +252,30 @@ def accepted_gap(first, second, mnemonic, op_str):
             dests = [p.split('[')[0].strip() for p in op_str.split(',')[:2]]
             if 'pc' in dests:
                 return True
+        except (ValueError, IndexError):
+            pass
+    if mn in ('ldr', 'ldrb', 'ldrh', 'ldrsh', 'ldrsb', 'ldrsht', 'ldrsbt'):
+        # Load-into-PC whose DATA address is unmapped in the sterile image
+        # (regs 0x20000081, RAM 0x20000000-0x20000100): we load 0 and fault
+        # on the even branch target; the oracle faults on the read. Both
+        # fault for environmental reasons, not decoder ones. Mapped-data
+        # cases execute identically (fuzz-verified with pattern RAM).
+        try:
+            dests = [p.split('[')[0].strip() for p in op_str.split(',')[:2]]
+            if 'pc' in dests and '[' in op_str:
+                if _sterile_data_unmapped(op_str):
+                    return True
+        except (ValueError, IndexError):
+            pass
+    if mn == 'pli':
+        # Capstone prints F9-signed shapes with the Rt slot set (o2[15:12]
+        # == 0xF, e.g. F990:F0F0) as `pli [rn, #off]` with no visible pc.
+        # Same environmental rule when the data address is sterile-unmapped
+        # (we load 0, fault on the even target; oracle faults on read).
+        try:
+            if ((second >> 12) & 0xF) == 0xF and '[' in op_str:
+                if _sterile_data_unmapped(op_str):
+                    return True
         except (ValueError, IndexError):
             pass
     if mn in ('bfi', 'bfc'):

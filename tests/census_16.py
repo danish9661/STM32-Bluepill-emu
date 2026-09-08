@@ -77,6 +77,9 @@ ACCEPTED_GAPS = [
 def accepted_over(op):
     if 0x4780 <= op <= 0x47FF and op & 0x7 != 0:
         return True  # BX/BLX with reserved low bits set
+    if 0xDE00 <= op <= 0xDEFF:
+        return True  # UDF: we trap (bucket 1); Capstone 5.x rejects the
+        # encoding while 6.x decodes it — either way not an over-accept
     if op == 0xB400 or op == 0xBC00:
         return True  # PUSH/POP with empty reglist: benign NOP
     if 0xB620 <= op <= 0xB63F:
