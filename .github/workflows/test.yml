@@ -142,6 +142,8 @@ jobs:
         run: node tests/test_can_chat.mjs
       - name: Stopwatch demo (EXTI button + TIM2)
         run: node tests/test_stopwatch.mjs
+      - name: USB CDC serial demo (EP0 control + EP1 bulk echo)
+        run: node tests/test_usb_cdc.mjs
       - name: CoreMark CPU-semantics check (known-answer CRCs)
         run: node tests/test_coremark.mjs
       - name: STM32F1 wrapper API (ergonomic class over emulator.js)

@@ -1,7 +1,6 @@
 //! USB full-speed device (STM32F103 @ 0x4000_5C00, IRQs 19/20, packet memory @
 //! 0x4000_6000). Synchronous transaction model: endpoint events complete when
-//! the firmware arms them (no SOF/tick engine), which is exact for
-//! control/bulk/interrupt firmware.
+//! the firmware arms them, which is exact for control/bulk/interrupt firmware.
 //!
 //! Implemented: EP0R-EP7R with real toggle semantics (STAT_TX/RX toggle on
 //! 1-write, CTR_TX/RX clear on 0-write, DTOG read-only), CNTR masks, ISTR
@@ -9,10 +8,14 @@
 //! hardware), DADDR, BTABLE, 512 B packet memory with byte-exact sub-word access, USB RESET event on
 //! FRES release, SETUP/OUT injection (host -> device) with DTOG sequencing,
 //! IN completion (device -> host) drained as `VmEvent::UsbIn`, CTR/RESET IRQs
-//! on the low-priority vector (IRQ 20; isochronous/double-buffered endpoints
-//! are treated as bulk).
-//! Deliberately absent: SOF/ESOF generation (FNR reads 0), suspend/resume,
-//! USB wakeup (IRQ 42), double-buffered endpoints, isochronous CTR.
+//! on the low-priority vector (IRQ 20; isochronous endpoints are treated as
+//! bulk), SOF engine (1ms frames off the instruction counter, FNR + SOF IRQ),
+//! suspend/resume with wakeup IRQ 42 (FSUSP force, 3-idle-frame auto-suspend,
+//! resume on traffic or RESUME pulse), double-buffered bulk endpoints.
+//!
+//! Deliberately absent: ESOF generation (host never misses in emulation),
+//! isochronous CTR, PDWN gating (stored only), remote-wakeup electricals
+//! beyond the WKUP flag.
 
 use crate::system::{System, VmEvent};
 use super::Peripheral;
@@ -21,8 +24,6 @@ pub const USB_BASE: u32 = 0x4000_5C00;
 /// End (exclusive) of the USB window: registers + 512 B packet memory.
 pub const USB_END: u32 = 0x4000_6400;
 const PMA_BYTES: usize = 512;
-/// Low-priority USB vector (all CTR/RESET events; no isochronous traffic).
-pub const USB_LP_IRQ: i32 = 20;
 
 // EPnR bits.
 const EA_MASK: u32 = 0x000F;
@@ -40,9 +41,23 @@ const STAT_VALID: u32 = 0x3;
 // ISTR bits.
 const ISTR_CTR: u32 = 1 << 15;
 const ISTR_DIR: u32 = 1 << 4;
+const ISTR_SOF: u32 = 1 << 9;
+const ISTR_SUSP: u32 = 1 << 11;
+const ISTR_WKUP: u32 = 1 << 12;
 // CNTR interrupt-enable bits.
 const CNTR_CTRM: u32 = 1 << 15;
 const CNTR_RESETM: u32 = 1 << 10;
+const CNTR_SOFM: u32 = 1 << 9;
+const CNTR_SUSPM: u32 = 1 << 11;
+const CNTR_WKUPM: u32 = 1 << 12;
+/// Low-priority USB vector (all CTR/RESET events; no isochronous traffic).
+pub const USB_LP_IRQ: i32 = 20;
+/// USB wakeup vector (WKUP event only).
+pub const USB_WKUP_IRQ: i32 = 42;
+/// Instructions per USB frame (1ms @ 72MHz): the SOF engine's tick.
+const SOF_PERIOD: u64 = 72_000;
+/// Idle frames (no transfers) before the device suspends, like 3ms of J.
+const SUSPEND_IDLE_FRAMES: u32 = 3;
 
 fn stat_tx(r: u32) -> u32 { (r >> 4) & 3 }
 fn stat_rx(r: u32) -> u32 { (r >> 12) & 3 }
@@ -54,6 +69,16 @@ pub struct Usb {
     daddr: u8,
     btable: u16,
     pma: Vec<u16>,
+    /// SOF engine: 11-bit frame number + sub-frame instruction accumulator.
+    frame: u16,
+    sof_acc: u64,
+    last_tick: u64,
+    /// Suspend state: set by FSUSP or 3 idle frames, cleared on resume.
+    suspended: bool,
+    idle_frames: u32,
+    traffic_since_sof: bool,
+    /// Device-initiated resume pulse (CNTR.RESUME): clears after one frame.
+    resume_at: u64,
 }
 
 impl Usb {
@@ -66,6 +91,13 @@ impl Usb {
                 daddr: 0,
                 btable: 0,
                 pma: vec![0; PMA_BYTES / 2],
+                frame: 0,
+                sof_acc: 0,
+                last_tick: crate::system::instruction_count(),
+                suspended: false,
+                idle_frames: 0,
+                traffic_since_sof: false,
+                resume_at: 0,
             }))
         } else {
             None
@@ -100,6 +132,96 @@ impl Usb {
     fn irq(&mut self, sys: &System, mask_bit: u32) {
         if self.cntr as u32 & mask_bit != 0 {
             sys.p.nvic.borrow_mut().set_intr_pending(USB_LP_IRQ);
+        }
+    }
+
+    /// Pend the wakeup vector (WKUP event only).
+    fn irq_wkup(&mut self, sys: &System) {
+        if self.cntr as u32 & CNTR_WKUPM != 0 {
+            sys.p.nvic.borrow_mut().set_intr_pending(USB_WKUP_IRQ);
+        }
+    }
+
+    /// SOF engine + suspend tracking, once per batch (instruction-delta).
+    /// A frame (1ms @ 72MHz = 72000 instr) sets SOF (IRQ via SOFM) unless
+    /// suspended (host silent: SOF freezes too). Three frames without any
+    /// transfer auto-suspend (SUSP + IRQ via SUSPM); any transfer resumes
+    /// (WKUP + IRQ42). A device RESUME pulse (CNTR.4) clears after a frame
+    /// with the same wake sequence.
+    fn tick_usb(&mut self, sys: &System) {
+        use crate::system::instruction_count;
+        let now = instruction_count();
+        let delta = now.wrapping_sub(self.last_tick);
+        self.last_tick = now;
+        if delta == 0 {
+            return;
+        }
+        if self.suspended {
+            // Device-initiated resume pulse still times out while suspended.
+            if self.resume_at != 0 && now >= self.resume_at {
+                self.resume_at = 0;
+                self.cntr &= !(1 << 4);
+                self.suspended = false;
+                self.istr &= !(ISTR_SUSP as u16);
+                self.istr |= ISTR_WKUP as u16;
+                self.sof_acc = 0;
+                self.idle_frames = 0;
+                self.irq_wkup(sys);
+            }
+            return;
+        }
+        self.sof_acc += delta;
+        while self.sof_acc >= SOF_PERIOD {
+            self.sof_acc -= SOF_PERIOD;
+            self.frame = (self.frame + 1) & 0x7FF;
+            self.istr |= ISTR_SOF as u16;
+            self.irq(sys, CNTR_SOFM);
+            if self.traffic_since_sof {
+                self.traffic_since_sof = false;
+                self.idle_frames = 0;
+            } else {
+                self.idle_frames += 1;
+                if self.idle_frames >= SUSPEND_IDLE_FRAMES {
+                    self.enter_suspend(sys);
+                }
+            }
+            if self.resume_at != 0 && now >= self.resume_at {
+                self.resume_at = 0;
+                self.cntr &= !(1 << 4);
+                self.istr |= ISTR_WKUP as u16;
+                self.irq_wkup(sys);
+            }
+        }
+    }
+
+    fn enter_suspend(&mut self, sys: &System) {
+        self.suspended = true;
+        self.istr |= ISTR_SUSP as u16;
+        self.irq(sys, CNTR_SUSPM);
+    }
+
+    /// Bulk double-buffered endpoint? (EP_KIND + EP_TYPE bulk 00; the DTOG
+    /// bit then selects between the TX-descriptor and RX-descriptor blocks
+    /// as the two buffers. Isochronous stays treated-as-bulk, single.)
+    fn is_double_buffered(&self, n: usize) -> bool {
+        let r = self.ep[n] as u32;
+        r & EP_KIND != 0 && r & EP_TYPE_MASK == 0
+    }
+
+    /// Any bus transfer marks traffic (resets the suspend-idle count).
+    /// Resume-from-suspend also raises WKUP here (host traffic resumes).
+    fn traffic(&mut self, sys: &System) {
+        self.traffic_since_sof = true;
+        self.idle_frames = 0;
+        if self.suspended && self.cntr & (1 << 1) != 0 {
+            // FSUSP held: stay suspended (firmware owns the state).
+            return;
+        }
+        if self.suspended {
+            self.suspended = false;
+            self.istr &= !(ISTR_SUSP as u16);
+            self.istr |= ISTR_WKUP as u16;
+            self.irq_wkup(sys);
         }
     }
 
@@ -138,10 +260,17 @@ impl Usb {
     /// STAT_TX transition with CTR_TX clear): move COUNT_TX bytes from the
     /// PMA TX buffer into a UsbIn event, then apply the hardware
     /// post-conditions (CTR_TX set, STAT_TX back to NAK, DTOG_TX toggled).
+    /// Double-buffered bulk endpoints use the DTOG_TX-selected descriptor
+    /// block (TX desc when DTOG=0, RX desc repurposed when DTOG=1).
     fn complete_in(&mut self, sys: &System, n: usize) {
         let base = (self.btable as usize) & 0x1F8;
-        let tx_addr = self.pma_half(base + n * 8) as usize;
-        let count = (self.pma_half(base + n * 8 + 2) & 0x3FF) as usize;
+        let blk = if self.is_double_buffered(n) && self.ep[n] & DTOG_TX as u16 != 0 {
+            base + n * 8 + 4
+        } else {
+            base + n * 8
+        };
+        let tx_addr = self.pma_half(blk) as usize;
+        let count = (self.pma_half(blk + 2) & 0x3FF) as usize;
         let mut data = vec![0u8; count.min(PMA_BYTES)];
         for (i, b) in data.iter_mut().enumerate() {
             *b = self.pma_byte(tx_addr + i);
@@ -152,11 +281,15 @@ impl Usb {
         self.ep[n] ^= DTOG_TX as u16;
         // ISTR CTR/DIR/EP_ID derive from the endpoint flags on read.
         self.irq(sys, CNTR_CTRM);
+        self.traffic(sys);
     }
 
     /// Host->device OUT/SETUP delivery (called by usb_inject_*): stage bytes
     /// into the PMA RX buffer when the endpoint is armed (STAT_RX VALID),
     /// else NAK (return false). Applies DTOG_RX toggle, CTR_RX, ISTR.
+    /// Double-buffered bulk endpoints use the DTOG_RX-selected block (RX
+    /// desc when DTOG=0, TX desc repurposed when DTOG=1) and stay VALID
+    /// across the first fill (firmware drains at its own pace).
     fn deliver_rx(&mut self, sys: &System, ep: usize, data: &[u8], is_setup: bool) -> bool {
         if ep >= 8 || (is_setup && ep != 0) {
             return false;
@@ -165,7 +298,13 @@ impl Usb {
             return false; // not armed: NAK.
         }
         let base = (self.btable as usize) & 0x1F8;
-        let rx_addr = self.pma_half(base + ep * 8 + 4) as usize;
+        let db = self.is_double_buffered(ep);
+        let blk = if db && self.ep[ep] & DTOG_RX as u16 != 0 {
+            base + ep * 8
+        } else {
+            base + ep * 8 + 4
+        };
+        let rx_addr = self.pma_half(blk) as usize;
         if rx_addr + data.len() > PMA_BYTES {
             return false;
         }
@@ -174,19 +313,22 @@ impl Usb {
         }
         // COUNT_RX: preserve the firmware's block-size config (bits 15:10),
         // report the received count in bits 9:0.
-        let cnt_off = base + ep * 8 + 6;
+        let cnt_off = blk + 2;
         let cfg = self.pma_half(cnt_off) & 0xFC00;
         self.pma_set_half(cnt_off, cfg | ((data.len() & 0x3FF) as u16));
         let mut r = self.ep[ep] as u32;
         if is_setup {
             r |= SETUP_BIT;
         }
-        r = (r & !STAT_RX_MASK) | (STAT_NAK << 12); // HW NAKs after reception
+        if !db {
+            r = (r & !STAT_RX_MASK) | (STAT_NAK << 12); // HW NAKs after reception
+        }
         r |= CTR_RX;
         r ^= DTOG_RX; // DATA0/DATA1 sequencing
         self.ep[ep] = r as u16;
         // ISTR CTR/DIR/EP_ID derive from the endpoint flags on read.
         self.irq(sys, CNTR_CTRM);
+        self.traffic(sys);
         true
     }
 
@@ -227,7 +369,9 @@ impl Usb {
             0x00..=0x1C if offset % 4 == 0 => self.ep[(offset / 4) as usize] as u32,
             0x40 => self.cntr as u32,
             0x44 => self.istr_read(),
-            0x48 => 0, // FNR: no SOF engine (see module docs).
+            // FNR: frame number + RXDP (attached). LSOF/LCK read 0: the
+            // host never misses in emulation (no ESOF generation).
+            0x48 => (self.frame as u32) | (1 << 15),
             0x4C => self.daddr as u32,
             0x50 => self.btable as u32,
             _ => 0,
@@ -243,6 +387,7 @@ impl Usb {
             0x40 => {
                 let fresh = value as u16 & 0xFF1F;
                 let was_fres = self.cntr & 1 != 0;
+                let was_fsusp = self.cntr & (1 << 1) != 0;
                 self.cntr = fresh;
                 if fresh & 1 != 0 {
                     // FRES asserted: hold the USB logic in reset (no event).
@@ -252,6 +397,29 @@ impl Usb {
                 } else if was_fres {
                     // FRES release: attach event; firmware enumeration starts.
                     self.usb_reset(sys, true);
+                }
+                // FSUSP set: force suspend now (SUSP + IRQ via SUSPM).
+                // Re-asserted on every rising edge, even if a cleared
+                // SUSP flag hides an already-suspended state.
+                if fresh & (1 << 1) != 0 && !was_fsusp {
+                    self.suspended = true;
+                    self.istr |= ISTR_SUSP as u16;
+                    self.irq(sys, CNTR_SUSPM);
+                }
+                // FSUSP cleared while suspended: wake (WKUP + IRQ42).
+                if fresh & (1 << 1) == 0 && was_fsusp && self.suspended {
+                    self.suspended = false;
+                    self.istr &= !(ISTR_SUSP as u16);
+                    self.istr |= ISTR_WKUP as u16;
+                    self.sof_acc = 0;
+                    self.idle_frames = 0;
+                    self.irq_wkup(sys);
+                }
+                // RESUME pulse (device-initiated remote wakeup): completes
+                // after one frame with the wake sequence (also when not
+                // suspended; the pulse still self-clears).
+                if fresh & (1 << 4) != 0 {
+                    self.resume_at = crate::system::instruction_count() + SOF_PERIOD;
                 }
             }
             0x44 => {
@@ -267,6 +435,9 @@ impl Usb {
 }
 
 impl Peripheral for Usb {
+    fn tick(&mut self, sys: &System) {
+        self.tick_usb(sys);
+    }
     fn read(&mut self, _sys: &System, offset: u32) -> u32 {
         self.read_reg(offset)
     }

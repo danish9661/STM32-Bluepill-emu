@@ -177,7 +177,7 @@ fn extract_svd_max_offset(p: &PeripheralInfo) -> u32 {
 
 fn name_has_tick(name: &str) -> bool {
     name.starts_with("TIM") || name.starts_with("DMA") || name == "RTC" || name.starts_with("ADC")
-        || name.starts_with("USART") || name.starts_with("UART")
+        || name.starts_with("USART") || name.starts_with("UART") || name == "USB"
 }
 
 impl Peripherals {

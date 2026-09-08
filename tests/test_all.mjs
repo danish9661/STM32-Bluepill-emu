@@ -2267,7 +2267,104 @@ periph_write(USB + U_ISTR, 4, 0);
 // DADDR / FNR misc
 periph_write(USB + U_DADDR, 4, 0x8A);
 assert_eq(periph_read(USB + U_DADDR, 4), 0x8A, 'USB DADDR ADD+EF');
-assert_eq(periph_read(USB + 0x48, 4), 0, 'USB FNR reads 0 (no SOF engine)');
+assert_eq(periph_read(USB + 0x48, 4) & 0x8000, 0x8000, 'USB FNR RXDP attached');
+
+// SOF engine: 1ms frames (72000 instr) bump FNR + SOF flag (ISTR.9)
+periph_write(USB + U_ISTR, 4, 0);
+step_batch(72000);
+assert_eq(periph_read(USB + 0x48, 4) & 0x7FF, 1, 'USB FNR frame 1 after 72K instr');
+assert_eq(periph_read(USB + U_ISTR, 4) & (1 << 9), 1 << 9, 'USB ISTR SOF set');
+step_batch(72000);
+assert_eq(periph_read(USB + 0x48, 4) & 0x7FF, 2, 'USB FNR frame 2');
+periph_write(USB + U_CNTR, 4, (1 << 9)); // SOFM
+step_batch(72000);
+// Drain stale pendings (earlier CTR completions) so the assert is meaningful.
+let _d = 0;
+while (get_next_pending_interrupt() !== -255 && _d++ < 100) { clear_current_interrupt(); }
+step_batch(72000);
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 20,
+    'USB SOF pends IRQ 20 with SOFM');
+clear_current_interrupt();
+periph_write(USB + U_CNTR, 4, 0);
+periph_write(USB + U_ISTR, 4, 0);
+
+// Suspend: FSUSP forces SUSP (ISTR.11); clearing FSUSP wakes (WKUP, IRQ42)
+periph_write(0xE000E100 + 0x04, 4, 1 << 10); // ISER1: USB wakeup IRQ 42 enable
+periph_write(USB + U_CNTR, 4, (1 << 11) | (1 << 12)); // SUSPM + WKUPM
+_d = 0;
+while (get_next_pending_interrupt() !== -255 && _d++ < 100) { clear_current_interrupt(); }
+periph_write(USB + U_CNTR, 4, (1 << 11) | (1 << 12) | (1 << 1)); // +FSUSP
+assert_eq(periph_read(USB + U_ISTR, 4) & (1 << 11), 1 << 11, 'USB ISTR SUSP on FSUSP');
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 20,
+    'USB SUSP pends IRQ 20 with SUSPM');
+clear_current_interrupt();
+periph_write(USB + U_CNTR, 4, (1 << 11) | (1 << 12)); // FSUSP off -> wake
+assert_eq(periph_read(USB + U_ISTR, 4) & (1 << 11), 0, 'USB ISTR SUSP cleared on wake');
+assert_eq(periph_read(USB + U_ISTR, 4) & (1 << 12), 1 << 12, 'USB ISTR WKUP on wake');
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 42,
+    'USB WKUP pends IRQ 42 with WKUPM');
+clear_current_interrupt();
+periph_write(USB + U_ISTR, 4, 0);
+periph_write(USB + U_CNTR, 4, 0);
+// Auto-suspend after 3 idle frames (no traffic): SOF freezes too
+const fnr0 = periph_read(USB + 0x48, 4) & 0x7FF;
+step_batch(72000 * 4);
+assert_eq(periph_read(USB + U_ISTR, 4) & (1 << 11), 1 << 11, 'USB auto-suspend after 3 idle frames');
+const fnr1 = periph_read(USB + 0x48, 4) & 0x7FF;
+step_batch(72000 * 2);
+assert_eq(periph_read(USB + 0x48, 4) & 0x7FF, fnr1, 'USB FNR frozen while suspended');
+// Traffic resumes: OUT inject wakes (WKUP) and restarts SOF
+periph_write(USB + U_EP1, 4, 0x1000); // re-arm EP1 OUT (NAK -> VALID toggle)
+assert_eq(usb_inject_out(1, [0xAA]), true, 'USB OUT accepted to wake');
+assert_eq(periph_read(USB + U_ISTR, 4) & (1 << 12), 1 << 12, 'USB WKUP on traffic resume');
+assert_eq(periph_read(USB + U_ISTR, 4) & (1 << 11), 0, 'USB SUSP cleared on resume');
+periph_write(USB + U_ISTR, 4, 0);
+// Remote wakeup: RESUME pulse (CNTR.4) self-clears after a frame + WKUP
+periph_write(USB + U_CNTR, 4, (1 << 11) | (1 << 12) | (1 << 1)); // FSUSP again
+periph_write(USB + U_CNTR, 4, (1 << 11) | (1 << 12) | (1 << 1) | (1 << 4)); // +RESUME
+step_batch(72000);
+assert_eq(periph_read(USB + U_CNTR, 4) & (1 << 4), 0, 'USB RESUME self-clears after a frame');
+assert_eq(periph_read(USB + U_ISTR, 4) & (1 << 12), 1 << 12, 'USB WKUP after RESUME pulse');
+periph_write(USB + U_ISTR, 4, 0);
+periph_write(USB + U_CNTR, 4, 0);
+
+// Double-buffered bulk EP3 OUT: DTOG_RX selects the buffer block (RX desc
+// at DTOG=0, TX desc repurposed at DTOG=1); STAT stays VALID across fills.
+reset();
+periph_write(USB + U_CNTR, 4, 0);
+periph_write(USB + U_BTABLE, 4, 0);
+const U_EP3 = 0x0C;
+// EA + KIND + STAT_RX toggle in ONE write (direct fields follow the
+// written value, so split writes would clear EA/KIND again).
+periph_write(USB + U_EP3, 4, 0x3103);          // EA=3, KIND, STAT_RX VALID
+assert_eq(periph_read(USB + U_EP3, 4), 0x3103, 'USB EP3 DB armed');
+periph_write(U_PMA + 24, 2, 0x100);  // ADDR3_TX (buffer B) = 0x100
+periph_write(U_PMA + 26, 2, 0);      // COUNT3_TX
+periph_write(U_PMA + 28, 2, 0x140);  // ADDR3_RX (buffer A) = 0x140
+periph_write(U_PMA + 30, 2, 0);      // COUNT3_RX
+assert_eq(usb_inject_out(3, [0x11]), true, 'USB DB OUT fill buffer A');
+assert_eq(periph_read(U_PMA + 0x140, 1), 0x11, 'USB DB buffer A byte');
+assert_eq(periph_read(USB + U_EP3, 4) & 0x3000, 0x3000, 'USB DB stays VALID after first fill');
+assert_eq(usb_inject_out(3, [0x22]), true, 'USB DB OUT fill buffer B');
+assert_eq(periph_read(U_PMA + 0x100, 1), 0x22, 'USB DB buffer B byte');
+// Double-buffered bulk EP4 IN: DTOG_TX selects the source block.
+// Descriptors first (the VALID transition completes immediately).
+const U_EP4 = 0x10;
+periph_write(U_PMA + 32, 2, 0x180);  // ADDR4_TX (buffer A)
+periph_write(U_PMA + 34, 2, 1);      // COUNT4_TX = 1
+periph_write(U_PMA + 0x180, 1, 0x77);
+periph_write(USB + U_EP4, 4, 0x0134); // EA=4 + KIND + STAT_TX VALID, one write
+const dev = Array.from(drain_events());
+let usb = [];
+for (let i = 0; i < dev.length;) {
+    if (dev[i++] !== 18) break;
+    const ep = dev[i++], len = dev[i++];
+    usb.push([ep, len, ...dev.slice(i, i + len)]);
+    i += len;
+}
+usb = usb.filter(e => e[0] === 4);
+assert_eq(usb.length, 1, 'USB DB IN completion drains buffer A');
+assert_eq(usb[0][2], 0x77, 'USB DB IN buffer A byte');
 
 // ============================================================
 // Summary
