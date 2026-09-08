@@ -287,6 +287,33 @@ fn ldrex_strex_pair() {
     assert_eq!(mem.read32(0x20003000), 0, "failed strex must not store");
 }
 
+/// LDREXB/STREXB + LDREXH/STREXH pairs (shapes oracle-verified:
+/// ldrexb r4,[r2] = E8D2 4F4F; Rt=o2[15:12], size=o2[4], Rd=o2[11:8].
+/// The oracle faults byte/half STREX unconditionally, so only our side
+/// of the store pair is asserted here).
+#[test]
+fn ldrexb_strexb_pair() {
+    let _held = crate::test_util::lock();
+    // strb r2,[r1]; ldrexb r0,[r1] (E8D1 0F4F); strexb r2,r0,[r1] (E8C1 024F).
+    let (cpu, mem) = run_snippet(
+        &[0x700A, 0xE8D1, 0x0F4F, 0xE8C1, 0x024F, 0xE7FE],
+        &[(1, 0x20003000), (2, 0xAB)],
+    );
+    assert!(cpu.fault.is_none(), "ldrexb/strexb fault: {:?}", cpu.fault);
+    assert_eq!(cpu.regs.r[0], 0xAB, "ldrexb did not load byte");
+    assert_eq!(cpu.regs.r[2], 0, "strexb status must be 0 after ldrexb");
+    assert_eq!(mem.read8(0x20003000), 0xAB);
+    // Halfword pair: strh/ldrexh r0,[r1] (E8D1 0F5F); strexh r2,r0,[r1] (E8C1 025F).
+    let (cpu, mem) = run_snippet(
+        &[0x800A, 0xE8D1, 0x0F5F, 0xE8C1, 0x025F, 0xE7FE],
+        &[(1, 0x20003000), (2, 0xBEEF)],
+    );
+    assert!(cpu.fault.is_none(), "ldrexh/strexh fault: {:?}", cpu.fault);
+    assert_eq!(cpu.regs.r[0], 0xBEEF, "ldrexh did not load halfword");
+    assert_eq!(cpu.regs.r[2], 0, "strexh status must be 0 after ldrexh");
+    assert_eq!(mem.read16(0x20003000), 0xBEEF);
+}
+
 /// TBH halfword table branch (TBB covered by tbb_index_by_value).
 #[test]
 fn tbh_index_by_value() {

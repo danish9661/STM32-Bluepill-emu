@@ -310,6 +310,15 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - Ship `site/arduino_rtc_clock.elf` + `site/arduino_servo.elf` (force-add, `*.elf` is ignored); build dirs ignored in `.gitignore`. Rebuild: `arduino-cli compile --fqbn STMicroelectronics:stm32:GenF1:pnum=BLUEPILL_F103C8 --build-path tests/arduino_<name>/build tests/arduino_<name>`.
 - **Verified**: rtc 4/4, servo 6/6, browser presets 2/2.
 
+### 29. Track-2 fuzz + backlog + CI gates + 2 more demos [this sprint]
+- **Track-2 differential fuzz** (multi-step, `tests/fuzz_diff.py` protocol v2 `ncode halfwords... steps`): IT+payload pairs (single-slot mask; predicated flag/C updates via `it_suppress`), LDREX/STREX word pairs (exclusive monitor across steps), 2-ALU chains (flag chaining with forced Rd→Rn, full-range regs), unaligned single-transfer bases (both sides byte-assemble identically, oracle-verified). Generator stays strict (mapped, no branches/PC) so any multi-step divergence is REAL, no triage.
+- **Oracle quirks found & worked around** (all empirically pinned): joint count over an IT block overruns one halfword past a *skipped* payload (skipped insns advance PC without consuming a stop) → NOP pads + r15 skip for pairs; preset multi-slot ITSTATE mis-evaluates conds (cond3 INVERTED!) → single-slot only; preset single-slot is exact.
+- **Real bugs found by track-2**: UDIV/SDIV Rd==PC adv-clobbered the quotient (now raw-write stands, oracle-verified); 16-bit mov/add-PC even-target needed the bx/blx triage rule.
+- **Backlog**: LDREXB/H (`E8D0|Rn:(Rt<<12)|0xF4F`, size=`o2[4]`) + STREXB/H (`E8C0|Rn`, Rd=`o2[11:8]`, Rt=`o2[15:12]`) — shapes oracle-verified (capstone's entry is near-single-point); exact-address reservations (mixed-size pairs fail, matching oracle); previously mis-decoded as STRD/LDRD. NVIC STIR (`0xE000EF00`, WO, INTID 9 bits) routed in `Peripherals::read/write` so both maps get it without touching bus windows; tested via ISPR bit (deliverability gating noted).
+- **Demos**: `arduino_dac_sine` (DAC1 CH1 16-pt sine → ADC1 CH4 loopback, tracks 155..3941) + `arduino_i2c_scan` (Wire probe, finds 0x3C+0x50) with headless tests (6/6, 4/4), page presets, browser presets (now 4/4), CI lines. Tests use `site/*.elf` directly (no build-dir copies in CI).
+- **CI**: census gates (`capstone==6.0.0`, dump + both `.py`) + fuzz canary (200/seed1, `unicorn==2.1.4`) wired after unit tests.
+- **Verified**: track-2 fuzz 2700 (200/s1 + 500/s7 + 1000/s11 + 1000/s42) 0 divs; cpu 43/43; census green; test_all 401/401; canary + 200M 39/39; coremark 5/5; all suites; browser demos 4/4.
+
 
 
 ## Next Phase — Long-term Optimizations

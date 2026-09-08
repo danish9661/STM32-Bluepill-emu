@@ -19,6 +19,8 @@ tests/arduino_echo/build/
 tests/arduino_fade/build/
 tests/arduino_rtc_clock/build/
 tests/arduino_servo/build/
+tests/arduino_dac_sine/build/
+tests/arduino_i2c_scan/build/
 tests/arduino_periph_test/build/compile_commands.json
 tests/arduino_ws2812/build/core/
 tests/arduino_ws2812/build/libraries/

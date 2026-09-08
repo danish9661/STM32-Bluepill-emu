@@ -593,6 +593,14 @@ periph_write(0xE000E325, 4, 0x80);
 let prio = periph_read(0xE000E325, 4);
 assert_eq(prio, 0x80, 'NVIC USART1 priority 0x80');
 
+// STIR (0xE000EF00, write-only): pends an IRQ by number. (Assert the ISPR
+// bit rather than delivery: the earlier get_next_pending_interrupt left an
+// active-priority entry that gates deliverability, same as HW.)
+periph_write(NVIC + 0x00, 4, 1 << 6); // ISER0 bit 6 = EXTI0 IRQ 6
+periph_write(0xE000EF00, 4, 6); // EXTI0 = IRQ 6
+assert_eq(periph_read(NVIC + 0x100, 4) & (1 << 6), 1 << 6, 'STIR pends EXTI0 in ISPR0');
+assert_eq(periph_read(0xE000EF00, 4), 0, 'STIR reads 0 (write-only)');
+
 // ============================================================
 // CRC
 // ============================================================

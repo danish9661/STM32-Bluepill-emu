@@ -104,6 +104,16 @@ jobs:
           cp site/arduino_coremark.elf tests/arduino_coremark/build/arduino_coremark.ino.elf
       - name: Unit tests
         run: node tests/test_all.mjs
+      - name: CPU decoder census (16-bit + 32-bit gates)
+        run: |
+          pip install capstone==6.0.0
+          cargo test --release --lib cpu::census
+          python3 tests/census_16.py
+          python3 tests/census_32.py
+      - name: Differential fuzz canary (200 cases vs Unicorn oracle)
+        run: |
+          pip install unicorn==2.1.4 capstone==6.0.0
+          python3 tests/fuzz_diff.py --cases 200 --seed 1
       - name: Firmware format + ESM smoke tests
         run: |
           node tests/test_firmware_formats.mjs
@@ -124,6 +134,10 @@ jobs:
         run: node tests/test_rtc_clock.mjs
       - name: Servo sweep demo (TIM3 PWM + angle prints)
         run: node tests/test_servo.mjs
+      - name: DAC sine + ADC loopback demo
+        run: node tests/test_dac_sine.mjs
+      - name: I2C scanner demo (Wire ACK/NACK)
+        run: node tests/test_i2c_scan.mjs
       - name: CoreMark CPU-semantics check (known-answer CRCs)
         run: node tests/test_coremark.mjs
       - name: STM32F1 wrapper API (ergonomic class over emulator.js)

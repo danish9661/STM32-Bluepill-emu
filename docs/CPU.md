@@ -183,6 +183,12 @@ all delta peripherals key off it).
 - Probe battery (`src/cpu/isa_tests.rs`, 29 tests): Capstone-locked
   encodings with exact regs/flags/mem asserts, incl. the fuzz-derived
   `bcc_w_forward_s0`/`bcc_w_backward_s1` and `unpredictable_shapes_fault`.
+- Track 2 (`fuzz_diff.py` protocol v2): IT+payload pairs (NOP pads + r15
+  skip around the oracle's IT stop-count quirk), LDREX/STREX pairs,
+  2-ALU flag chains, unaligned bases — 2700 cases, 0 divergences; found
+  UDIV/SDIV-PC and 16-bit mov/add-PC handling. Backlog closed: LDREXB/H +
+  STREXB/H (`E8D0`/`E8C0`, exact-address reservations) and NVIC STIR
+  (`0xE000EF00` routed in `Peripherals`, both maps).
 
 ## Tests
 

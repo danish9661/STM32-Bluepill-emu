@@ -5,11 +5,13 @@ Usage:
   cargo test --release --lib cpu::census   # refresh /tmp/census*_ours.json
   python3 tests/fuzz_diff.py [--cases N] [--seed S]
 
-Protocol: generate N cases (valid-executing encodings from the census dumps
-+ constrained regs/flags) -> /tmp/fuzz_cases.txt -> `cargo test --release
---lib cpu::diffuzz` with FUZZ_CASES/FUZZ_OUT (executes on our core) ->
-execute the same cases on Unicorn (Cortex-M-ish Thumb, MPU off) -> compare
-regs/PC/xPSR-NZCVQ-T/memory-hash/fault-bit.
+Protocol v2: generate N cases (single insns from the census dumps with
+constrained regs/flags, plus track-2 multi-step shapes: IT+payload pairs,
+LDREX/STREX pairs, 2-ALU chains) -> /tmp/fuzz_cases.txt (`ncode h* regs
+sp lr xpsr it steps`) -> `cargo test --release --lib cpu::diffuzz` with
+FUZZ_CASES/FUZZ_OUT (executes on our core) -> execute the same cases on
+Unicorn (Cortex-M-ish Thumb, MPU off) -> compare regs/PC/xPSR-NZCVQ-T/
+memory-hash/fault-bit.
 
 Deliberately excluded (divergent by design, covered elsewhere):
   SVC/BKPT/UDF (trap mechanisms differ; census buckets them), WFI/WFE/SEV
@@ -265,55 +267,229 @@ def constrain_memory_case(first, second, regs, sp):
 def gen_cases(n, seed):
     rng = random.Random(seed)
     ops16, ops32 = load_census()
+    track2_selfcheck()
     cases = []
     guard = 0
     while len(cases) < n and guard < n * 20:
         guard += 1
-        if rng.random() < 0.6:
-            op = rng.choice(ops16)
-            if skip_op(op, None):
-                continue
-            first, second = op, None
+        roll = rng.random()
+        if roll < 0.50:
+            case = gen_single(rng, ops16, ops32)
+        elif roll < 0.70:
+            case = gen_itpair(rng)
+        elif roll < 0.80:
+            case = gen_ldstpair(rng)
         else:
-            first, second = rng.choice(ops32)
-            if skip_op(first, second):
-                continue
-        # T3/EA data-proc with Rd==PC: target needs ALU sim to triage;
-        # resample instead (control-flow unmapped targets skip cleanly).
-        if is_rdpc_dataproc(first, second):
+            case = gen_aluchain(rng)
+        if case is None:
             continue
-        # Oracle limits (faults valid encodings): resample.
-        if skip_oracle_limits(first, second):
-            continue
-        # UNPREDICTABLE writeback-to-Rt: resample.
-        if skip_wb_to_rt(first, second):
-            continue
-        regs = [rand_reg(rng) for _ in range(13)]
-        sp = 0x20000000 + rng.randrange(0x1000, 0xF000) & ~7
-        lr = rng.choice([0x08000001, 0x20000081, rng.randint(0, 0xFF)])
-        if lr & 0x0FFFFFF0 == 0x0FFFFFF0:
-            lr ^= 0x100  # keep clear of EXC_RETURN patterns
-        nzcvq = rng.randrange(0, 32) << 27
-        xpsr = 0x01000000 | nzcvq
-        # ITSTATE always 0 at setup (Unicorn mishandles stop-count with a
-        # preset IT block; predicated continuation is covered by hand
-        # probes + v2). Bare `it` instructions still occur and their
-        # state-setting is model-checked exactly below.
-        it = [0, 0, 0, 0]
-        # Pin memory-op bases into mapped RAM (and reg-indices small) so
-        # effective addresses stay mapped on both sides.
-        constrain_memory_case(first, second, regs, sp)
-        cases.append((first, second, regs, sp, lr, xpsr, it))
+        cases.append(case)
     return cases
 
 
+def gen_single(rng, ops16, ops32):
+    """One instruction, one step (track 1, unchanged semantics)."""
+    if rng.random() < 0.6:
+        op = rng.choice(ops16)
+        if skip_op(op, None):
+            return None
+        first, second = op, None
+    else:
+        first, second = rng.choice(ops32)
+        if skip_op(first, second):
+            return None
+    # T3/EA data-proc with Rd==PC: target needs ALU sim to triage;
+    # resample instead (control-flow unmapped targets skip cleanly).
+    if is_rdpc_dataproc(first, second):
+        return None
+    # Oracle limits (faults valid encodings): resample.
+    if skip_oracle_limits(first, second):
+        return None
+    # UNPREDICTABLE writeback-to-Rt: resample.
+    if skip_wb_to_rt(first, second):
+        return None
+    regs = [rand_reg(rng) for _ in range(13)]
+    # Unaligned bases are fine on both sides (both byte-assemble;
+    # oracle-verified for word/half/byte): relax the even-only rule for
+    # single-transfer bases (never SP).
+    relax_alignment(rng, first, second, regs)
+    sp = 0x20000000 + rng.randrange(0x1000, 0xF000) & ~7
+    lr = rng.choice([0x08000001, 0x20000081, rng.randint(0, 0xFF)])
+    if lr & 0x0FFFFFF0 == 0x0FFFFFF0:
+        lr ^= 0x100  # keep clear of EXC_RETURN patterns
+    nzcvq = rng.randrange(0, 32) << 27
+    xpsr = 0x01000000 | nzcvq
+    # ITSTATE always 0 at setup (Unicorn mishandles stop-count with a
+    # preset IT block; predicated continuation is covered by hand
+    # probes + track-2 IT pairs). Bare `it` instructions still occur
+    # and their state-setting is model-checked exactly below.
+    it = [0, 0, 0, 0]
+    # Pin memory-op bases into mapped RAM (and reg-indices small) so
+    # effective addresses stay mapped on both sides.
+    constrain_memory_case(first, second, regs, sp)
+    code = [first] if second is None else [first, second]
+    return (code, regs, sp, lr, xpsr, it, 1)
+
+
+ALU_KINDS = ['lsl_imm5', 'adds_reg', 'subs_reg', 'adds_imm3', 'subs_imm3',
+             'movs_imm8', 'cmp_imm8', 'ands', 'eors', 'adcs', 'sbcs', 'orrs']
+
+
+def alu16(kind, rd, rn, rm, imm):
+    """Encode a 16-bit ALU op (r0-r7 only). Verified against Capstone by
+    track2_selfcheck; the fuzzer never emits anything else here."""
+    if kind == 'lsl_imm5':
+        return 0x0000 | (imm & 31) << 6 | (rn & 7) << 3 | (rd & 7)
+    if kind == 'adds_reg':
+        return 0x1800 | (rm & 7) << 6 | (rn & 7) << 3 | (rd & 7)
+    if kind == 'subs_reg':
+        return 0x1A00 | (rm & 7) << 6 | (rn & 7) << 3 | (rd & 7)
+    if kind == 'adds_imm3':
+        return 0x1C00 | (imm & 7) << 6 | (rn & 7) << 3 | (rd & 7)
+    if kind == 'subs_imm3':
+        return 0x1E00 | (imm & 7) << 6 | (rn & 7) << 3 | (rd & 7)
+    if kind == 'movs_imm8':
+        return 0x2000 | (rd & 7) << 8 | (imm & 0xFF)
+    if kind == 'cmp_imm8':
+        return 0x2800 | (rn & 7) << 8 | (imm & 0xFF)
+    base = {'ands': 0x4000, 'eors': 0x4040, 'adcs': 0x4140,
+            'sbcs': 0x4180, 'orrs': 0x4300}[kind]
+    return base | (rm & 7) << 3 | (rd & 7)
+
+
+def alu_dest(kind):
+    """Does this kind write a register (vs flags-only CMP)?"""
+    return kind != 'cmp_imm8'
+
+
+def track2_selfcheck():
+    """One-time Capstone check that the ALU encoder + LDREX/STREX shapes
+    decode as intended (a bad encoder would fail every track-2 case)."""
+    import struct
+    from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB
+    md = Cs(CS_ARCH_ARM, CS_MODE_THUMB)
+    for kind in ALU_KINDS:
+        op = alu16(kind, 1, 2, 3, 0x55)
+        r = list(md.disasm(struct.pack('<H', op), 0x20002000))
+        assert r and r[0].size == 2, (kind, hex(op))
+    for h1, h2 in [(0xE852, 0x0F00), (0xE842, 0x0100)]:
+        r = list(md.disasm(struct.pack('<HH', h1, h2), 0x20002000))
+        assert r and r[0].size == 4, (hex(h1), hex(h2))
+    assert list(md.disasm(struct.pack('<H', 0xBF08), 0x20002000))[0].mnemonic == 'it'
+
+
+def any_regs(rng):
+    regs = [rng.randint(0, 0xFFFFFFFF) for _ in range(13)]
+    sp = 0x20000000 + rng.randrange(0x1000, 0xF000) & ~7
+    lr = rng.choice([0x08000001, 0x20000081, rng.randint(0, 0xFF)])
+    if lr & 0x0FFFFFF0 == 0x0FFFFFF0:
+        lr ^= 0x100
+    xpsr = 0x01000000 | (rng.randrange(0, 32) << 27)
+    return regs, sp, lr, xpsr
+
+
+def gen_itpair(rng):
+    """`it <cond>` + one predicable 16-bit ALU op (+ 2 NOP pads).
+    Tests predicated flag updates: the payload must set flags (and C!)
+    only when its slot condition holds — the it_suppress path both sides.
+    Single-slot mask only (0x8); multi-slot ITSTATE is mis-evaluated by
+    the oracle even when preset, so those stay hand-probe-covered.
+    Oracle counting quirk (verified): a *skipped* payload advances PC
+    without consuming a stop, so joint count=2 overruns one halfword
+    past a skipped payload (taken stops exactly). The NOP pads absorb
+    the overrun deterministically (NOPs never fault, touch no state);
+    the comparator skips r15 for pairs (counting semantics, not decoder
+    behavior) and checks regs/flags/mem exactly. Our side runs exactly
+    2 steps from zero ITSTATE."""
+    cond = rng.randrange(0, 14)
+    it = 0xBF00 | (cond << 4) | 0x8
+    kind = rng.choice(ALU_KINDS)
+    rd, rn, rm = (rng.randrange(0, 8) for _ in range(3))
+    imm = rng.choice([rng.randrange(0, 256), rng.randrange(0, 8),
+                      rng.randrange(1, 32)])
+    payload = alu16(kind, rd, rn, rm, imm)
+    regs, sp, lr, xpsr = any_regs(rng)
+    return ([it, payload, 0xBF00, 0xBF00], regs, sp, lr, xpsr,
+            [0, 0, 0, 0], 2)
+
+
+def gen_ldstpair(rng):
+    """LDREX r0,[r2] + STREX r1,r0,[r2] (2 steps, mapped word). Tests the
+    exclusive monitor across instructions; both sides must succeed with
+    status 0 and land the store. (Byte/half pairs arrive with the
+    LDREXB/STREXB backlog fix.)"""
+    regs, sp, lr, xpsr = any_regs(rng)
+    regs[2] = 0x20004000
+    regs[0] = rng.randint(0, 0xFFFFFFFF)
+    regs[1] = rng.randint(0, 0xFFFFFFFF)
+    return ([0xE852, 0x0F00, 0xE842, 0x0100], regs, sp, lr, xpsr,
+            [0, 0, 0, 0], 2)
+
+
+def gen_aluchain(rng):
+    """Two chained 16-bit ALU ops (2 steps): ALU2 reads ALU1's Rd (and
+    often its flags via ADC/SBC), testing flag chaining across steps."""
+    k1 = rng.choice(ALU_KINDS)
+    k2 = rng.choice(ALU_KINDS)
+    rd1 = rng.randrange(0, 8)
+    a, b = (rng.randrange(0, 8) for _ in range(2))
+    i1 = rng.choice([rng.randrange(0, 256), rng.randrange(0, 8),
+                     rng.randrange(1, 32)])
+    i2 = rng.choice([rng.randrange(0, 256), rng.randrange(0, 8),
+                     rng.randrange(1, 32)])
+    ins1 = alu16(k1, rd1, a, b, i1)
+    # Force the chain half the time (as Rn for reg/imm forms, as Rdn for
+    # data-proc forms where Rn==Rd field; CMP chains flags+reg anyway).
+    if alu_dest(k1) and rng.random() < 0.5:
+        d2 = n2 = rd1
+    else:
+        d2, n2 = rng.randrange(0, 8), rng.randrange(0, 8)
+    ins2 = alu16(k2, d2, n2, b, i2)
+    regs, sp, lr, xpsr = any_regs(rng)
+    return ([ins1, ins2], regs, sp, lr, xpsr, [0, 0, 0, 0], 2)
+
+
+def relax_alignment(rng, first, second, regs):
+    """Allow odd bases for single-transfer memory ops (both sides
+    byte-assemble unaligned word/half/byte accesses identically,
+    oracle-verified). SP stays word-aligned; literals are fixed."""
+    import struct
+    from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB
+    md = Cs(CS_ARCH_ARM, CS_MODE_THUMB)
+    data = struct.pack('<H', first)
+    if second is not None:
+        data += struct.pack('<H', second)
+    try:
+        r = list(md.disasm(data, 0x20002000))
+    except Exception:
+        return
+    if not r or '[' not in r[0].op_str:
+        return
+    mn = r[0].mnemonic
+    mn = mn[:-2] if mn.endswith('.w') or mn.endswith('.n') else mn
+    if mn not in ('ldr', 'ldrb', 'ldrh', 'ldrsb', 'ldrsh', 'str', 'strb',
+                  'strh', 'ldrd', 'strd'):
+        return
+    try:
+        inside = r[0].op_str.split('[')[1].split(']')[0]
+        breg = inside.split(',')[0].strip().rstrip('!')
+        if breg.startswith('r') and breg not in ('sp',):
+            idx = int(breg[1:])
+            if 0 <= idx <= 12 and rng.random() < 0.5:
+                regs[idx] |= 1
+    except (ValueError, IndexError):
+        pass
+
+
 def write_cases(cases):
+    # NOTE: no header/comment lines — fuzz_divs.txt references cases by
+    # raw line number, so every line must be a case.
     with open(CASES_PATH, 'w') as f:
-        for (first, second, regs, sp, lr, xpsr, it) in cases:
-            f.write(f'{first:04X} {"-" if second is None else f"{second:04X}"} '
-                    + ' '.join(f'{r:08X}' for r in regs)
+        for (code, regs, sp, lr, xpsr, it, steps) in cases:
+            f.write(f'{len(code)} ' + ' '.join(f'{h:04X}' for h in code)
+                    + ' ' + ' '.join(f'{r:08X}' for r in regs)
                     + f' {sp:08X} {lr:08X} {xpsr:08X} '
-                    + f'{it[0]:02X} {it[1]:02X} {it[2]:02X} {it[3]:02X} 1\n')
+                    + f'{it[0]:02X} {it[1]:02X} {it[2]:02X} {it[3]:02X} {steps}\n')
 
 
 def run_ours():
@@ -387,6 +563,30 @@ def branch_target_mapped(first, second, regs, sp):
         if v[idx] & 1 == 0:
             return False
         return mapped(v[idx] & ~1)
+    if bm in ('mov', 'add'):
+        # 16-bit high-reg MOV/ADD with Rd==PC (e.g. mov pc, r4): even
+        # source faults on our side like HW (branch() to ARM state);
+        # the oracle jumps. Same design divergence as bx/blx above.
+        # (32-bit Rd==PC data-proc resamples at generation.)
+        try:
+            parts = [p.strip() for p in ops.split(',')]
+            if len(parts) != 2 or parts[0] != 'pc':
+                return None
+            src = parts[1]
+            idx = {'r0': 0, 'r1': 1, 'r2': 2, 'r3': 3, 'r4': 4, 'r5': 5,
+                   'r6': 6, 'r7': 7, 'r8': 8, 'r9': 9, 'r10': 10,
+                   'r11': 11, 'r12': 12, 'sp': 13, 'lr': 14,
+                   'pc': 15}.get(src)
+            if idx is None:
+                return None
+            v = regs[idx] if idx < 13 else (sp if idx == 13 else 0)
+            if idx == 15:
+                v = 0x20002004
+            if v & 1 == 0:
+                return False
+            return mapped(v & ~1)
+        except (IndexError, ValueError, KeyError):
+            return None
     if bm in ('pop', 'ldm', 'ldmia', 'ldmdb', 'ldmib', 'ldmda', 'vldmia'):
         if 'pc' not in ops:
             return None
@@ -643,14 +843,11 @@ def run_oracle(cases):
     # TB cache, so flush it every case (re-executing a stale TB once
     # masqueraded as divine state leakage).
     pc = 0x20002000
-    for case_idx, (first, second, regs, sp, lr, xpsr, it) in enumerate(cases):
+    for case_idx, (code, regs, sp, lr, xpsr, it, steps) in enumerate(cases):
         mu.mem_write(0x08000000, flash)
         mu.mem_write(0x20000000, ram)
         # install snippet at PC (fixed 0x20002001, like the Rust side)
-        code = struct.pack('<H', first)
-        if second is not None:
-            code += struct.pack('<H', second)
-        mu.mem_write(pc, code)
+        mu.mem_write(pc, struct.pack('<%dH' % len(code), *code))
         mu.ctl_flush_tb()
         for c, v in zip(regs_consts, regs):
             mu.reg_write(c, v)
@@ -662,15 +859,17 @@ def run_oracle(cases):
         if it[0] or it[1]:
             itstate = (it[0] << 4) | it[1]
             cpsr |= (((itstate >> 2) & 0x3F) << 10) | ((itstate & 0x3) << 25)
+        start = pc | 1
+        count = steps
         mu.reg_write(UC_ARM_REG_CPSR, cpsr)
         fault = 0
         try:
-            mu.emu_start(pc | 1, 0, timeout=0, count=1)
+            mu.emu_start(start, 0, timeout=0, count=count)
         except Exception:
             fault = 1
         # Harness self-check: every case must advance PC or fault. A
         # silent no-op means the driver (not the CPU) is broken.
-        if not fault and mu.reg_read(UC_ARM_REG_PC) == pc:
+        if not fault and mu.reg_read(UC_ARM_REG_PC) == (start & ~1):
             raise RuntimeError(f'oracle silent skip on case {case_idx}')
         got_regs = [mu.reg_read(c) for c in regs_consts]
         got = got_regs + [mu.reg_read(UC_ARM_REG_SP),
@@ -697,45 +896,57 @@ def main():
     assert len(ours) == len(oracle) == n
     divs = []
     unmapped_skips = 0
-    for idx, ((first, second, regs, sp, lr, xpsr, it), oline, (got, mh, fault)) in enumerate(zip(cases, ours, oracle)):
+    for idx, ((code, regs, sp, lr, xpsr, it, _steps), oline, (got, mh, fault)) in enumerate(zip(cases, ours, oracle)):
         orr = [int(x, 16) for x in oline[0:16]]
         oxpsr = int(oline[16], 16)
         omh = int(oline[21], 16)
         ofault = int(oline[22])
+        first = code[0]
+        second = code[1] if len(code) > 1 else None
+        multi = len(code) > 2 or (len(code) == 2 and steps_of(cases[idx]) > 1)
         issues = []
         if ofault != fault:
-            # Ours sets PC silently while Unicorn prefetch-faults when the
-            # branch target is unmapped: recompute and expect those. Same
-            # for data accesses outside mapped RAM/flash (ours returns
-            # 0/drops, Unicorn faults). Reserved shift bit: oracle-strict.
-            tm = branch_target_mapped(first, second, regs, sp)
-            if tm is None:
-                tm = data_addrs_mapped(first, second, regs, sp)
-            if tm is None and reserved_shift_bit(first, second):
-                tm = False
-            if tm is None and ofault == 1 and fault == 0 and cap_dsp_mnemonic(first, second):
-                tm = False
-            if tm is False:
-                # Expected divergence BY DESIGN (unmapped / reserved /
-                # oracle-strict): the faulting side stops while the other
-                # advances, so PC/regs/mem legitimately differ downstream.
-                # Comparing values here only re-reports the same triaged
-                # fault (this once listed ~35 phantom r15-only "divergences"
-                # per 200 cases). Skip value checks for the case entirely:
-                # mapped-agreement is proven by the remaining cases.
-                unmapped_skips += 1
-                continue
+            # Track-2 multi-step cases are generated fault-free by
+            # construction (mapped, no branches, no PC writes), so any
+            # fault mismatch there is REAL — no first-insn triage (the
+            # fault may be in step 2 with clobbered regs).
+            if multi:
+                issues.append(f'fault ours={ofault} unicorn={fault} (multi-step)')
             else:
-                issues.append(f'fault ours={ofault} unicorn={fault}')
+                # Ours sets PC silently while Unicorn prefetch-faults when the
+                # branch target is unmapped: recompute and expect those. Same
+                # for data accesses outside mapped RAM/flash (ours returns
+                # 0/drops, Unicorn faults). Reserved shift bit: oracle-strict.
+                tm = branch_target_mapped(first, second, regs, sp)
+                if tm is None:
+                    tm = data_addrs_mapped(first, second, regs, sp)
+                if tm is None and reserved_shift_bit(first, second):
+                    tm = False
+                if tm is None and ofault == 1 and fault == 0 and cap_dsp_mnemonic(first, second):
+                    tm = False
+                if tm is False:
+                    # Expected divergence BY DESIGN (unmapped / reserved /
+                    # oracle-strict): the faulting side stops while the other
+                    # advances, so PC/regs/mem legitimately differ downstream.
+                    # Comparing values here only re-reports the same triaged
+                    # fault (this once listed ~35 phantom r15-only "divergences"
+                    # per 200 cases). Skip value checks for the case entirely:
+                    # mapped-agreement is proven by the remaining cases.
+                    unmapped_skips += 1
+                    continue
+                else:
+                    issues.append(f'fault ours={ofault} unicorn={fault}')
         if (oxpsr & XPSR_MASK) != (got[16] & XPSR_MASK):
             issues.append(f'xpsr ours={oxpsr:08x} unicorn={got[16]:08x}')
+        # Both sides faulted: r15 is fault-reporting state, not
+        # architectural (we record the faulting address; the oracle
+        # reports exception-entry state, e.g. subw-pc leaves
+        # 0xFFFFF1E8). Regs/mem must still agree (fault = no state
+        # change on either side). IT pairs also skip r15 (oracle
+        # stop-counting quirk, documented in gen_itpair).
+        is_itpair = (len(code) == 4 and (code[0] & 0xFF00) == 0xBF00)
         for ri in range(16):
-            # Both sides faulted: r15 is fault-reporting state, not
-            # architectural (we record the faulting address; the oracle
-            # reports exception-entry state, e.g. subw-pc leaves
-            # 0xFFFFF1E8). Regs/mem must still agree (fault = no state
-            # change on either side).
-            if ri == 15 and ofault == 1 and fault == 1:
+            if ri == 15 and (is_itpair or (ofault == 1 and fault == 1)):
                 continue
             want = (orr[ri] & ~1) if ri == 15 else (orr[ri] & 0xFFFFFFFF)
             have = (got[ri] & ~1) if ri == 15 else (got[ri] & 0xFFFFFFFF)
@@ -755,9 +966,11 @@ def main():
             else:
                 issues.append(f'memhash ours={omh:016x} unicorn={mh:016x}')
         # IT-state model check: a bare `it` instruction must set the
-        # identical block state on both sides.
+        # identical block state on both sides. (Single-step only:
+        # track-2 pairs end mid-block by design; their IT advancement
+        # is covered implicitly by the predicated-payload values.)
         oit = [int(x, 16) for x in oline[17:21]]
-        if oit[0] or oit[1]:
+        if not multi and (oit[0] or oit[1]):
             exp = expected_it(it, oit, first, second, orr, got)
             if exp is not None:
                 ucitfield = ((got[16] >> 10) & 0x3F) << 2 | ((got[16] >> 25) & 0x3)
@@ -773,13 +986,15 @@ def main():
             # encodings. Same when both sides faulted on an unmapped
             # access (values polluted by the 0-vs-fault design gap before
             # the agreed fault, e.g. LDRD-post-indexed-PC from unmapped).
-            if cap_invalid_mclass(first, second):
+            # (Single-step only: multi-step cases are constrained
+            # fault-free, so anything there is REAL.)
+            if not multi and cap_invalid_mclass(first, second):
                 unmapped_skips += 1
                 continue
             if ofault == 1 and fault == 1 and data_addrs_mapped(first, second, regs, sp) is False:
                 unmapped_skips += 1
                 continue
-            op = f'{first:04X}' if second is None else f'{first:04X}:{second:04X}'
+            op = ':'.join(f'{h:04X}' for h in code)
             divs.append((idx, op, issues[:8]))
     print(f'fuzz: {n} cases, {len(divs)} divergences, '
           f'{unmapped_skips} expected-unmapped-target skips')
@@ -842,6 +1057,10 @@ def cap_dsp_mnemonic(first, second):
     mn = r[0].mnemonic
     mn = mn[:-2] if mn.endswith('.w') or mn.endswith('.n') else mn
     return mn in DSP_MNEMONICS
+
+
+def steps_of(case):
+    return case[6]
 
 
 def expected_it(it_in, it_out, first, second, regs_out, regs_uc):

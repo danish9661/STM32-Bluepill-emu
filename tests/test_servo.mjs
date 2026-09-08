@@ -5,7 +5,7 @@
 import { readFileSync } from 'fs';
 import { createEmulator } from '../pkg/emulator.js';
 
-const ELF = 'tests/arduino_servo/build/arduino_servo.ino.elf';
+const ELF = 'site/arduino_servo.elf';
 const MAX = 100000000;
 const CHUNK = 5000000;
 

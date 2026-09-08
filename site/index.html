@@ -316,6 +316,8 @@ select:focus { outline: none; border-color: #0ea5e9; }
                     <option value="ws2812">WS2812 Strip (SPI1·DMA1 CH3, 8 LEDs)</option>
                     <option value="rtc_clock">RTC Clock (HH:MM:SS on UART)</option>
                     <option value="servo">Servo Sweep (TIM3 PWM on PA6)</option>
+                    <option value="dac_sine">DAC Sine + ADC Loopback (PA4)</option>
+                    <option value="i2c_scan">I2C Scanner (finds OLED+EEPROM)</option>
                 </select>
                 <select id="chipSelect" title="Chip / board (rp2040js-style: pick the peripheral map)">
                     <option value="stm32f103c8">STM32F103C8 (builtin map)</option>
@@ -1195,6 +1197,20 @@ $('loadPresetBtn').addEventListener('click', async () => {
             const buf = await fetch('arduino_servo.elf').then(r => r.arrayBuffer());
             await initEmulator(new Uint8Array(buf), 'arduino_servo.elf (servo sweep)');
             log('Press Run — a 50Hz TIM3 PWM on PA6 sweeps 0→180° (1–2ms pulses); watch PA6 toggle in the pin grid.', 't-in');
+        } else if (preset === 'dac_sine') {
+            const buf = await fetch('arduino_dac_sine.elf').then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(buf), 'arduino_dac_sine.elf (DAC sine + ADC loopback)');
+            log('Press Run — DAC1 CH1 plays a 16-point sine on PA4 while ADC1 CH4 samples it back; dac=/adc= pairs print.', 't-in');
+        } else if (preset === 'i2c_scan') {
+            const [fw, eeprom] = await Promise.all([
+                fetch('arduino_i2c_scan.elf').then(r => r.arrayBuffer()),
+                fetch('eeprom.bin').then(r => r.arrayBuffer()),
+            ]);
+            await initEmulator(new Uint8Array(fw), 'arduino_i2c_scan.elf (I2C scanner)', {
+                i2c_eeprom: [{ peripheral: 'I2C1', address: 0x50, data: new Uint8Array(eeprom) }],
+                i2c_oled: [{ peripheral: 'I2C1', address: 0x3C, width: 128, height: 64 }],
+            });
+            log('Press Run — every 7-bit address is probed; expect found 0x3C (OLED) and 0x50 (EEPROM).', 't-in');
         }
     } catch (e) {
         log(`Failed to load preset: ${e.message || e}`, 't-err');

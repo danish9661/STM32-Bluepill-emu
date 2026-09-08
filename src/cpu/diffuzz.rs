@@ -1,9 +1,9 @@
 //! Differential-execution worker for tests/fuzz_diff.py (Unicorn oracle).
 //!
-//! Protocol (all plain text, no new dependencies):
+//! Protocol v2 (all plain text, no new dependencies):
 //! - reads cases from the path in env FUZZ_CASES, one per line:
-//!     `op1 op2 r0..r12 sp lr xpsr itc itm itn itx steps`
-//!   op1/op2 are hex halfwords (`-` for op2 means 16-bit insn); regs hex;
+//!     `ncode h1 h2 ... r0..r12 sp lr xpsr itc itm itn itx steps`
+//!   ncode = number of code halfwords (1, 2 or 4); regs hex;
 //!   itc/it m/itn/itx = IT-block state (cond, mask, n, idx), 0 when inactive.
 //! - writes one result line per case to the path in env FUZZ_OUT:
 //!     `R0..R12 SP LR XPSR ITC ITM ITN ITX MEMHASH FAULT`
@@ -66,40 +66,35 @@ fn diffuzz_exec() {
             continue;
         }
         let f: Vec<&str> = line.split_whitespace().collect();
-        let op1 = parse_hex(f[0]) as u16;
-        let op2 = if f[1] == "-" {
-            None
-        } else {
-            Some(parse_hex(f[1]) as u16)
-        };
+        let ncode: usize = f[0].parse().unwrap_or(0);
+        if ncode == 0 || ncode > 4 || f.len() < 1 + ncode + 21 {
+            continue; // malformed: skip, driver counts lines
+        }
+        let mut code: Vec<u8> = Vec::with_capacity(ncode * 2);
+        for k in 0..ncode {
+            let h = parse_hex(f[1 + k]) as u16;
+            code.push((h & 0xFF) as u8);
+            code.push((h >> 8) as u8);
+        }
+        let r = &f[1 + ncode..];
         let mut cpu = Cpu::new(0x2000FFF0, 0x20002001);
-        for (i, v) in f[2..15].iter().enumerate() {
+        for (i, v) in r[0..13].iter().enumerate() {
             cpu.regs.r[i] = parse_hex(v);
         }
-        cpu.regs.r[13] = parse_hex(f[15]);
-        cpu.regs.r[14] = parse_hex(f[16]);
-        cpu.regs.xpsr = parse_hex(f[17]);
-        cpu.it_cond = parse_hex(f[18]) as u8;
-        cpu.it_mask = parse_hex(f[19]) as u8;
-        cpu.it_n = parse_hex(f[20]) as u8;
-        cpu.it_idx = parse_hex(f[21]) as u8;
+        cpu.regs.r[13] = parse_hex(r[13]);
+        cpu.regs.r[14] = parse_hex(r[14]);
+        cpu.regs.xpsr = parse_hex(r[15]);
+        cpu.it_cond = parse_hex(r[16]) as u8;
+        cpu.it_mask = parse_hex(r[17]) as u8;
+        cpu.it_n = parse_hex(r[18]) as u8;
+        cpu.it_idx = parse_hex(r[19]) as u8;
         cpu.dsp = false;
         cpu.deliver_irqs = false;
-        let steps: u32 = f[22].parse().unwrap_or(1);
+        let steps: u32 = r[20].parse().unwrap_or(1);
         let mut mem = FlatMemory::new(0x10000, 0x10000);
         fill_pattern(&mut mem);
         // Install the snippet at PC.
         let pc = (cpu.regs.r[15] & !1) as usize;
-        let code: Vec<u8> = if let Some(o2) = op2 {
-            vec![
-                (op1 & 0xFF) as u8,
-                (op1 >> 8) as u8,
-                (o2 & 0xFF) as u8,
-                (o2 >> 8) as u8,
-            ]
-        } else {
-            vec![(op1 & 0xFF) as u8, (op1 >> 8) as u8]
-        };
         for (i, b) in code.iter().enumerate() {
             mem.write8_raw((pc as u32).wrapping_add(i as u32), *b);
         }

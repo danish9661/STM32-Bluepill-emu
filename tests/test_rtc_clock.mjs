@@ -5,7 +5,7 @@
 import { readFileSync } from 'fs';
 import { createEmulator } from '../pkg/emulator.js';
 
-const ELF = 'tests/arduino_rtc_clock/build/arduino_rtc_clock.ino.elf';
+const ELF = 'site/arduino_rtc_clock.elf';
 const MAX = 50000000;
 const CHUNK = 5000000;
 

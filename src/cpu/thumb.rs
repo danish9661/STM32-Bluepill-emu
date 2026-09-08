@@ -2037,6 +2037,12 @@ pub fn exec32(
                     } else {
                         (rr(cpu, rn, pc) as i32).wrapping_div(b) as u32
                     };
+                    // Rd==PC: raw write stands (differential fuzz: the
+                    // oracle keeps the quotient without interworking or
+                    // adv-clobber); anything else advances past.
+                    if rd == 15 {
+                        return true;
+                    }
                     adv(cpu, pc, 4);
                     return true;
                 }
@@ -2066,6 +2072,10 @@ pub fn exec32(
                 }
                 let b = rr(cpu, rm, pc);
                 cpu.regs.r[rd] = if b == 0 { 0 } else { rr(cpu, rn, pc) / b };
+                // Rd==PC: raw write stands (see SDIV).
+                if rd == 15 {
+                    return true;
+                }
                 adv(cpu, pc, 4);
                 return true;
             }
@@ -2227,6 +2237,46 @@ pub fn exec32(
                 .wrapping_add(4)
                 .wrapping_add((mem.read16(tab.wrapping_add(idx.wrapping_mul(2))) as u32) * 2);
             return branch(cpu, sys, mem, t | 1, pc, op1, op2, 4);
+        }
+        // LDREXB/H (E8D0|Rn; size in o2[4], Rt in o2[15:12]). Shapes
+        // verified against the oracle (E8D2:4F4F loads the byte;
+        // o2[11:8]/[7:5]/[3:0] are fixed 1111/010/1111). Reservation at
+        // the exact address (word forms use addr&!3; mixed-size pairs
+        // fail, matching the oracle). Previously these fell into the
+        // STRD/LDRD block below (values agreed, but wrongly).
+        if (o1 & 0x0FF0) == 0x08D0 && (o2 & 0x0FEF) == 0x0F4F {
+            let rt = ((o2 >> 12) & 0xF) as usize;
+            let addr = rr(cpu, rn, pc);
+            cpu.exclusive = Some(addr);
+            cpu.regs.r[rt] = if (o2 >> 4) & 1 == 1 {
+                mem.read16(addr) as u32
+            } else {
+                mem.read8(addr) as u32
+            };
+            adv(cpu, pc, 4);
+            return true;
+        }
+        // STREXB/H (E8C0|Rn; Rd=status in o2[11:8], Rt=data in o2[15:12]).
+        // The oracle faults these unconditionally (byte-exclusive not
+        // implemented there), so differential pairs resample; our pair
+        // logic is probe-tested (ldrex_strex_forms).
+        if (o1 & 0x0FF0) == 0x08C0 && (o2 & 0x00EF) == 0x004F {
+            let rt = ((o2 >> 12) & 0xF) as usize;
+            let rdv = ((o2 >> 8) & 0xF) as usize;
+            let addr = rr(cpu, rn, pc);
+            if cpu.exclusive == Some(addr) {
+                if (o2 >> 4) & 1 == 1 {
+                    mem.write16(addr, rr(cpu, rt, pc) as u16);
+                } else {
+                    mem.write8(addr, rr(cpu, rt, pc) as u8);
+                }
+                cpu.regs.r[rdv] = 0;
+            } else {
+                cpu.regs.r[rdv] = 1;
+            }
+            cpu.exclusive = None; // STREX always clears, pass or fail
+            adv(cpu, pc, 4);
+            return true;
         }
         // LDREX / STREX (E8 + nibble 4/5, word form). Single global
         // reservation: exact on a single core (see Cpu::exclusive).

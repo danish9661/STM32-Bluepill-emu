@@ -169,6 +169,11 @@ fn name_has_tick(name: &str) -> bool {
 impl Peripherals {
     pub const NVIC_REGS_BASE: u32 = 0xE000_E100;
     pub const NVIC_REGS_END: u32 = 0xE000_E500;
+    /// Software Trigger Interrupt Register: write-only, pends an interrupt
+    /// by number (INTID, 9 bits). Present in both SVDs inside NVIC; handled
+    /// here (not in Nvic itself) so both the hardcoded and SVD maps route
+    /// it without widening any bus window into SCB territory.
+    pub const STIR_ADDR: u32 = 0xE000_EF00;
 
     pub const MEMORY_MAPS: [(u32, u32); 2] = [
         (0x4000_0000, 0xB000_0000),
@@ -467,6 +472,9 @@ impl Peripherals {
         if let Some((addr, bit_number)) = Self::bitbanding(addr) {
             return (self.read(sys, addr, 1) >> bit_number) & 1;
         }
+        if addr == Self::STIR_ADDR {
+            return 0; // STIR is write-only
+        }
         // NVIC priority registers are byte-addressable, bypass alignment
         if Self::nvic_priority_check(addr) {
             return self.nvic.borrow_mut().read(sys, addr - Self::NVIC_REGS_BASE);
@@ -536,7 +544,11 @@ impl Peripherals {
         if addr >= 0x4002_1000 && addr < 0x4002_2000 {
             self.update_rcc_enrs(addr - 0x4002_1000, value);
         }
-        if Self::NVIC_REGS_BASE <= addr && addr < Self::NVIC_REGS_END {
+        if addr == Self::STIR_ADDR {
+            self.nvic
+                .borrow_mut()
+                .set_intr_pending((value & 0x1FF) as i32);
+        } else if Self::NVIC_REGS_BASE <= addr && addr < Self::NVIC_REGS_END {
             self.nvic.borrow_mut().write(sys, addr - Self::NVIC_REGS_BASE, value);
         } else if let Some(p) = self.bus.borrow().get(addr) {
             p.peripheral.borrow_mut().write_sized(sys, addr - p.start, size, value);
