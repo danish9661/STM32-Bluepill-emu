@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 test.describe('New demo presets', () => {
-  for (const [preset, needle] of [['rtc_clock', '12:00:01'], ['servo', 'deg=10'], ['dac_sine', 'adc='], ['i2c_scan', 'found=2'], ['can_chat', 'rx id=100'], ['stopwatch', 'Stopwatch demo'], ['pwm_wave', 'duty=143 ccr=143'], ['mini_rtos', 'B1 t='], ['sd_logger', 'logger done']]) {
+  for (const [preset, needle] of [['rtc_clock', '12:00:01'], ['servo', 'deg=10'], ['dac_sine', 'adc='], ['i2c_scan', 'found=2'], ['can_chat', 'rx id=100'], ['stopwatch', 'Stopwatch demo'], ['pwm_wave', 'duty=143 ccr=143'], ['mini_rtos', 'B1 t='], ['sd_logger', 'logger done'], ['board_pill', 'board demo: Blue Pill'], ['board_maple', 'board demo: Maple Mini'], ['board_nucleo', 'board demo: Nucleo-F103RB'], ['board_rc', 'board demo: Generic F103RC']]) {
     test(`${preset} loads and prints`, async ({ page }) => {
       page.on('console', msg => { if (msg.type() === 'error') console.log('BROWSER ERR:', msg.text()); });
       await page.goto('http://localhost:8765/');

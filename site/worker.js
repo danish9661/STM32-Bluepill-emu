@@ -64,8 +64,6 @@ async function handleMessage(e) {
           chip: msg.chip,
           svd: msg.svd,
           firmware: msg.firmware,
-          flash_size: 0x10000,
-          ram_size: 0x5000,
           vector_table: 0x08000000,
           ext_devices: msg.ext_devices || {},
         });

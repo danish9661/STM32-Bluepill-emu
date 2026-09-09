@@ -382,6 +382,13 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
   PB8, Pill D17=PC13) shown in the page GPIO grid; pin asserts in
   test_chips (15/15) + live browser alias check. Maple Mini shares the
   Pill variant except its own header map — verified, not assumed.
+- **Per-board demo firmware** (`tests/arduino_board_demo/`, 8/8 headless,
+  4 browser presets, CI): one sketch (LED_BUILTIN + board-name banner via
+  ifdefs) compiled per FQBN (BLUEPILL_C8, MAPLEMINI_CB, NUCLEO_F103RB,
+  GENERIC_F103RCTX) and booted on its chip; page presets set chip+ELF
+  together. Caught a real bug: the worker hardcoded 64K/20K sizes,
+  starving F103RC's 48K-RAM stack (browser wedged, headless passed) —
+  worker now inherits sizes from the chip table like the main path.
 - **Verified**: full gate re-run at commit (no behavior change for existing
   firmware: nothing addressed 0xE0042000 before; default IDCODE is the
   real F103 value).

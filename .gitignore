@@ -28,6 +28,14 @@ tests/arduino_pwm_wave/build/
 tests/arduino_i2c_slave/build/
 tests/arduino_mini_rtos/build/
 tests/arduino_sd_logger/build/
+tests/arduino_board_demo/build-pill/
+tests/arduino_board_demo/build-maple/
+tests/arduino_board_demo/build-nucleo/
+tests/arduino_board_demo/build-rc/
+tests/arduino_board_demo/build-pill/
+tests/arduino_board_demo/build-maple/
+tests/arduino_board_demo/build-nucleo/
+tests/arduino_board_demo/build-rc/
 tests/arduino_periph_test/build/compile_commands.json
 tests/arduino_ws2812/build/core/
 tests/arduino_ws2812/build/libraries/

@@ -326,6 +326,10 @@ select:focus { outline: none; border-color: #0ea5e9; }
                     <option value="i2c_slave">I2C Slave @ 0x42 (write + read)</option>
                     <option value="mini_rtos">Mini-RTOS (PendSV preemptive tasks)</option>
                     <option value="sd_logger">SD Data Logger (SDIO+ADC+RTC)</option>
+                    <option value="board_pill">Board: Blue Pill (LED PC13)</option>
+                    <option value="board_maple">Board: Maple Mini (LED D33)</option>
+                    <option value="board_nucleo">Board: Nucleo-F103RB (LED D13)</option>
+                    <option value="board_rc">Board: Generic F103RC</option>
                 </select>
                 <select id="chipSelect" title="Chip / board (rp2040js-style: pick the peripheral map)">
                     <option value="stm32f103c8">STM32F103C8 (builtin map)</option>
@@ -1392,6 +1396,19 @@ $('loadPresetBtn').addEventListener('click', async () => {
             const buf = await fetch('arduino_mini_rtos.elf').then(r => r.arrayBuffer());
             await initEmulator(new Uint8Array(buf), 'arduino_mini_rtos.elf (preemptive tasks)');
             log('Press Run — tasks A/B preempt every 1ms via PendSV; sequences must stay gap-free.', 't-in');
+        } else if (preset.startsWith('board_')) {
+            // Per-board demo: matching ELF + chip variant together.
+            const boards = {
+                board_pill: ['arduino_board_pill.elf', 'stm32f103c8'],
+                board_maple: ['arduino_board_maple.elf', 'maple_mini'],
+                board_nucleo: ['arduino_board_nucleo.elf', 'nucleo_f103rb'],
+                board_rc: ['arduino_board_rc.elf', 'stm32f103rc'],
+            };
+            const [elf, chipSelVal] = boards[preset];
+            $('chipSelect').value = chipSelVal;
+            const buf = await fetch(elf).then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(buf), `${elf} (${chipSelVal})`);
+            log('Press Run — board banner + LED blink + UART ticks on the matched chip.', 't-in');
         } else if (preset === 'sd_logger') {
             // 1 MiB blank SDHC image (written blocks land here, in RAM only)
             const buf = await fetch('arduino_sd_logger.elf').then(r => r.arrayBuffer());
