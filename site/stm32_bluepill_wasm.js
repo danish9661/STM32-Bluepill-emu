@@ -162,6 +162,17 @@ export function clear_current_interrupt() {
 }
 
 /**
+ * TEMPORARY DEBUG (remove before commit): last exception take.
+ * @returns {Uint32Array}
+ */
+export function dbg_last_take() {
+    const ret = wasm.dbg_last_take();
+    var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
+}
+
+/**
  * DMA periph->mem pump: pop `size` bytes from the peripheral at `addr` via
  * the normal periph_read path (chunks <= 4, little-endian packed), so JS only
  * writes the result to RAM once per transfer instead of one crossing per chunk.
@@ -435,6 +446,15 @@ export function has_pending_interrupt() {
 }
 
 /**
+ * @param {number} channel
+ * @returns {number}
+ */
+export function i2c_inject_read(channel) {
+    const ret = wasm.i2c_inject_read(channel);
+    return ret;
+}
+
+/**
  * Queue injected RX bytes for an I2C channel (virtual device -> MCU).
  * @param {number} channel
  * @param {Uint8Array} bytes
@@ -443,6 +463,41 @@ export function i2c_inject_rx(channel, bytes) {
     const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     wasm.i2c_inject_rx(channel, ptr0, len0);
+}
+
+/**
+ * Host-side I2C slave transactions: address this peripheral as a slave
+ * from an external host (see `I2C1`/`I2C2` slave docs). Start NACKs when
+ * the peripheral is disabled/busy/unmatched; write NACKs when not in
+ * slave-RX, RXNE unread or ACK cleared; read returns -1 when not in
+ * slave-TX or DR empty (stretch equivalents).
+ * @param {number} channel
+ * @param {number} addr
+ * @param {boolean} is_read
+ * @returns {boolean}
+ */
+export function i2c_inject_start(channel, addr, is_read) {
+    const ret = wasm.i2c_inject_start(channel, addr, is_read);
+    return ret !== 0;
+}
+
+/**
+ * @param {number} channel
+ * @returns {boolean}
+ */
+export function i2c_inject_stop(channel) {
+    const ret = wasm.i2c_inject_stop(channel);
+    return ret !== 0;
+}
+
+/**
+ * @param {number} channel
+ * @param {number} byte
+ * @returns {boolean}
+ */
+export function i2c_inject_write(channel, byte) {
+    const ret = wasm.i2c_inject_write(channel, byte);
+    return ret !== 0;
 }
 
 /**

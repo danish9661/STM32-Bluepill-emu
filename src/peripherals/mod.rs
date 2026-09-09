@@ -65,6 +65,12 @@ pub trait Peripheral {
     /// Host-side USB OUT/SETUP delivery into endpoint `ep` (`is_setup` only
     /// legal on EP0). Returns false when NAKed. Default: unhandled.
     fn usb_inject(&mut self, _sys: &System, _ep: usize, _data: &[u8], _is_setup: bool) -> bool { false }
+    /// Host-side I2C slave transactions (this peripheral addressed as slave).
+    /// Defaults: unhandled (NACK / no data).
+    fn i2c_slave_start(&mut self, _sys: &System, _addr: u8, _is_read: bool) -> bool { false }
+    fn i2c_slave_write(&mut self, _sys: &System, _byte: u8) -> bool { false }
+    fn i2c_slave_read(&mut self, _sys: &System) -> Option<u8> { None }
+    fn i2c_slave_stop(&mut self, _sys: &System) -> bool { false }
     /// Configured (sysclk, hclk, pclk1, pclk2) in Hz, if this is RCC.
     fn rcc_clocks(&self) -> Option<(u32, u32, u32, u32)> { None }
     /// Returns AFIO MAPR remap bits for this peripheral, if applicable.
@@ -119,6 +125,11 @@ pub struct Peripherals {
     pub nvic: RefCell<nvic::Nvic>,
     pub gpio: RefCell<GpioPorts>,
     rcc_enrs: RefCell<(u32, u32, u32)>,
+    /// Auxiliary Control Register (SCB ACTRL @ 0xE000E008, RW): DISMCYCINT/
+    /// DISFOLD cycle-count subtilities only — stored, no timing effect.
+    /// Handled here (like STIR) so both maps route it without touching
+    /// any bus window.
+    actrl: core::cell::Cell<u32>,
 }
 
 fn extract_svd_max_offset(p: &PeripheralInfo) -> u32 {
@@ -189,6 +200,11 @@ impl Peripherals {
     /// it without widening any bus window into SCB territory.
     pub const STIR_ADDR: u32 = 0xE000_EF00;
 
+    /// Auxiliary Control Register (SCB ACTRL @ 0xE000E008, RW, reset 0).
+    pub const ACTRL_ADDR: u32 = 0xE000_E008;
+    /// Implemented ACTRL bits: DISMCYCINT(0)/DISFOLD(2) (DISFPCA is M4).
+    pub const ACTRL_MASK: u32 = 0x7;
+
     pub const MEMORY_MAPS: [(u32, u32); 2] = [
         (0x4000_0000, 0xB000_0000),
         (0xE000_0000, 0xE100_0000),
@@ -206,6 +222,7 @@ impl Peripherals {
             nvic: RefCell::new(nvic::Nvic::default()),
             gpio: RefCell::new(gpio),
             rcc_enrs,
+            actrl: core::cell::Cell::new(0),
         };
 
         let svd_map: HashMap<&str, &PeripheralInfo> = device.peripherals.iter()
@@ -303,6 +320,7 @@ impl Peripherals {
             nvic: RefCell::new(nvic::Nvic::default()),
             gpio: RefCell::new(gpio),
             rcc_enrs,
+            actrl: core::cell::Cell::new(0),
         };
 
         let mut regs: Vec<(u32, &str)> = vec![
@@ -490,6 +508,9 @@ impl Peripherals {
         if addr == Self::STIR_ADDR {
             return 0; // STIR is write-only
         }
+        if addr == Self::ACTRL_ADDR {
+            return self.actrl.get();
+        }
         // NVIC priority registers are byte-addressable, bypass alignment
         if Self::nvic_priority_check(addr) {
             return self.nvic.borrow_mut().read(sys, addr - Self::NVIC_REGS_BASE);
@@ -563,6 +584,8 @@ impl Peripherals {
             self.nvic
                 .borrow_mut()
                 .set_intr_pending((value & 0x1FF) as i32);
+        } else if addr == Self::ACTRL_ADDR {
+            self.actrl.set(value & Self::ACTRL_MASK);
         } else if Self::NVIC_REGS_BASE <= addr && addr < Self::NVIC_REGS_END {
             self.nvic.borrow_mut().write(sys, addr - Self::NVIC_REGS_BASE, value);
         } else if let Some(p) = self.bus.borrow().get(addr) {
@@ -647,6 +670,50 @@ impl Peripherals {
         } else {
             false
         }
+    }
+
+    /// I2C base address for a 1-based channel number (F103: I2C1/2 only).
+    fn i2c_base(channel: u32) -> Option<u32> {
+        match channel {
+            1 => Some(0x4000_5400),
+            2 => Some(0x4000_5800),
+            _ => None,
+        }
+    }
+
+    /// Host-side I2C slave transactions (this peripheral addressed as slave
+    /// by an external host). See the `I2c::slave_*` methods for semantics.
+    pub fn i2c_inject_start(&self, sys: &System, channel: u32, addr: u8, is_read: bool) -> bool {
+        if let Some(b) = Self::i2c_base(channel) {
+            if let Some(slot) = self.bus.borrow().get(b) {
+                return slot.peripheral.borrow_mut().i2c_slave_start(sys, addr, is_read);
+            }
+        }
+        false
+    }
+    pub fn i2c_inject_write(&self, sys: &System, channel: u32, byte: u8) -> bool {
+        if let Some(b) = Self::i2c_base(channel) {
+            if let Some(slot) = self.bus.borrow().get(b) {
+                return slot.peripheral.borrow_mut().i2c_slave_write(sys, byte);
+            }
+        }
+        false
+    }
+    pub fn i2c_inject_read(&self, sys: &System, channel: u32) -> Option<u8> {
+        if let Some(b) = Self::i2c_base(channel) {
+            if let Some(slot) = self.bus.borrow().get(b) {
+                return slot.peripheral.borrow_mut().i2c_slave_read(sys);
+            }
+        }
+        None
+    }
+    pub fn i2c_inject_stop(&self, sys: &System, channel: u32) -> bool {
+        if let Some(b) = Self::i2c_base(channel) {
+            if let Some(slot) = self.bus.borrow().get(b) {
+                return slot.peripheral.borrow_mut().i2c_slave_stop(sys);
+            }
+        }
+        false
     }
 
     /// Configured clocks (sysclk, hclk, pclk1, pclk2) in Hz from the RCC

@@ -45,11 +45,12 @@ fn channel_pin(ch: u8) -> Option<(u8, u8)> {
     }
 }
 
-/// Nominal internal-channel values: temp sensor ~25C (0x1F8), VREFINT 1.2 V
-/// (0x5D2), VBAT (0xC7F) — emulated statistically, not modeled.
+/// Nominal internal-channel values: temp sensor ~25C (V25 = 1.43 V ->
+/// 1.43/3.3*4095 = 1774 = 0x6EE), VREFINT 1.2 V (0x5D2), VBAT (0xC7F) —
+/// emulated statistically, not modeled.
 fn nominal_channel(ch: u8) -> Option<u32> {
     match ch {
-        16 => Some(0x1F8),
+        16 => Some(0x6EE),
         17 => Some(0x5D2),
         18 => Some(0xC7F),
         _ => None,

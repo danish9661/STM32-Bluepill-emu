@@ -2,7 +2,18 @@ use crate::{system::System, ext_devices::{ExtDevices, I2cDeviceEntry}};
 use super::Peripheral;
 
 #[derive(Clone, PartialEq, Debug)]
-enum I2cState { Idle, StartSent, AddrSent { is_read: bool }, Active { is_read: bool } }
+enum I2cState {
+    Idle,
+    StartSent,
+    AddrSent { is_read: bool },
+    Active { is_read: bool },
+    /// Slave mode (this peripheral addressed by an external host via the
+    /// inject_* API): address matched, awaiting the SR1+SR2 clear sequence.
+    SlaveAddr { is_read: bool },
+    /// Slave mode active: master-write (is_read=false, host bytes land in
+    /// DR+RXNE) or master-read (is_read=true, firmware loads DR for TX).
+    SlaveActive { is_read: bool },
+}
 
 impl Default for I2cState { fn default() -> Self { I2cState::Idle } }
 
@@ -40,6 +51,9 @@ pub struct I2c {
     /// Clock stretching: instruction count until SCL is released by the slave.
     /// If non-zero, interrupts are deferred until the stretch period expires.
     stretch_until: u64,
+    /// STOPF clear sequence: set by an SR1 read while STOPF is up, consumed
+    /// by the next CR1 write (RM0008: SR1 read followed by CR1 write).
+    stopf_armed: bool,
     /// SMBus packet-error-code accumulator (CRC-8/SMBus, poly 0x07, init 0).
     /// Covers address+R/W + data bytes while PECEN (CR1.5) is set; readable
     /// via PECR. SMBALERT pin (CR1.13/SMBALERT) is register-only (no pin).
@@ -51,7 +65,7 @@ impl Default for I2c {
         Self {
             name: String::new(), devices: Vec::new(), active_device: None,
             cr1: 0, cr2: 0, oar1: 0, oar2: 0, sr1: 0, sr2: 0, ccr: 0, trise: 0, dr: 0,
-            state: I2cState::Idle, sr1_addr_flag: false,
+            state: I2cState::Idle, sr1_addr_flag: false, stopf_armed: false,
             irq_ev: 0, irq_er: 0,
             dma_channel_tx: 0, dma_channel_rx: 0,
             stretch_until: 0,
@@ -84,6 +98,7 @@ impl I2c {
         self.sr1 = 0; self.sr2 = 0;
         self.active_device = None; self.state = I2cState::Idle;
         self.sr1_addr_flag = false;
+        self.stopf_armed = false;
         self.pec = 0;
     }
 
@@ -106,6 +121,94 @@ impl I2c {
     fn pec_xfer(&self) -> bool { self.cr1 & (1 << 12) != 0 }
     fn engc(&self) -> bool { self.cr1 & (1 << 6) != 0 }
 
+    /// Slave address match against OAR1 (7-bit), OAR2 (dual, ENDUAL) and
+    /// general call (addr 0 with ENGC). 10-bit mode (OAR1 ADDMODE) is not
+    /// modeled — the OAR1 write mask drops bit 15, so it can't be selected.
+    fn slave_match(&self, addr: u8) -> bool {
+        if addr == 0 {
+            return self.engc();
+        }
+        if ((self.oar1 >> 1) & 0x7F) as u8 == addr {
+            return true;
+        }
+        if self.oar2 & 1 != 0 && ((self.oar2 >> 1) & 0x7F) as u8 == addr {
+            return true;
+        }
+        false
+    }
+
+    /// Host START + address (slave mode). ACKs on OAR match (PE must be set,
+    /// master engine idle): ADDR flag, BUSY (MSL=0), GENCALL for addr 0.
+    /// Returns false (NACK) when busy, disabled or unmatched.
+    pub fn slave_start(&mut self, sys: &System, addr: u8, is_read: bool) -> bool {
+        if self.cr1 & 1 == 0 {
+            return false;
+        }
+        if !matches!(self.state, I2cState::Idle) {
+            return false;
+        }
+        if !self.slave_match(addr) {
+            return false;
+        }
+        self.sr1 = 1 << 1; // ADDR
+        self.sr2 = (1 << 1) | if addr == 0 { 1 << 4 } else { 0 }; // BUSY[+GENCALL]
+        if self.pec_enabled() {
+            self.pec = 0;
+            self.pec_feed(addr << 1 | is_read as u8);
+        }
+        self.state = I2cState::SlaveAddr { is_read };
+        self.fire_interrupts(sys);
+        true
+    }
+
+    /// Host data byte (master-write): lands in DR + RXNE. Returns false
+    /// (NACK — the stretch equivalent) when not in slave-RX or the previous
+    /// byte is still unread, or ACK is cleared.
+    pub fn slave_write(&mut self, sys: &System, byte: u8) -> bool {
+        if !matches!(self.state, I2cState::SlaveActive { is_read: false }) {
+            return false;
+        }
+        if self.cr1 & (1 << 10) == 0 {
+            return false;
+        }
+        if self.sr1 & (1 << 6) != 0 {
+            return false;
+        }
+        self.dr = byte as u32;
+        self.sr1 |= 1 << 6; // RXNE
+        if self.pec_enabled() {
+            self.pec_feed(byte);
+        }
+        self.fire_interrupts(sys);
+        true
+    }
+
+    /// Host read (master-read): consumes the firmware-loaded DR byte, sets
+    /// TXE. Returns None (stretch) when not in slave-TX or DR still empty.
+    pub fn slave_read(&mut self, sys: &System) -> Option<u8> {
+        if !matches!(self.state, I2cState::SlaveActive { is_read: true }) {
+            return None;
+        }
+        if self.sr1 & (1 << 7) != 0 {
+            return None;
+        }
+        let b = self.dr as u8;
+        self.sr1 |= 1 << 7; // TXE
+        self.fire_interrupts(sys);
+        Some(b)
+    }
+
+    /// Host STOP: STOPF flag, back to Idle. Only valid out of a slave
+    /// transaction (a STOP during master activity is a bus error, ignored).
+    pub fn slave_stop(&mut self, sys: &System) -> bool {
+        if !matches!(self.state, I2cState::SlaveAddr { .. } | I2cState::SlaveActive { .. }) {
+            return false;
+        }
+        self.sr1 |= 1 << 4; // STOPF
+        self.state = I2cState::Idle;
+        self.fire_interrupts(sys);
+        true
+    }
     /// Resolves the DMA channel to use, accounting for AFIO remap.
     /// I2C1 default: TX=ch4, RX=ch5. AFIO remap (MAPR bit 1): TX=ch6, RX=ch7.
     fn resolve_dma_channel(&self, sys: &System, tx: bool) -> u8 {
@@ -155,6 +258,19 @@ impl Peripheral for I2c {
         sys.p.afio_remap_status(&self.name)
     }
 
+    fn i2c_slave_start(&mut self, sys: &System, addr: u8, is_read: bool) -> bool {
+        self.slave_start(sys, addr, is_read)
+    }
+    fn i2c_slave_write(&mut self, sys: &System, byte: u8) -> bool {
+        self.slave_write(sys, byte)
+    }
+    fn i2c_slave_read(&mut self, sys: &System) -> Option<u8> {
+        self.slave_read(sys)
+    }
+    fn i2c_slave_stop(&mut self, sys: &System) -> bool {
+        self.slave_stop(sys)
+    }
+
     fn read(&mut self, sys: &System, offset: u32) -> u32 {
         match offset {
             0x00 => self.cr1,
@@ -199,6 +315,7 @@ impl Peripheral for I2c {
                 }
              0x14 => {
                 self.sr1_addr_flag = (self.sr1 & (1 << 1)) != 0;
+                self.stopf_armed = (self.sr1 & (1 << 4)) != 0;
                 self.sr1
             }
             0x18 => {
@@ -206,26 +323,44 @@ impl Peripheral for I2c {
                 if self.sr1_addr_flag {
                     self.sr1 &= !(1 << 1); // Clear ADDR
                     self.sr1_addr_flag = false;
-                    let is_read = match std::mem::replace(&mut self.state, I2cState::Idle) {
+                    // (is_master, is_read); slave setup is fully handled
+                    // in its arm below, master continues in the shared block.
+                    let addr_kind = match std::mem::replace(&mut self.state, I2cState::Idle) {
                         I2cState::AddrSent { is_read } => {
                             self.state = I2cState::Active { is_read };
-                            is_read
+                            Some(is_read)
                         }
-                        s => { self.state = s; false }
+                        I2cState::SlaveAddr { is_read } => {
+                            // Slave addressing: MSL stays 0, BUSY set at
+                            // match; TRA follows direction. Read mode arms
+                            // TXE (firmware must load DR); write mode waits
+                            // for the first host byte (RXNE). No slave DMA.
+                            self.state = I2cState::SlaveActive { is_read };
+                            if is_read {
+                                self.sr1 |= 1 << 7; // TXE
+                                self.sr2 |= 1 << 2; // TRA=1 (transmitter)
+                            } else {
+                                self.sr2 &= !(1 << 2); // TRA=0 (receiver)
+                            }
+                            None
+                        }
+                        s => { self.state = s; None }
                     };
-                    if is_read {
-                        self.sr1 |= 1 << 6; // RXNE
-                        self.sr2 &= !(1 << 2); // TRA=0 (receiver)
-                        if self.cr2 & (1 << 11) != 0 {
-                            let ch = self.resolve_dma_channel(sys, false);
-                            if ch != 0 { sys.p.dma_request(sys, ch as u32); }
-                        }
-                    } else {
-                        self.sr1 |= 1 << 7; // TXE
-                        self.sr2 |= 1 << 2; // TRA=1 (transmitter)
-                        if self.cr2 & (1 << 11) != 0 {
-                            let ch = self.resolve_dma_channel(sys, true);
-                            if ch != 0 { sys.p.dma_request(sys, ch as u32); }
+                    if let Some(is_read) = addr_kind {
+                        if is_read {
+                            self.sr1 |= 1 << 6; // RXNE
+                            self.sr2 &= !(1 << 2); // TRA=0 (receiver)
+                            if self.cr2 & (1 << 11) != 0 {
+                                let ch = self.resolve_dma_channel(sys, false);
+                                if ch != 0 { sys.p.dma_request(sys, ch as u32); }
+                            }
+                        } else {
+                            self.sr1 |= 1 << 7; // TXE
+                            self.sr2 |= 1 << 2; // TRA=1 (transmitter)
+                            if self.cr2 & (1 << 11) != 0 {
+                                let ch = self.resolve_dma_channel(sys, true);
+                                if ch != 0 { sys.p.dma_request(sys, ch as u32); }
+                            }
                         }
                     }
                     self.fire_interrupts(sys);
@@ -242,6 +377,12 @@ impl Peripheral for I2c {
                 let prev_start = self.cr1 & (1 << 8);
                 let prev_pe = self.cr1 & 1;
                 self.cr1 = value;
+
+                // STOPF clear: SR1 read followed by any CR1 write.
+                if self.stopf_armed {
+                    self.sr1 &= !(1 << 4);
+                    self.stopf_armed = false;
+                }
 
                 // SW reset (bit 15)
                 if value & (1 << 15) != 0 {
@@ -381,6 +522,13 @@ impl Peripheral for I2c {
                             let ch = self.resolve_dma_channel(sys, true);
                             if ch != 0 { sys.p.dma_request(sys, ch as u32); }
                         }
+                        self.fire_interrupts(sys);
+                    }
+                    I2cState::SlaveActive { is_read: true } => {
+                        // Slave transmitter: firmware loads the next byte
+                        // for the host to read; TXE clears on DR write.
+                        self.dr = value & 0xFF;
+                        self.sr1 &= !(1 << 7);
                         self.fire_interrupts(sys);
                     }
                     _ => {}

@@ -20,7 +20,7 @@ SPI3, GPIOE-G) are harmless supersets, marked *(S)* below.
 | WWDG | 0x40002C00 | Full | Counter + reset + early-wakeup interrupt (EWI → IRQ0) |
 | IWDG | 0x40003000 | Full | Down-counter + reset; runs through STOP/STANDBY |
 | USART1-3, UART4/5 | APB1/2 | Full | Byte-time pacing, RXNE/TXE IRQs, DMA channels (incl. DMA2 for UART4/5) |
-| I2C1/2 | APB1 | Full | Master TX/RX state machine; **no 10-bit addressing, no slave mode** (OAR registers store only) |
+| I2C1/2 | APB1 | Full | Master TX/RX state machine + slave mode (host inject: OAR match, ADDR/STOPF, RXNE/TXE, EV IRQs); **no 10-bit addressing** (OAR registers store only) |
 | USB (FS device) | 0x40005C00 | Full | EP0-7R toggle semantics, CNTR masks, ISTR (W0C flags; CTR/DIR/EP_ID derived), DADDR, BTABLE, 512 B PMA (byte-exact), RESET on FRES release, SETUP/OUT injection with DTOG sequencing, IN completion as `UsbIn` event + IRQ20. SOF engine (FNR/RXDP, SOF/SUSP/WKUP IRQs, wakeup IRQ42, auto-suspend, RESUME), double-buffered bulk endpoints. Still out: isochronous endpoints (treated as bulk) |
 | CAN1 (+CAN2 via F105 SVD) | APB1 | Full | Mailboxes, ID-list + mask filters, TX/RX IRQs, RX injection |
 | BKP | 0x40006C00 | Full | Backup registers (RM0008 map) + tamper pin (TPE/TPAL, IRQ2, DR clear) |
@@ -37,14 +37,14 @@ SPI3, GPIOE-G) are harmless supersets, marked *(S)* below.
 | CRC | 0x40023000 | Full | |
 | FSMC | 0xA0000000 | Full (S) | 7 banks, MBKEN/WREN, all widths, NAND ECC accumulator (ECCR2/3, self-consistent) |
 | NVIC / STK / SCB | 0xE000Exxx | Full | Priority dispatch, SysTick debt, SHPR/SHCSR, faults, deep sleep |
-| SCB_ACTRL | 0xE000E008 | Missing | Aux control (DISMCYCINT/DISFOLD — cycle-count subtilities only) |
+| SCB_ACTRL | 0xE000E008 | Full | RW store (DISMCYCINT/DISFOLD mask 0x7, reset 0); no timing effect — cycle counts are instruction-exact by construction |
 | NVIC_STIR | 0xE000EF00 | Full | Software-triggered IRQs (WO, INTID 9 bits, routed to pending) |
 | MPU | 0xE000ED90 | Full | 8 regions, RNR/VALID/aliases, priority, subregions, AP/XN, background, PPB rules, MMFSR/MMFAR, MemManage/HardFault escalation (see docs/CPU.md) |
 | DBG / DBGMCU | 0xE0042000 | Missing | Intentional: debug/trace has no headless meaning |
 | ETHERNET_MAC/MMC/PTP/DMA | 0x40028xxx | Skipped | Correct: no F1 silicon has Ethernet (ST SVD quirk) |
 | OTG_FS_* | 0x50000xxx | Skipped | Correct: F103 has FS-device USB only, no OTG (SVD quirk) |
 
-Score: of ~40 real peripherals, **39 Full, 1 Partial, 0 Stubs**, 4 intentionally missing/skipped.
+Score: of ~40 real peripherals, **40 Full, 1 Partial, 0 Stubs**, 3 intentionally missing/skipped.
 
 The remaining Partial is the RCC clock tree (all enable/reset bits work; the
 MHz value behind the fixed instruction budget is now queryable via
@@ -125,11 +125,12 @@ every real Blue Pill storage project uses SD.
 
 ## 5. Test coverage of the above
 
-- `tests/test_all.mjs` (497): SDIO init/R/W/IRQ/DMA/no-card/SVD; DMA global
+- `tests/test_all.mjs` (507): SDIO init/R/W/IRQ/DMA/no-card/SVD; DMA global
   streams; WWDG EWI; PVD edges; RTC second/overflow + flags; RCC clock decode;
   tamper; USB toggles/RESET/control/bulk/IRQ/SOF/suspend/double-buffer; TIM
-  DMA-burst window; everything in §1 marked Full has a group.
+  DMA-burst window; CAN TX edge-trigger (no-re-pend); ACTRL store; ADC temp/
+  VREFINT nominals; everything in §1 marked Full has a group.
 - `tests/canary.mjs` + 200M runs (both paths): 39/39 real-firmware checks.
 - `tests/test_pwm_wave.mjs` pins the millis() rate end to end (8 exact wave
   steps in a fixed 70M budget — catches SysTick under-delivery).
-- Deliberately untested: DBG/ACTRL (absent), eMMC path, USB isochronous.
+- Deliberately untested: DBG (absent), eMMC path, USB isochronous.

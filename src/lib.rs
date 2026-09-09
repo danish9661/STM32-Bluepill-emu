@@ -484,6 +484,40 @@ pub fn i2c_inject_rx(channel: u8, bytes: &[u8]) {
     if let Some(sys) = try_sys() { sys.i2c_inject_rx(channel, bytes); }
 }
 
+/// Host-side I2C slave transactions: address this peripheral as a slave
+/// from an external host (see `I2C1`/`I2C2` slave docs). Start NACKs when
+/// the peripheral is disabled/busy/unmatched; write NACKs when not in
+/// slave-RX, RXNE unread or ACK cleared; read returns -1 when not in
+/// slave-TX or DR empty (stretch equivalents).
+#[wasm_bindgen]
+pub fn i2c_inject_start(channel: u8, addr: u8, is_read: bool) -> bool {
+    match try_sys() {
+        Some(sys) => sys.p.i2c_inject_start(sys, channel as u32, addr, is_read),
+        None => false,
+    }
+}
+#[wasm_bindgen]
+pub fn i2c_inject_write(channel: u8, byte: u8) -> bool {
+    match try_sys() {
+        Some(sys) => sys.p.i2c_inject_write(sys, channel as u32, byte),
+        None => false,
+    }
+}
+#[wasm_bindgen]
+pub fn i2c_inject_read(channel: u8) -> i32 {
+    match try_sys() {
+        Some(sys) => sys.p.i2c_inject_read(sys, channel as u32).map(|b| b as i32).unwrap_or(-1),
+        None => -1,
+    }
+}
+#[wasm_bindgen]
+pub fn i2c_inject_stop(channel: u8) -> bool {
+    match try_sys() {
+        Some(sys) => sys.p.i2c_inject_stop(sys, channel as u32),
+        None => false,
+    }
+}
+
 /// Set an analog wire voltage on a GPIO pin (12-bit, 0xFFFF clears it).
 /// ADC channels mapped to the pin then sample this voltage with an RC
 /// sample-and-hold model instead of the injected simulation value.
@@ -764,3 +798,4 @@ pub fn i2c_oled_writes(peripheral: &str, address: u32) -> u64 {
     }
     0
 }
+

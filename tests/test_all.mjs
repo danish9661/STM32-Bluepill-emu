@@ -9,6 +9,7 @@ const { init, init_svd, periph_read, periph_write, tick, step_batch, has_pending
         add_fsmc_bank, gpio_set_analog, adc_set_rc_tau, register_js_peripheral,
         add_sd_card, reset_ext_devices, rcc_sysclk_hz, rcc_fail_hse, add_i2c_eeprom,
         drain_events, usb_inject_setup, usb_inject_out, pwm_duty,
+        i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop,
         gpio_take_pin_events } = periph;
 
 let passed = 0, failed = 0;
@@ -384,6 +385,21 @@ assert(has_pending_interrupt() && get_next_pending_interrupt() === 18,
   'ADC AWD interrupt pending (IRQ 18)');
 clear_current_interrupt();
 
+// Internal channels: temp sensor (ch16 ~25C: V25=1.43V -> 0x6EE),
+// VREFINT (ch17 1.2V -> 0x5D2); TSVREFE (CR2 bit 23) gates them on HW,
+// the model returns nominals directly.
+reset();
+periph_write(0x40021018, 4, 1 << 9);   // ADC1EN
+adc_set_rc_tau(1);                     // fast cap: nominals settle in one shot
+periph_write(ADC1 + 0x34, 4, 16);      // SQ1 = ch16 (temp sensor)
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 22));
+step_batch(14);
+assert_eq(periph_read(ADC1 + 0x4C, 4) & 0xFFF, 0x6EE, 'ADC ch16 temp ~25C (0x6EE)');
+periph_write(ADC1 + 0x34, 4, 17);      // SQ1 = ch17 (VREFINT)
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 22));
+step_batch(14);
+assert_eq(periph_read(ADC1 + 0x4C, 4) & 0xFFF, 0x5D2, 'ADC ch17 VREFINT (0x5D2)');
+
 // External trigger: TIM1 update -> TRGO -> ADC (EXTTRIG + EXTSEL=TIM1_TRGO)
 reset();
 periph_write(0x40021018, 4, (1 << 9) | (1 << 11)); // ADC1EN + TIM1EN
@@ -741,6 +757,13 @@ periph_write(0xE000EF00, 4, 6); // EXTI0 = IRQ 6
 assert_eq(periph_read(NVIC + 0x100, 4) & (1 << 6), 1 << 6, 'STIR pends EXTI0 in ISPR0');
 assert_eq(periph_read(0xE000EF00, 4), 0, 'STIR reads 0 (write-only)');
 
+// SCB ACTRL (0xE000E008, RW): DISMCYCINT/DISFOLD stored, no timing effect
+assert_eq(periph_read(0xE000E008, 4), 0, 'ACTRL reset value 0');
+periph_write(0xE000E008, 4, 0x5);
+assert_eq(periph_read(0xE000E008, 4), 0x5, 'ACTRL stores DISMCYCINT+DISFOLD');
+periph_write(0xE000E008, 4, 0xFFFFFFFF);
+assert_eq(periph_read(0xE000E008, 4), 0x7, 'ACTRL masks to implemented bits');
+
 // ============================================================
 // CRC
 // ============================================================
@@ -898,6 +921,35 @@ assert_eq(periph_read(I2C1 + 0x18, 4) & (1 << 4), 1 << 4, 'I2C SR2 GENCALL set')
 periph_write(I2C1 + 0x00, 4, 1 | (1 << 9)); // STOP
 reset();
 
+// Slave mode: host addresses this peripheral (OAR1 0x42) via inject API
+periph_write(0x4002101C, 4, 1 << 21); // I2C1 clock
+periph_write(I2C1 + 0x00, 4, 1 | (1 << 10)); // PE + ACK
+periph_write(I2C1 + 0x08, 4, 0x42 << 1); // OAR1 = 0x42
+assert_eq(i2c_inject_start(1, 0x43, false), false, 'slave NACKs unmatched address');
+assert_eq(i2c_inject_start(1, 0x42, false), true, 'slave ACKs OAR1 match (write)');
+assert_eq(periph_read(I2C1 + 0x14, 4) & (1 << 1), 1 << 1, 'slave ADDR set on match');
+assert_eq(periph_read(I2C1 + 0x18, 4) & 0x7, 0x2, 'slave SR2 BUSY, MSL=0, TRA=0');
+assert_eq(periph_read(I2C1 + 0x14, 4) & (1 << 1), 0, 'slave ADDR clears on SR1+SR2');
+assert_eq(i2c_inject_write(1, 0x5A), true, 'slave accepts host byte');
+assert_eq(periph_read(I2C1 + 0x14, 4) & (1 << 6), 1 << 6, 'slave RXNE set');
+assert_eq(i2c_inject_write(1, 0x5B), false, 'slave NACKs while RXNE unread');
+assert_eq(periph_read(I2C1 + 0x10, 4) & 0xFF, 0x5A, 'slave DR holds host byte');
+assert_eq(i2c_inject_write(1, 0x5B), true, 'slave accepts after DR read');
+assert_eq(i2c_inject_stop(1), true, 'slave STOP accepted');
+assert_eq(periph_read(I2C1 + 0x14, 4) & (1 << 4), 1 << 4, 'slave STOPF set');
+periph_write(I2C1 + 0x00, 4, 1 | (1 << 10)); // CR1 write clears STOPF
+assert_eq(periph_read(I2C1 + 0x14, 4) & (1 << 4), 0, 'slave STOPF clears on SR1+CR1');
+// Slave transmitter: host reads firmware-loaded bytes
+assert_eq(i2c_inject_start(1, 0x42, true), true, 'slave ACKs OAR1 match (read)');
+periph_read(I2C1 + 0x14, 4); periph_read(I2C1 + 0x18, 4); // clear ADDR
+assert_eq(periph_read(I2C1 + 0x14, 4) & (1 << 7), 1 << 7, 'slave TXE armed after ADDR clear');
+assert_eq(i2c_inject_read(1), -1, 'slave read stretches while DR empty');
+periph_write(I2C1 + 0x10, 4, 0xA5); // firmware loads DR
+assert_eq(i2c_inject_read(1), 0xA5, 'slave serves loaded byte');
+assert_eq(i2c_inject_read(1), -1, 'slave TXE re-arms after byte');
+assert_eq(i2c_inject_stop(1), true, 'slave STOP after read');
+reset();
+
 // ============================================================
 // RTC
 // ============================================================
@@ -974,6 +1026,24 @@ assert_eq(periph_read(CAN1 + 0x00, 4) & 1, 1, 'CAN1 MCR INRQ');
 // Write CAN BTR
 periph_write(CAN1 + 0x1C, 4, 0x001C0033);
 assert_eq(periph_read(CAN1 + 0x1C, 4), 0x001C0033, 'CAN1 BTR');
+
+// CAN TX IRQ is edge-triggered (RQCP 0->1 / TMEIE rising), never a storm
+const IRQ_TX = 1 << 19; // CAN1_TX is IRQ19 -> ISPR0/ICPR0 bit19
+periph_write(CAN1 + 0x00, 4, 0); // leave init mode
+periph_write(NVIC + 0x00, 4, IRQ_TX); // ISER0: enable IRQ19
+periph_write(CAN1 + 0x180, 4, (0x123 << 21) | 1); // TI0R TXRQ, TMEIE=0
+assert_eq(periph_read(NVIC + 0x100, 4) & IRQ_TX, 0, 'no TX IRQ while TMEIE=0');
+periph_write(CAN1 + 0x14, 4, 1); // IER TMEIE 0->1 with completion latched
+assert_eq(periph_read(NVIC + 0x100, 4) & IRQ_TX, IRQ_TX, 'TX IRQ pends once on TMEIE rising');
+periph_write(NVIC + 0x180, 4, IRQ_TX); // ICPR0: retire it
+periph_write(CAN1 + 0x14, 4, 1); // IER same value: no rising edge
+assert_eq(periph_read(NVIC + 0x100, 4) & IRQ_TX, 0, 'no TX re-pend without edge');
+periph_write(CAN1 + 0x0C, 4, 0x20); // RF0R release (event-write fire source)
+assert_eq(periph_read(NVIC + 0x100, 4) & IRQ_TX, 0, 'no TX re-pend on RX event');
+periph_write(CAN1 + 0x08, 4, 0x00070707); // TSR W1C: clear completion
+periph_write(CAN1 + 0x14, 4, 0);
+periph_write(CAN1 + 0x14, 4, 1); // rising again, nothing outstanding
+assert_eq(periph_read(NVIC + 0x100, 4) & IRQ_TX, 0, 'no TX pend after W1C clear');
 
 // ============================================================
 // DMA

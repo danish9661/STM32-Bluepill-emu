@@ -200,7 +200,7 @@ export async function createEmulator(opts = {}) {
     gpio_set_input, gpio_read_input,
     can_inject_message, adc_set_sim_value, gpio_set_analog, adc_set_rc_tau,
     touchscreen_set_touch, pwm_duty, raise_fault,
-     i2c_oled_fb, lcd_fb, gpio_take_pin_events,     drain_events, spi_inject_miso, i2c_inject_rx, usb_inject_setup, usb_inject_out,
+     i2c_oled_fb, lcd_fb, gpio_take_pin_events,     drain_events, spi_inject_miso, i2c_inject_rx, i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop, usb_inject_setup, usb_inject_out,
     rustcpu_init, rustcpu_load, rustcpu_run, rustcpu_fault, rustcpu_fault_clear, rustcpu_dispatch,
     rustcpu_regs, rustcpu_set_pc, rustcpu_mem_read, rustcpu_mem_write, rustcpu_dma_pump, rustcpu_i2c_hook_fired,
     rustcpu_write_tap, rustcpu_take_writes } = periph;
@@ -606,6 +606,18 @@ export async function createEmulator(opts = {}) {
 
         /** Queue injected RX bytes for an I2C channel (virtual device -> MCU). */
         i2cInjectRx(channel, bytes) { i2c_inject_rx(channel, bytes); },
+
+        /** Host START + address this I2C peripheral as a slave. Returns false (NACK) when busy/disabled/unmatched. */
+        i2cInjectStart(channel, addr, isRead) { return i2c_inject_start(channel, addr, !!isRead); },
+
+        /** Host data byte to an addressed slave (master-write). Returns false (NACK) when not ready. */
+        i2cInjectWrite(channel, byte) { return i2c_inject_write(channel, byte); },
+
+        /** Host read from an addressed slave (master-read). Returns -1 when DR empty (stretch). */
+        i2cInjectRead(channel) { return i2c_inject_read(channel); },
+
+        /** Host STOP to an addressed slave. */
+        i2cInjectStop(channel) { return i2c_inject_stop(channel); },
 
         /** Inject a USB SETUP packet (8 bytes) into EP0 (host -> device). Returns false when NAKed. */
         usbInjectSetup(bytes) { return usb_inject_setup(bytes); },

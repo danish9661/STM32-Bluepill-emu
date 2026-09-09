@@ -129,10 +129,12 @@ impl Can {
 
     fn fire_interrupts(&mut self, sys: &System) {
         let base = self.irq_base;
-        // TX (TMEIE bit 0)
-        if self.ier & 0x01 != 0 && self.tsr & 0x0700_0000 != 0 {
-            sys.p.nvic.borrow_mut().set_intr_pending(base);
-        }
+        // NOTE: no TX arm here on purpose. The old code pended TX on the
+        // LEVEL of TSR bits 24-26 — but those are CODE[1:0]/TME0, not RQCP
+        // (TME0 is set at reset!), so any TMEIE-enabled run stormed IRQ37
+        // on every later CAN event write. Real HW pends on the RQCP 0->1
+        // edge (and on TMEIE rising with RQCP already set); both edges pend
+        // explicitly at their sites below, exactly once each.
         // RX0 (FMPIE0 bit 1, FFIE0 bit 2, FOVIE0 bit 3)
         if self.ier & 0x0E != 0 && self.rf0r & 0x03 != 0 {
             sys.p.nvic.borrow_mut().set_intr_pending(base + 1);
@@ -244,7 +246,15 @@ impl Peripheral for Can {
                 self.fire_interrupts(sys);
             }
             0x014 => {
+                // TMEIE 0->1 with a completion already latched (TSR TXOK-ish
+                // bits — the firmware-visible completion flags) pends once,
+                // like silicon; later event writes must NOT re-pend (level
+                // storm). Completion clears via the TSR W1C arm below.
+                let tme_rising = (value & !self.ier) & 0x01 != 0;
                 self.ier = value & 0x7FF;
+                if tme_rising && self.tsr & 0x0007_0707 != 0 {
+                    sys.p.nvic.borrow_mut().set_intr_pending(self.irq_base);
+                }
                 self.fire_interrupts(sys);
             }
             0x01C => self.btr = value, // incl. SILM/LBKM (reserved bits stored, as before)
@@ -277,6 +287,11 @@ impl Peripheral for Can {
                     // (through the filters, like silicon).
                     if self.btr & (1 << 30) != 0 && self.btr & (1u32 << 31) == 0 {
                         self.inject_message(sys, mb.tir, mb.tdtr, mb.tdlr, mb.tdhr);
+                    }
+                    // TX completion edge: pend the TX IRQ once if TMEIE is
+                    // armed (RQCP 0->1 equivalent; see fire_interrupts note).
+                    if self.ier & 0x01 != 0 {
+                        sys.p.nvic.borrow_mut().set_intr_pending(self.irq_base);
                     }
                     self.fire_interrupts(sys);
                 }

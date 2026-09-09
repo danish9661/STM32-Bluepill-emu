@@ -322,6 +322,8 @@ select:focus { outline: none; border-color: #0ea5e9; }
                     <option value="stopwatch">Stopwatch (PB13 button + TIM2)</option>
                     <option value="usb_cdc">USB CDC Serial (enumerate + echo)</option>
                     <option value="pwm_wave">TIM DMA-Burst PWM Wave (TIM3+DMA1)</option>
+                    <option value="i2c_slave">I2C Slave @ 0x42 (write + read)</option>
+                    <option value="mini_rtos">Mini-RTOS (PendSV preemptive tasks)</option>
                 </select>
                 <select id="chipSelect" title="Chip / board (rp2040js-style: pick the peripheral map)">
                     <option value="stm32f103c8">STM32F103C8 (builtin map)</option>
@@ -392,6 +394,18 @@ select:focus { outline: none; border-color: #0ea5e9; }
             <button id="usbEchoBtn" disabled>Send</button>
         </div>
         <div class="ws-count" id="usbStatus">not enumerated</div>
+    </div>
+</div>
+<div class="fullrow">
+    <div class="card" id="i2cCard" hidden>
+        <h2>I2C host · slave @ 0x42</h2>
+        <div class="toolbar">
+            <input id="i2cWriteInput" placeholder="hex bytes, e.g. 41 42" value="41 42">
+            <button id="i2cWriteBtn" class="primary">Write slave</button>
+            <input id="i2cReadCount" placeholder="N" value="2" size="3">
+            <button id="i2cReadBtn" class="primary">Read slave</button>
+        </div>
+        <div class="ws-count" id="i2cStatus">idle</div>
     </div>
 </div>
 </div>
@@ -496,7 +510,9 @@ function handleWorkerMsg(e) {
     }
     // USB CDC host tap
     if (m.usbIn) for (const p of m.usbIn) usbInbox.push(p);
+    if (m.usbAck !== null && m.usbAck !== undefined) lastHostAck = m.usbAck;
     if (usbEnum || usbEchoWait) usbEnumAdvance();
+    if (i2cSeq) i2cAdvance();
     // showcase canvases from worker snapshot
     if (m.oledFb) {
       try {
@@ -1023,6 +1039,8 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
     autopilot = false;
     usbListenMain = false;
     usbInbox = []; usbEnum = null; usbEnumerated = false;
+    i2cSeq = null; lastHostAck = null;
+    $('i2cStatus').textContent = 'idle';
     runSteps = 0;
     autoBytes = [];
     canInjected = false;
@@ -1035,6 +1053,7 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
     $('showcaseCard').hidden = true;
     $('wsCard').hidden = true;
     $('usbCard').hidden = true;
+    $('i2cCard').hidden = true;
     $('usbEchoInput').disabled = true;
     $('usbEchoBtn').disabled = true;
     $('usbStatus').textContent = 'not enumerated';
@@ -1180,6 +1199,7 @@ function runLoop() {
     }
     pollUart();
     if (usbListenMain) { usbDrainMain(); if (usbEnum || usbEchoWait) usbEnumAdvance(); }
+    if (i2cSeq) i2cAdvance();
     if (autopilot) {
         const termText = terminal.textContent;
         const sumM = termText.match(/SUMMARY\s+pass=(\d+)\s+fail=(\d+)/);
@@ -1332,6 +1352,15 @@ $('loadPresetBtn').addEventListener('click', async () => {
             const buf = await fetch('arduino_pwm_wave.elf').then(r => r.arrayBuffer());
             await initEmulator(new Uint8Array(buf), 'arduino_pwm_wave.elf (TIM DMA-burst PWM wave)');
             log('Press Run — TIM3 CH1 duty follows an 8-step triangle; each step is burst-DMAed from RAM (duty=N ccr=N).', 't-in');
+        } else if (preset === 'i2c_slave') {
+            const buf = await fetch('arduino_i2c_slave.elf').then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(buf), 'arduino_i2c_slave.elf (I2C slave @ 0x42)');
+            $('i2cCard').hidden = false;
+            log('Press Run — then Write slave (bytes print via onReceive) or Read slave (onRequest replies).', 't-in');
+        } else if (preset === 'mini_rtos') {
+            const buf = await fetch('arduino_mini_rtos.elf').then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(buf), 'arduino_mini_rtos.elf (preemptive tasks)');
+            log('Press Run — tasks A/B preempt every 1ms via PendSV; sequences must stay gap-free.', 't-in');
         }
     } catch (e) {
         log(`Failed to load preset: ${e.message || e}`, 't-err');
@@ -1359,6 +1388,84 @@ const usbEchoSend = () => {
 };
 $('usbEchoBtn').addEventListener('click', usbEchoSend);
 $('usbEchoInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') usbEchoSend(); });
+
+// ---- I2C host driver (page i2c_slave preset): single-flight command
+// sequencer over i2cInject* (worker path via message+ack, direct path
+// synchronous). Stretches/NACKs retry a few frames before giving up.
+let lastHostAck = null;
+let i2cSeq = null;
+function i2cSend(type, payload) {
+    if (useWorker && worker) {
+        // explicit wire fields only: op objects carry closures (check/onOk)
+        // that structured-clone cannot serialize.
+        if (type === 'i2cStart') worker.postMessage({ type, channel: 1, addr: payload.addr, isRead: !!payload.isRead });
+        else if (type === 'i2cWrite') worker.postMessage({ type, channel: 1, byte: payload.byte });
+        else if (type === 'i2cRead') worker.postMessage({ type, channel: 1 });
+        else if (type === 'i2cStop') worker.postMessage({ type, channel: 1 });
+        return null;
+    }
+    try {
+        if (!emu) return false;
+        if (type === 'i2cStart') return !!emu.i2cInjectStart(1, payload.addr, !!payload.isRead);
+        if (type === 'i2cWrite') return !!emu.i2cInjectWrite(1, payload.byte);
+        if (type === 'i2cRead') return emu.i2cInjectRead(1);
+        if (type === 'i2cStop') return !!emu.i2cInjectStop(1);
+    } catch { return false; }
+    return false;
+}
+function i2cStepResult(s, op, ack) {
+    const ok = op.check ? op.check(ack) : !!ack;
+    if (ok) { s.i++; if (op.onOk) op.onOk(ack); s.wait = 1; }
+    else if (++op.retries > (op.maxRetries || 6)) {
+        log(`I2C host: ${op.name} failed — slave busy or NACK`, 't-err');
+        $('i2cStatus').textContent = 'failed: ' + op.name;
+        i2cSeq = null;
+    } else { s.wait = 2; }
+}
+function i2cAdvance() {
+    const s = i2cSeq;
+    if (!s) return;
+    if (s.wait > 0) { s.wait--; return; }
+    const op = s.ops[s.i];
+    if (!op) { i2cSeq = null; if (s.finish) s.finish(); $('i2cStatus').textContent = s.doneText; return; }
+    if (op.sent === undefined) {
+        const r = i2cSend(op.type, op);
+        if (r !== null) i2cStepResult(s, op, r);
+        else { op.sent = true; op.ackMiss = 0; lastHostAck = undefined; s.wait = 2; }
+        return;
+    }
+    if (lastHostAck === undefined) {
+        // worker ack not yet arrived: keep waiting (bounded, then retry op)
+        if (++op.ackMiss > 40) { op.sent = undefined; i2cStepResult(s, op, null); }
+        return;
+    }
+    op.sent = undefined;
+    const ack = lastHostAck;
+    lastHostAck = undefined;
+    i2cStepResult(s, op, ack);
+}
+$('i2cWriteBtn').addEventListener('click', () => {
+    if (!running) { log('Press Run first.', 't-err'); return; }
+    const bytes = $('i2cWriteInput').value.trim().split(/\s+/).map(h => parseInt(h, 16)).filter(n => n >= 0 && n < 256);
+    if (!bytes.length) return;
+    const ops = [{ type: 'i2cStart', addr: 0x42, isRead: false, name: 'START+addr', retries: 0 }];
+    for (const b of bytes) ops.push({ type: 'i2cWrite', byte: b, name: 'write byte', retries: 0, maxRetries: 10 });
+    ops.push({ type: 'i2cStop', name: 'STOP', retries: 0 });
+    $('i2cStatus').textContent = 'writing…';
+    i2cSeq = { ops, i: 0, wait: 0, doneText: `wrote ${bytes.length} byte(s) — see onReceive print` };
+});
+$('i2cReadBtn').addEventListener('click', () => {
+    if (!running) { log('Press Run first.', 't-err'); return; }
+    const n = Math.max(1, Math.min(16, parseInt($('i2cReadCount').value, 10) || 2));
+    const got = [];
+    const ops = [{ type: 'i2cStart', addr: 0x42, isRead: true, name: 'START+addr', retries: 0 }];
+    for (let k = 0; k < n; k++) ops.push({ type: 'i2cRead', name: 'read byte', retries: 0, maxRetries: 12,
+        check: (ack) => ack !== null && ack >= 0, onOk: (ack) => got.push(ack) });
+    ops.push({ type: 'i2cStop', name: 'STOP', retries: 0 });
+    $('i2cStatus').textContent = 'reading…';
+    i2cSeq = { ops, i: 0, wait: 0, doneText: 'read done',
+        finish: () => log(`I2C host read: ${got.map(b => b.toString(16).padStart(2, '0')).join(' ')}`, 't-out') };
+});
 btnWidget.addEventListener('mousedown', () => { if (useWorker && worker) worker.postMessage({ type: 'gpioSetInput', port: 1, pin: 13, value: true }); else if (emu) emu.gpioSetInput(1, 13, true); });
 const btnUp = () => { if (useWorker && worker) worker.postMessage({ type: 'gpioSetInput', port: 1, pin: 13, value: false }); else if (emu) emu.gpioSetInput(1, 13, false); };
 btnWidget.addEventListener('mouseup', btnUp);

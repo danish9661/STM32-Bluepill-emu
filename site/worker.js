@@ -107,6 +107,30 @@ async function handleMessage(e) {
       usbAck = a;
       break;
     }
+    case 'i2cStart': {
+      let a = false;
+      try { a = !!emu.i2cInjectStart(msg.channel, msg.addr, !!msg.isRead); } catch {}
+      usbAck = a;
+      break;
+    }
+    case 'i2cWrite': {
+      let a = false;
+      try { a = !!emu.i2cInjectWrite(msg.channel, msg.byte); } catch {}
+      usbAck = a;
+      break;
+    }
+    case 'i2cRead': {
+      let a = -1;
+      try { a = emu.i2cInjectRead(msg.channel); } catch {}
+      usbAck = a;
+      break;
+    }
+    case 'i2cStop': {
+      let a = false;
+      try { a = !!emu.i2cInjectStop(msg.channel); } catch {}
+      usbAck = a;
+      break;
+    }
     case 'usbOut': {
       let a = false;
       try { a = !!emu.usbInjectOut(msg.ep, msg.bytes); } catch {}
