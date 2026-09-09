@@ -84,8 +84,11 @@ it directly. Mixing these up zeroes `SystemCoreClock` and breaks
   stack (PSP when thread+PSP — this is what makes RTOS task stacks work),
   runs the handler on MSP with `LR` = `EXC_RETURN` selecting the origin stack,
   loads the handler through VTOR. Clears `sleeping` (exception entry wakes).
-- `exception_return(exc)`: unstacks from the bank selected by EXC_RETURN
-  (mid-handler `msr psp` task switches honored), restores APSR + IT state,
+- `exception_return(exc)`: unstacks from live `r13` for nested (F1) and
+  thread-MSP (F9) returns — in handler mode `r13` IS the stack, while the
+  banks may still point at an already-consumed inner frame (unstacking the
+  bank derailed the PC into unmapped space); only PSP (FD) returns use the
+  bank, which task switches retarget. Restores APSR + IT state,
   keeps `CONTROL.SPSEL` coherent with the return stack (untouched on
   handler-to-handler returns), resumes the outer vector when nested,
   balances the NVIC active stack, drains SysTick debt.

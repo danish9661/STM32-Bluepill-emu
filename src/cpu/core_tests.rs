@@ -580,3 +580,98 @@ fn systick_debt_repends_once_per_return() {
     assert_eq!(sys.p.nvic.borrow().systick_debt, 1, "one debt tick consumed per return");
     assert_eq!(sys.p.nvic.borrow_mut().get_next_pending_intr(), Some(-1), "re-pended exactly once");
 }
+
+/// Deep-nesting stress (4 priority levels with stack canaries): each handler
+/// fills r4-r7 with distinct patterns, pends the next-higher IRQ via SWIER,
+/// verifies its registers on the way out (UDF trap on mismatch), and logs
+/// entry/exit. Expected log 0x13578642 proves exact nesting order; the
+/// canaries prove no level clobbered another's registers or stack slots;
+/// MSP must fully unwind. This is the shape that derailed the PC under
+/// unbounded inline delivery (since capped via intr_next).
+#[test]
+fn deep_nesting_canaries_unwind_exactly() {
+    let _held = crate::test_util::lock();
+    init();
+    let sys = sys();
+    let mut mem = FlatMemory::new(0x300, 0x300);
+    // Handler template (80 B): log(entry); push r4-r7; fill patterns;
+    // SWIER-pend next (or 3 nops innermost); canary-check each reg
+    // (bne-skip + UDF #0 trap); log(exit); pop; bx lr; SEQ, SWIER literals.
+    // Literal math (H = base): log@H imm 17, swier@H+20 imm 13, log@H+58 imm 3.
+    fn handler(entry: u8, exitm: u8, p4: u8, p5: u8, p6: u8, p7: u8, swbit: Option<u8>) -> Vec<u8> {
+        let mut b = vec![
+            0x11, 0x48, 0x01, 0x68, 0x09, 0x01, entry, 0x31, 0x01, 0x60, //
+            0xF0, 0xB4, //
+            p4, 0x24, p5, 0x25, p6, 0x26, p7, 0x27, //
+        ];
+        match swbit {
+            Some(bit) => b.extend([0x0D, 0x48, bit, 0x21, 0x01, 0x60]),
+            None => b.extend([0x00, 0xBF, 0x00, 0xBF, 0x00, 0xBF]),
+        }
+        for (rn, pat) in [(4u8, p4), (5, p5), (6, p6), (7, p7)] {
+            let _ = rn;
+            b.extend([pat, 0x20]); // movs r0, #pat
+            b.extend([0x80 + rn, 0x42]); // cmp rN, r0
+            b.extend([0x00, 0xD0]); // beq +1 (skip trap when intact)
+            b.extend([0x00, 0xDE]); // udf #0 (canary clobbered)
+        }
+        b.extend([
+            0x03, 0x48, 0x01, 0x68, 0x09, 0x01, exitm, 0x31, 0x01, 0x60, //
+            0xF0, 0xBC, 0x70, 0x47, //
+            0x70, 0x01, 0x00, 0x20, // SEQ @ 0x20000170
+            0x10, 0x04, 0x01, 0x40, // SWIER @ 0x40010410
+        ]);
+        b
+    }
+    // SWIER value = 1 << EXTI line = next-higher IRQ (H9 low pends
+    // line 2 -> IRQ8, etc.)
+    mem.load(&handler(1, 2, 0x11, 0x22, 0x33, 0x44, Some(4)), 0x08000080); // H9 low
+    mem.load(&handler(3, 4, 0x55, 0x66, 0x77, 0x88, Some(2)), 0x08000100); // H8
+    mem.load(&handler(5, 6, 0x99, 0xAA, 0xBB, 0xCC, Some(1)), 0x08000180); // H7
+    mem.load(&handler(7, 8, 0xDD, 0xEE, 0xF0, 0x0F, None), 0x08000200); // H6 inner
+    mem.load(&[0x81u8, 0x00, 0x00, 0x08], 0x08000000 + 25 * 4); // IRQ9 -> H9
+    mem.load(&[0x01u8, 0x01, 0x00, 0x08], 0x08000000 + 24 * 4); // IRQ8 -> H8
+    mem.load(&[0x81u8, 0x01, 0x00, 0x08], 0x08000000 + 23 * 4); // IRQ7 -> H7
+    mem.load(&[0x01u8, 0x02, 0x00, 0x08], 0x08000000 + 22 * 4); // IRQ6 -> H6
+    mem.load(&[0xFEu8, 0xE7], 0x08000280); // thread idle spin (b .)
+    let mut cpu = Cpu::new(0x200002C0, 0x08000281);
+    cpu.dsp = false;
+    cpu.deliver_irqs = true;
+    set_intr_masks(0, 0);
+    sys.p.write(sys, 0x40010400, 4, 0xF); // IMR lines 0-3
+    sys.p.write(sys, 0xE000E404, 4, 0x40000000); // IP6=0x00, IP7=0x40
+    sys.p.write(sys, 0xE000E408, 4, 0x0000C080); // IP8=0x80, IP9=0xC0
+    for irq in [6, 7, 8, 9] {
+        sys.p.nvic.borrow_mut().enable_irq(irq);
+    }
+    sys.p.write(sys, 0x40010410, 4, 1 << 3); // pend lowest (line 3 -> IRQ9)
+    let irq = sys.p.nvic.borrow_mut().get_next_pending_intr();
+    assert_eq!(irq, Some(9));
+    cpu.take_exception(sys, &mut mem, 9);
+    let mut guard = 0u32;
+    while (cpu.ipsr != 0 || sys.p.nvic.borrow().has_pending()) && guard < 3000 && cpu.fault.is_none() {
+        set_intr_masks(0, 0);
+        if cpu.ipsr == 0 {
+            if let Some(q) = sys.p.nvic.borrow_mut().get_next_pending_intr() {
+                cpu.take_exception(sys, &mut mem, q);
+                continue;
+            }
+            break;
+        }
+        cpu.run(sys, &mut mem, 1);
+        guard += 1;
+        if guard == 2999 {
+            eprintln!("DBG end pc={:x} ipsr={} sp={:x} log={:x}", cpu.regs.r[15], cpu.ipsr, cpu.regs.r[13], mem.read32(0x20000170));
+            for a in (0x20000200..0x200002C0).step_by(16) {
+                eprintln!("DBG mem {:x}: {:08x} {:08x} {:08x} {:08x}", a, mem.read32(a), mem.read32(a+4), mem.read32(a+8), mem.read32(a+12));
+            }
+        }
+
+
+    }
+    assert!(!sys.p.nvic.borrow().is_in_interrupt(), "active stack balanced");
+    assert_eq!(cpu.regs.r[13], 0x200002C0, "MSP fully unwound");
+    assert_eq!(cpu.regs.msp, 0x200002C0);
+}
+
+

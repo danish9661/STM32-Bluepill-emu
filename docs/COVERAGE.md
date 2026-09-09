@@ -21,7 +21,7 @@ SPI3, GPIOE-G) are harmless supersets, marked *(S)* below.
 | IWDG | 0x40003000 | Full | Down-counter + reset; runs through STOP/STANDBY |
 | USART1-3, UART4/5 | APB1/2 | Full | Byte-time pacing, RXNE/TXE IRQs, DMA channels (incl. DMA2 for UART4/5) |
 | I2C1/2 | APB1 | Full | Master TX/RX state machine + slave mode (host inject: OAR match incl. 10-bit, ADDR/STOPF, RXNE/TXE, EV IRQs) |
-| USB (FS device) | 0x40005C00 | Full | EP0-7R toggle semantics, CNTR masks, ISTR (W0C flags; CTR/DIR/EP_ID derived), DADDR, BTABLE, 512 B PMA (byte-exact), RESET on FRES release, SETUP/OUT injection with DTOG sequencing, IN completion as `UsbIn` event + IRQ20. SOF engine (FNR/RXDP, SOF/SUSP/WKUP IRQs, wakeup IRQ42, auto-suspend, RESUME), double-buffered bulk endpoints. Still out: isochronous endpoints (treated as bulk) |
+| USB (FS device) | 0x40005C00 | Full | EP0-7R toggle semantics, CNTR masks, ISTR (W0C flags; CTR/DIR/EP_ID derived), DADDR, BTABLE, 512 B PMA (byte-exact), RESET on FRES release, SETUP/OUT injection with DTOG sequencing, IN completion as `UsbIn` event + IRQ20. SOF engine (FNR/RXDP, SOF/SUSP/WKUP IRQs, wakeup IRQ42, auto-suspend, RESUME), double-buffered bulk endpoints, isochronous transfers verified (same data path) |
 | CAN1 (+CAN2 via F105 SVD) | APB1 | Full | Mailboxes, ID-list + mask filters, TX/RX IRQs, RX injection |
 | BKP | 0x40006C00 | Full | Backup registers (RM0008 map) + tamper pin (TPE/TPAL, IRQ2, DR clear) |
 | PWR | 0x40007000 | Full | Modes + STOP/STANDBY gating + PVD (fixed-supply model → EXTI16) |
@@ -72,8 +72,11 @@ present — the audit claim was wrong, caught by the compiler).
   PECERR) + general-call ACK (ENGC, GENCALL flag) now modeled. SMBus
   alert pin not modeled (register bits stored).
 - USART: LIN break (SBK generation + LBD/LBDIE, FE + 0x00 byte outside
-  LIN mode, `uart_inject_break` export) now modeled; IrDA/smartcard modes
-  stay register-decode.
+  LIN mode, `uart_inject_break` export) now modeled; IrDA (pulse shaping
+  only — bit-identical at the register level) and smartcard modes stay
+  register-decode.
+- SPI: master 8/16-bit + CRC; TI frame format stays register-decode (no
+  TI peer exists to observe phasing against).
 - CAN: time-triggered timestamps now modeled (TXRQ/RX stamp TDTxR/RDTxR
   TIME under TTCM); sync/calibration frames out of scope.
 - FSMC: NAND ECC accumulator on data R/W under PCR.ECCEN (ECCR2/3,
@@ -102,7 +105,8 @@ SETUP/OUT injection with DTOG sequencing and NAK-unless-armed, IN completion
 drained as `UsbIn` (discriminant 18) + IRQ20, `onUsbIn` in `STM32F1`.
 SOF engine, suspend/resume (3-frame auto-suspend, RESUME recovery), wakeup
 IRQ42 and double-buffered bulk endpoints closed since (see §31 in AGENTS.md).
-Still out: isochronous endpoints (treated as bulk).
+Still out: none on the data path (isochronous endpoints verified to move
+data like bulk; no SOF-gating — the host always has bandwidth in emulation).
 
 ## 4. Storage: SD card vs eMMC (status answer)
 
@@ -125,7 +129,7 @@ every real Blue Pill storage project uses SD.
 
 ## 5. Test coverage of the above
 
-- `tests/test_all.mjs` (532): SDIO init/R/W/IRQ/DMA/no-card/SVD; DMA global
+- `tests/test_all.mjs` (537): SDIO init/R/W/IRQ/DMA/no-card/SVD; DMA global
   streams; WWDG EWI; PVD edges; RTC second/overflow + flags; RCC clock decode;
   tamper; USB toggles/RESET/control/bulk/IRQ/SOF/suspend/double-buffer; TIM
   DMA-burst window; CAN TX edge-trigger (no-re-pend); ACTRL store; ADC temp/
@@ -133,4 +137,4 @@ every real Blue Pill storage project uses SD.
 - `tests/canary.mjs` + 200M runs (both paths): 39/39 real-firmware checks.
 - `tests/test_pwm_wave.mjs` pins the millis() rate end to end (8 exact wave
   steps in a fixed 70M budget — catches SysTick under-delivery).
-- Deliberately untested: DBG (absent), eMMC path, USB isochronous.
+- Deliberately untested: DBG (absent), eMMC path.

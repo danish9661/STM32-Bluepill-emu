@@ -2376,6 +2376,37 @@ assert_eq(periph_read(USB + U_EP1, 4) & 0x4000, 0, 'USB EP1 DTOG_RX toggled twic
 clear_current_interrupt();
 periph_write(USB + U_ISTR, 4, 0);
 
+// Isochronous endpoints move data exactly like bulk (no SOF-gating in the
+// model; TYPE is stored, mechanics shared). EP2 as ISO OUT then ISO IN.
+// (Toggle writes are relative: compute the mask from live STAT_RX.)
+periph_write(U_PMA + 20, 2, 0x100);  // ADDR2_RX
+periph_write(U_PMA + 22, 2, 0x8800); // COUNT2_RX 64B blocks
+{
+const ep2cur = periph_read(USB + U_EP2, 4);
+periph_write(USB + U_EP2, 4, 0x0402 | ((((ep2cur >> 12) & 3) ^ 3) << 12)); // EA2 + TYPE_ISO + RX->VALID
+}
+assert_eq(periph_read(USB + U_EP2, 4) & 0x0600, 0x0400, 'USB EP2 TYPE_ISO stored');
+assert_eq(usb_inject_out(2, [0xAA, 0xBB]), true, 'USB ISO OUT accepted when armed');
+assert_eq(periph_read(U_PMA + 0x100, 1), 0xAA, 'USB ISO OUT lands in RX buffer');
+assert_eq(periph_read(USB + U_EP2, 4) & 0x8000, 0x8000, 'USB EP2 CTR_RX after ISO OUT');
+periph_write(U_PMA + 16, 2, 0x140);  // ADDR2_TX
+periph_write(U_PMA + 0x140, 1, 0x5A);
+periph_write(U_PMA + 18, 2, 1);      // COUNT2_TX = 1
+periph_write(USB + U_EP2, 4, 0x0432); // STAT_TX DISABLED -> VALID (keep EA2+TYPE_ISO)
+const iev = drain_events();
+let isoIn = null;
+for (let i = 0; i < iev.length;) {
+    const t = iev[i++];
+    if (t === 18) {
+        const ep = iev[i++], len = iev[i++];
+        isoIn = [ep, len, iev.slice(i, i + len).join(',')];
+        i += len;
+    } else break;
+}
+assert_eq(isoIn !== null && isoIn[0] === 2 && isoIn[1] === 1 && isoIn[2] === '90', true, 'USB ISO IN completion drains UsbIn');
+clear_current_interrupt();
+periph_write(USB + U_ISTR, 4, 0);
+
 // DADDR / FNR misc
 periph_write(USB + U_DADDR, 4, 0x8A);
 assert_eq(periph_read(USB + U_DADDR, 4), 0x8A, 'USB DADDR ADD+EF');

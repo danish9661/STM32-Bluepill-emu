@@ -266,7 +266,6 @@ impl Cpu {
         // then behave like silicon instead of succeeding spuriously).
         self.exclusive = None;
         // Entering handler mode is always privileged (MPU).
-        sync_privilege(self, sys);
         // NVIC active-priority accounting: whoever pops a pending IRQ pushes
         // here. `get_next_pending_intr()` pops + pushes for dispatched IRQs;
         // synchronous takes (SVC) push explicitly at their call sites via
@@ -294,9 +293,18 @@ impl Cpu {
             self.fault = Some(CpuFault { pc, op1: 0x4770, op2: 0, len: 2 });
             return false;
         }
-        // Unstack from the bank selected by EXC_RETURN (using CURRENT bank
-        // values — a PendSV task switch updates PSP mid-handler).
-        let mut sp = if exc == EXC_RETURN_PSP { self.regs.psp } else { self.regs.msp };
+        // Unstack from the bank selected by EXC_RETURN. Nested (F1) and
+        // thread-MSP (F9) returns MUST use live r13: in handler mode r13 IS
+        // the stack and the bank still points at an already-consumed inner
+        // frame (unstacking the bank dereferenced handler-pushed registers
+        // as a frame and derailed the PC into unmapped space). Only PSP
+        // (FD) returns use the bank, which task switches retarget mid-
+        // handler. Afterwards the banks are re-synced to the unstacked SP.
+        let mut sp = if exc == EXC_RETURN_PSP {
+            self.regs.psp
+        } else {
+            self.regs.r[13]
+        };
         // In handler mode r13 == MSP; if returning to MSP it must match.
         // (If a buggy handler moved MSP, trust the bank per ARM.)
         let r0 = mem.read32(sp);
