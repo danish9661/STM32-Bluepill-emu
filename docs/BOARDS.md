@@ -21,6 +21,11 @@ The page shows the live chip (`label · ID … · flash/RAM`) in the stats bar
 after every load, and the GPIO grid renders Arduino aliases from
 `site/board_pins.json` (extracted from the STM32duino variant files).
 
+Each board has runnable demo firmware (`tests/arduino_board_demo/`, one
+sketch compiled per FQBN, shipped as `site/arduino_board_*.elf`) with a
+matching page preset that sets chip + ELF together
+(`tests/test_board_demo.mjs` 8/8, browser presets, CI).
+
 ## Verification matrix
 
 - Bluepill-targeted periph39 firmware: **39/39 on all six F103-map chips**

@@ -22,6 +22,11 @@ All notable changes to this project will be documented in this file.
   SCB ACTRL store; ADC temp nominal fix (0x6EE)
 - Demos: usb_cdc, pwm_wave, i2c_slave, mini_rtos (preemptive PendSV kernel),
   sd_logger (SDIO+ADC+RTC); page presets + browser coverage for all
+- Per-board demo firmware (`tests/arduino_board_demo`, one sketch × 4 FQBNs:
+  Blue Pill / Maple Mini / Nucleo-F103RB / Generic F103RC, shipped ELFs +
+  page presets setting chip+ELF together); DFU-layout offset-vector boot
+  proven (`vector_table: 0x08005000`); self-contained offset test in
+  `tests/test_chips.mjs`
 - Emulator surface for debuggers: `memWriteBytes()`, `takeFault()`,
   `setReg()` (+ `rustcpu_set_reg` / `rustcpu_mem_write_raw` exports)
 
@@ -34,6 +39,9 @@ All notable changes to this project will be documented in this file.
   re-sync live PRIMASK (no delivery into `noInterrupts` windows)
 - USB CDC firmware CTR-preserve rule (multi-packet IN); C++-mangled
   `PendSV_Handler` never installed in the RTOS demo; TIM7 absent on C8
+- Page worker inherited 64K/20K sizes instead of the chip table (wedged
+  F103RC in the browser while headless passed); worker + main path both
+  inherit sizes now
 
 ### Tests
 - 537 unit + 49 CPU tests, 39/39 firmware, chip/offset-boot/gdb suites,
