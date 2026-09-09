@@ -176,6 +176,37 @@ pub fn rustcpu_set_pc(pc: u32) {
     native_mut().cpu.regs.r[15] = pc | 1;
 }
 
+/// Debugger register write (GDB `P` packet): r0-r12, SP (bank-synced like
+/// the run loop), LR, PC (forced Thumb). xPSR is read-only here.
+#[wasm_bindgen]
+pub fn rustcpu_set_reg(i: u32, v: u32) {
+    let emu = native_mut();
+    match i {
+        0..=12 => emu.cpu.regs.r[i as usize] = v,
+        13 => {
+            emu.cpu.regs.r[13] = v;
+            if emu.cpu.ipsr == 0 {
+                if emu.cpu.regs.control & 2 != 0 {
+                    emu.cpu.regs.psp = v;
+                } else {
+                    emu.cpu.regs.msp = v;
+                }
+            }
+        }
+        14 => emu.cpu.regs.r[14] = v,
+        15 => emu.cpu.regs.r[15] = v | 1,
+        _ => {}
+    }
+}
+
+/// Raw guest-memory write for debugger clients (GDB `M` packets, BKPT
+/// patching): bypasses flash protection and MPU checks like a probe would.
+/// Firmware install should still use rustcpu_load.
+#[wasm_bindgen]
+pub fn rustcpu_mem_write_raw(addr: u32, data: &[u8]) {
+    native_mut().mem.load(data, addr);
+}
+
 /// Raw guest-memory access (RAM + flash; flash writes stay protected, use
 /// rustcpu_load for firmware). Bypasses MPU checks like a debugger would.
 /// Backs memRead32 + the hi2c Mode RAM patch.

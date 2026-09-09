@@ -350,6 +350,7 @@ select:focus { outline: none; border-color: #0ea5e9; }
                 <span>Avg MIPS <b id="avgMips">—</b></span>
                 <span class="stat-pc">PC <b id="statPc">--------</b></span>
                 <span>SP <b id="statSp">--------</b></span>
+                <span>Chip <b id="statChip">--------</b></span>
             </div>
             <div class="term-section">
                 <h2>UART Terminal</h2>
@@ -426,7 +427,7 @@ select:focus { outline: none; border-color: #0ea5e9; }
 </div>
 
 <script type="module">
-import { createEmulator, parseSymbolMap, parseElf } from './emulator.js';
+import { createEmulator, parseSymbolMap, parseElf, chipInfo } from './emulator.js';
 
 const $ = id => document.getElementById(id);
 const boardWrap = $('boardWrap');
@@ -482,6 +483,7 @@ function handleWorkerMsg(e) {
     $('sendBtn').disabled = false;
     if (firmwareData) log(`Loaded ${firmwareData.name || 'firmware'} on ${firmwareData.chip === 'stm32f105' ? 'STM32F105' : (firmwareData.chip || 'stm32f103c8')} (${firmwareData.bytes?.length || '?'} bytes) — worker ready. PC=0x${regs.PC.toString(16).padStart(8,'0')}`);
     updateRegsWorker(m.pc, m.sp, null);
+    showChip(m.idcode);
     setState('Ready');
   } else if (m.type === 'frame') {
     // stats
@@ -591,6 +593,16 @@ function handleWorkerMsg(e) {
 }
 function updateRegsWorker(pc, sp, sym) {
   try { $('statPc').textContent='0x'+pc.toString(16).padStart(8,'0'); $('statSp').textContent='0x'+sp.toString(16).padStart(8,'0'); } catch {}
+}
+// Live chip readout: label + sizes from the chip table, IDCODE read from
+// the model itself (0xE0042000) — GD32 reports 0x2BA01477, F103 0x10016410.
+function showChip(idcode) {
+  try {
+    const name = (typeof firmwareData?.chip === 'string') ? firmwareData.chip : 'stm32f103c8';
+    const info = chipInfo(name);
+    const id = (idcode == null ? info.idcode : idcode) >>> 0;
+    $('statChip').textContent = `${info.label} · ID ${id.toString(16).toUpperCase()} · ${info.flash / 1024}K/${info.ram / 1024}K`;
+  } catch {}
 }
 let svdXml = null;
 let f105SvdXml = null;
@@ -1066,6 +1078,7 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
     for (const k in PIN_ACTIVITY) delete PIN_ACTIVITY[k];
     pinActivityTotal = 0;
     $('instCount').textContent = '0';
+    $('statChip').textContent = '--------';
     $('stepCount').textContent = '0';
     $('speed').textContent = '—';
     $('avgMips').textContent = '—';
@@ -1107,7 +1120,7 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
         handleWorkerMsg._lastInst = 0;
         handleWorkerMsg._t0 = performance.now();
         setState('Initializing… (worker)');
-        const chip = chipSel === 'stm32f105' ? { name: 'STM32F105', svd: f105SvdXml || svdXml || undefined } : chipSel;
+        const chip = chipSel === 'stm32f105' ? { name: 'STM32F105', svd: f105SvdXml || svdXml || undefined, idcode: 0x10016418 } : chipSel;
         const svdForWorker = (chipSel === 'stm32f103c8' && svdXml) ? svdXml : undefined;
         // autoBytes for periph_test autopilot
         const ab = (name.includes('periph_test') || name.includes('arduino_periph_test')) ? [0x41, 0x42] : [];
@@ -1132,7 +1145,7 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
     setState('Initializing…');
     try {
         const chip = chipSel === 'stm32f105'
-            ? { name: 'STM32F105', svd: f105SvdXml || svdXml || undefined }
+            ? { name: 'STM32F105', svd: f105SvdXml || svdXml || undefined, idcode: 0x10016418 }
             : chipSel;
         emu = await createEmulator({
             chip,
@@ -1153,6 +1166,7 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
         $('uartInput').focus();
         updateRegs();
         updateVisuals();
+        try { showChip(emu.periphRead(0xE0042000, 4)); } catch {}
         const ph2 = $('gpioPlaceholder'); if (ph2) ph2.style.display = 'none';
         setState('Ready');
     } catch (e) {

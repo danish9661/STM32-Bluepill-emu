@@ -182,20 +182,31 @@ export function parseElf(buffer) {
  *
  * @returns {Promise<BluepillEmulator>}
  */
+/**
+ * Builtin chip table: flash/RAM sizes + DBGMCU IDCODE + display label.
+ * GD32F103 is register-identical at everything modeled, so no SVD is
+ * needed — only sizes and the IDCODE differ (timing stays
+ * instruction-based). Unknown names behave like stm32f103c8.
+ */
+export const CHIPS = {
+    stm32f103c8: { flash: 0x10000, ram: 0x5000, idcode: 0x10016410, label: 'STM32F103C8' },
+    stm32f103cb: { flash: 0x20000, ram: 0x5000, idcode: 0x10016410, label: 'STM32F103CB' },
+    maple_mini:  { flash: 0x20000, ram: 0x5000, idcode: 0x10016410, label: 'Maple Mini (F103CB)' },
+    nucleo_f103rb: { flash: 0x20000, ram: 0x5000, idcode: 0x10016410, label: 'Nucleo-F103RB' },
+    stm32f103rc: { flash: 0x40000, ram: 0xC000, idcode: 0x10016410, label: 'STM32F103RC' },
+    gd32f103c8:  { flash: 0x10000, ram: 0x5000, idcode: 0x2BA01477, label: 'GD32F103C8' },
+    gd32f103cb:  { flash: 0x20000, ram: 0x5000, idcode: 0x2BA01477, label: 'GD32F103CB' },
+    gd32f103rb:  { flash: 0x20000, ram: 0x5000, idcode: 0x2BA01477, label: 'GD32F103RB' },
+};
+
+/** Chip descriptor for a createEmulator `chip` name (default: f103c8). */
+export function chipInfo(name) {
+    return (typeof name === 'string' && CHIPS[name]) ? CHIPS[name] : CHIPS.stm32f103c8;
+}
 export async function createEmulator(opts = {}) {
     // Builtin chip table: flash/RAM sizes + DBGMCU IDCODE. GD32F103 is
     // register-identical at everything modeled, so no SVD is needed —
     // only sizes and the IDCODE differ (timing stays instruction-based).
-    const CHIPS = {
-        stm32f103c8: { flash: 0x10000, ram: 0x5000, idcode: 0x10016410, label: 'STM32F103C8' },
-        stm32f103cb: { flash: 0x20000, ram: 0x5000, idcode: 0x10016410, label: 'STM32F103CB' },
-        maple_mini:  { flash: 0x20000, ram: 0x5000, idcode: 0x10016410, label: 'Maple Mini (F103CB)' },
-        nucleo_f103rb: { flash: 0x20000, ram: 0x5000, idcode: 0x10016410, label: 'Nucleo-F103RB' },
-        stm32f103rc: { flash: 0x40000, ram: 0xC000, idcode: 0x10016410, label: 'STM32F103RC' },
-        gd32f103c8:  { flash: 0x10000, ram: 0x5000, idcode: 0x2BA01477, label: 'GD32F103C8' },
-        gd32f103cb:  { flash: 0x20000, ram: 0x5000, idcode: 0x2BA01477, label: 'GD32F103CB' },
-        gd32f103rb:  { flash: 0x20000, ram: 0x5000, idcode: 0x2BA01477, label: 'GD32F103RB' },
-    };
     const chipEntry = (typeof opts.chip === 'string' && CHIPS[opts.chip]) ? CHIPS[opts.chip]
         : (typeof opts.chip === 'object' && opts.chip !== null ? opts.chip : null);
     const {
@@ -226,7 +237,7 @@ export async function createEmulator(opts = {}) {
     touchscreen_set_touch, pwm_duty, raise_fault,
      i2c_oled_fb, lcd_fb, gpio_take_pin_events,     drain_events, spi_inject_miso, i2c_inject_rx, i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop, usb_inject_setup, usb_inject_out,
     rustcpu_init, rustcpu_load, rustcpu_run, rustcpu_fault, rustcpu_fault_clear, rustcpu_dispatch,
-    rustcpu_regs, rustcpu_set_pc, rustcpu_mem_read, rustcpu_mem_write, rustcpu_dma_pump, rustcpu_i2c_hook_fired,
+    rustcpu_regs, rustcpu_set_pc, rustcpu_set_reg, rustcpu_mem_read, rustcpu_mem_write, rustcpu_mem_write_raw, rustcpu_dma_pump, rustcpu_i2c_hook_fired,
     rustcpu_write_tap, rustcpu_take_writes, set_dbg_idcode } = periph;
 
     // Register external devices BEFORE init()
@@ -374,11 +385,16 @@ export async function createEmulator(opts = {}) {
     const pumpDma = () => rustcpu_dma_pump();
     // Execute one CPU batch; returns exact executed instructions (incl.
     // handlers) for accounting.
+    // Last CPU fault (pc, op), kept for debugger clients: execBatch clears
+    // the live fault after skipping past it, so takeFault() lets a driver
+    // (e.g. the GDB stub's BKPT handling) observe it exactly once.
+    let lastFault = null;
     const execBatch = (n) => {
         const done = rustcpu_run(n);
         const fault = rustcpu_fault();
         if (fault.length) {
             const fpc = fault[0] >>> 0, op1 = fault[1] >>> 0;
+            lastFault = [fpc, op1];
             const sym = resolveSym(fpc);
             if (verbose) console.log(`FAULT @${sym || ('0x' + fpc.toString(16))} op=0x${op1.toString(16)} (rust cpu decode gap)`);
             if (symbolList.length) raise_fault(3, fpc); // UNDEFINSTR; runs via dispatch
@@ -536,6 +552,7 @@ export async function createEmulator(opts = {}) {
         },
 
         getPc() { return rustcpu_regs()[15] >>> 0; },
+        setReg(i, v) { rustcpu_set_reg(i >>> 0, v >>> 0); },
         getSp() { return rustcpu_regs()[13] >>> 0; },
         setPc(pc) { rustcpu_set_pc(pc | 1); },
 
@@ -580,6 +597,19 @@ export async function createEmulator(opts = {}) {
         /** Read a 32-bit word from emulated memory (e.g. a RAM flag). */
         memRead32(addr) {
             return read32(addr) >>> 0;
+        },
+
+        /** Raw guest-memory write (bytes): bypasses flash protection and MPU
+         *  checks like a hardware probe (GDB `M` packets, BKPT patching). */
+        memWriteBytes(addr, bytes) {
+            rustcpu_mem_write_raw(addr >>> 0, bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes));
+        },
+
+        /** Last CPU fault ([pc, op]) since the previous call, if any. */
+        takeFault() {
+            const f = lastFault;
+            lastFault = null;
+            return f;
         },
 
         canInjectMessage(addr, tir, tdtr, tdlr, tdhr) {

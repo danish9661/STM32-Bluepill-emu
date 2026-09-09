@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.0] — 2026-09-09 — chips, GDB stub, depth + demos
+
+### Added
+- Chip variants without SVD (`pkg/emulator.js` CHIPS table + `chipInfo()`):
+  stm32f103cb, maple_mini, nucleo_f103rb, stm32f103rc (256K/48K),
+  gd32f103c8/cb/rb (DBGMCU IDCODE 0x2BA01477); new `set_dbg_idcode`
+  export + read-only `DBGMCU_IDCODE @ 0xE0042000`; board Arduino-pin
+  aliases (`site/board_pins.json`) shown in the page GPIO grid;
+  live chip readout in the stats bar; `docs/BOARDS.md` support matrix
+- GDB RSP stub (`pkg/gdbstub.mjs`, `stm32f1-emu/gdb`): registers, memory,
+  BKPT breakpoints (restore/step/reinsert dance), step/continue, target.xml
+  over TCP (`target remote :1234`); `tests/test_gdbstub.mjs` 16/16
+- I2C slave mode + host inject API (`i2cInjectStart/Write/Read/Stop`),
+  10-bit addressing, `tests/arduino_i2c_slave` (Wire @ 0x42) + page host card
+- USB FS depth: SOF engine, suspend/resume, double-buffered bulk,
+  isochronous transfers; CDC-ACM demo + page USB host (live enumeration)
+- TIM DMA burst (DCR/DMAR window) + PWM-wave demo; CAN TX IRQ edge trigger;
+  SCB ACTRL store; ADC temp nominal fix (0x6EE)
+- Demos: usb_cdc, pwm_wave, i2c_slave, mini_rtos (preemptive PendSV kernel),
+  sd_logger (SDIO+ADC+RTC); page presets + browser coverage for all
+- Emulator surface for debuggers: `memWriteBytes()`, `takeFault()`,
+  `setReg()` (+ `rustcpu_set_reg` / `rustcpu_mem_write_raw` exports)
+
+### Fixed
+- SysTick rate: debt drain lost after the native cutover (re-pend exactly
+  one per return) + phase loss (`trigger += ticks*period`); millis exact
+- Nested F1/F9 returns unstacked from stale banks instead of live r13
+  (phantom reboots under deep nesting); proven by 4-deep canary test
+- Inline dispatch routes through the shared 64-IRQ budget; lazy paths
+  re-sync live PRIMASK (no delivery into `noInterrupts` windows)
+- USB CDC firmware CTR-preserve rule (multi-packet IN); C++-mangled
+  `PendSV_Handler` never installed in the RTOS demo; TIM7 absent on C8
+
+### Tests
+- 537 unit + 49 CPU tests, 39/39 firmware, chip/offset-boot/gdb suites,
+  browser 19/19 local; `docs/COVERAGE.md` (40 Full, USB rows closed)
+
 ## [2.0.0] — 2026-09-04 — native Rust CPU replaces Unicorn
 - CPU backend is now the vendored pure-Rust ARMv7-M interpreter
   (`src/cpu/`): Unicorn binaries, mem hooks, `mrs`/`i2c_init` patches, the

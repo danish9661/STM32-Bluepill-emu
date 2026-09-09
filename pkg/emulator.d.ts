@@ -73,8 +73,10 @@ export interface CreateEmulatorOptions {
   vector_table?: number;
   /** SVD XML string (optional; overrides the builtin F103C8 map). */
   svd?: string | null;
-  /** Chip identifier or `{name, svd}` object (default 'stm32f103c8'). */
-  chip?: string | { name: string; svd: string };
+  /** Chip identifier, `{name, svd}` object, or builtin variant name
+   *  (stm32f103cb, maple_mini, nucleo_f103rb, stm32f103rc,
+   *  gd32f103c8/cb/rb — sizes + DBGMCU IDCODE from the table). */
+  chip?: string | { name: string; svd?: string; flash?: number; ram?: number; idcode?: number };
   /** rp2040js-style custom peripherals. */
   js_peripherals?: JsPeripheral[];
   /** USART base address used by uartRx() (default 0x40013800 = USART1). */
@@ -137,6 +139,8 @@ export interface BluepillEmulator {
   getSp(): number;
   /** Write program counter. */
   setPc(pc: number): void;
+  /** Write a core register by index (0-12, 13=SP bank-synced, 14=LR, 15=PC). */
+  setReg(i: number, v: number): void;
 
   // ── Symbol resolution ─────────────────────────────────────────────────────
 
@@ -213,6 +217,14 @@ export interface BluepillEmulator {
   spiInjectMiso(channel: number, bytes: Uint8Array): void;
   /** Queue RX bytes for an I2C channel. */
   i2cInjectRx(channel: number, bytes: Uint8Array): void;
+  /** Host START + address this I2C peripheral as a slave (false = NACK). */
+  i2cInjectStart(channel: number, addr: number, isRead: boolean): boolean;
+  /** Host data byte to an addressed slave (false = NACK). */
+  i2cInjectWrite(channel: number, byte: number): boolean;
+  /** Host read from an addressed slave (-1 while DR empty). */
+  i2cInjectRead(channel: number): number;
+  /** Host STOP to an addressed slave. */
+  i2cInjectStop(channel: number): boolean;
 
   // ── OLED / LCD framebuffers ───────────────────────────────────────────────
 
@@ -236,6 +248,10 @@ export interface BluepillEmulator {
   periphWrite(addr: number, width: number, value: number): void;
   /** Read 32-bit word from emulated memory. */
   memRead32(addr: number): number;
+  /** Raw guest-memory write (bypasses flash protection + MPU, like a probe). */
+  memWriteBytes(addr: number, bytes: Uint8Array | number[]): void;
+  /** Last CPU fault ([pc, op]) since the previous call, if any. */
+  takeFault(): [number, number] | null;
 
   // ── Custom peripherals / Interrupt control ────────────────────────────────
 
@@ -245,3 +261,9 @@ export interface BluepillEmulator {
 
 /** Create a full STM32F103C8 emulator instance. */
 export function createEmulator(opts?: CreateEmulatorOptions): Promise<BluepillEmulator>;
+
+/** Builtin chip table (flash/RAM sizes, DBGMCU IDCODE, label). */
+export const CHIPS: Record<string, { flash: number; ram: number; idcode: number; label: string }>;
+
+/** Chip descriptor for a `chip` name (default: stm32f103c8 entry). */
+export function chipInfo(name?: string): { flash: number; ram: number; idcode: number; label: string };

@@ -27,6 +27,20 @@ for (const [chip, id] of [
     for (let i = 0; i < 10; i++) await emu.run(1000000);
     ok(String(emu.getUartOutput() || '').includes('Hi'), 'GD32F103C8 UART echo round-trip');
 }
+// DFU-layout offset boot (Maple Mini heritage): bootloader region erased,
+// app vectors at 0x08005000 via vector_table. Hand-assembled, no toolchain:
+// SP=0x20001000, reset -> marker 0x42 into RAM + spin.
+{
+    const img = new Uint8Array(0x5020).fill(0xFF);
+    const w16 = (off, v) => { img[off] = v & 0xFF; img[off + 1] = (v >> 8) & 0xFF; };
+    const w32 = (off, v) => { for (let i = 0; i < 4; i++) img[off + i] = (v >>> (i * 8)) & 0xFF; };
+    w32(0x5000, 0x20001000); w32(0x5004, 0x08005009);
+    w16(0x5008, 0x4802); w16(0x500A, 0x2142); w16(0x500C, 0x6001); w16(0x500E, 0xE7FE);
+    w16(0x5010, 0xBF00); w16(0x5012, 0xBF00); w32(0x5014, 0x20002000);
+    const emu = await createEmulator({ firmware: img, chip: 'maple_mini', vector_table: 0x08005000 });
+    for (let i = 0; i < 5; i++) await emu.run(100000);
+    ok(emu.memRead32(0x20002000) === 0x42, 'offset-vector boot runs app code (DFU layout)');
+}
 
 // Board Arduino-pin aliases (site/board_pins.json, extracted from the
 // STM32duino variant files): physical pin -> Arduino names.

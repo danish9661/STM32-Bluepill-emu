@@ -395,6 +395,22 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
   No GD32 Arduino core installed locally — GD32 runs identical F103
   binaries (the clone contract), covered by the GD32 boot+echo test.
 
+### 37. GDB stub + boards docs/UI + npm 2.1.0 [this sprint]
+- **GDB RSP stub** (`pkg/gdbstub.mjs`, `stm32f1-emu/gdb`, 16/16 via a Node
+  RSP client): regs/mem/step/continue/BKPT/target.xml over TCP. Needed new
+  surface: `memWriteBytes` (bypasses flash protection via new
+  `rustcpu_mem_write_raw`), `takeFault` (execBatch snapshot), `setReg`
+  (`rustcpu_set_reg`). Real bugs found by writing it: RSP reg numbers are
+  decimal (not hex), Thumb breakpoint addrs need masking (not reject),
+  flash writes are MPU-protected (BKPT patch needs the raw path).
+- **Boards**: `docs/BOARDS.md` matrix (chips, IDCODEs, pinouts, verified
+  runs incl. DFU-layout offset boot); page stats bar shows live chip
+  (`label · ID … · flash/RAM`, IDCODE read from the model); F105 object
+  carries its IDCODE too. `site/board_pins.json` ships in the package.
+- **Release**: version 2.1.0, CHANGELOG entry, `files` + `exports` cover
+  gdbstub/board data, `.d.ts` updated (CHIPS/chipInfo/i2cInject/mem/takeFault).
+- **Verified**: full gate re-run at commit.
+
 
 
 ## Next Phase — Long-term Optimizations

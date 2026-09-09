@@ -73,7 +73,9 @@ async function handleMessage(e) {
         emu.onPinChange((port, pin, level) => pinBuf.push(port, pin, level));
         if (msg.symbols) emu.setSymbols(msg.symbols);
         const regs = emu.getRegisters();
-        post('ready', { pc: regs.PC, sp: regs.SP });
+        let idcode = null;
+        try { idcode = emu.periphRead(0xE0042000, 4) >>> 0; } catch {}
+        post('ready', { pc: regs.PC, sp: regs.SP, idcode });
       } catch (err) {
         try { self.postMessage({ type: 'debug', msg: 'createEmulator err: '+(err.message||String(err)) }); } catch {}
         post('error', { message: err.message || String(err) });

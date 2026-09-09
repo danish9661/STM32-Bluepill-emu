@@ -131,6 +131,10 @@ test.describe('Browser firmware tests', () => {
     await page.click('#loadPresetBtn');
     await page.click('#runBtn');
     await expect(page.locator('#gpioGrid')).toContainText('D13', { timeout: 30000 });
+    // GD32 chip readout shows the live IDCODE + sizes.
+    await page.selectOption('#chipSelect', 'gd32f103c8');
+    await page.click('#loadPresetBtn');
+    await expect(page.locator('#statChip')).toContainText('2BA01477', { timeout: 30000 });
     await page.selectOption('#chipSelect', 'stm32f105');
     await page.selectOption('#presetSelect', 'periph37');
     await page.click('#loadPresetBtn');

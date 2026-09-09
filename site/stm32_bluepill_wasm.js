@@ -775,6 +775,19 @@ export function rustcpu_mem_write(addr, data) {
 }
 
 /**
+ * Raw guest-memory write for debugger clients (GDB `M` packets, BKPT
+ * patching): bypasses flash protection and MPU checks like a probe would.
+ * Firmware install should still use rustcpu_load.
+ * @param {number} addr
+ * @param {Uint8Array} data
+ */
+export function rustcpu_mem_write_raw(addr, data) {
+    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    wasm.rustcpu_mem_write_raw(addr, ptr0, len0);
+}
+
+/**
  * Registers for getRegisters/getPc/getSp parity + debugging:
  * [r0..r12, sp, lr, pc, xpsr, primask, control, ipsr] (20 words).
  * @returns {Uint32Array}
@@ -804,6 +817,16 @@ export function rustcpu_run(slice) {
  */
 export function rustcpu_set_pc(pc) {
     wasm.rustcpu_set_pc(pc);
+}
+
+/**
+ * Debugger register write (GDB `P` packet): r0-r12, SP (bank-synced like
+ * the run loop), LR, PC (forced Thumb). xPSR is read-only here.
+ * @param {number} i
+ * @param {number} v
+ */
+export function rustcpu_set_reg(i, v) {
+    wasm.rustcpu_set_reg(i, v);
 }
 
 /**
