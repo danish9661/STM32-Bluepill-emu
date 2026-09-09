@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="STM32 Bluepill emulator JavaScript API: STM32F1 wrapper, createEmulator options, virtual-peripheral events, host injection, custom peripherals.">
+<link rel="canonical" href="https://danish9661.github.io/STM32-Bluepill-emu/docs-api.html">
+<title>API — STM32 Bluepill Emulator Docs</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.65; }
+header { background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%); border-bottom: 1px solid #1e3a5f; padding: 12px 24px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; position: sticky; top: 0; z-index: 100; }
+header h1 { font-size: 17px; font-weight: 700; background: linear-gradient(90deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+header .sub { font-size: 12px; color: #64748b; }
+header .spacer { flex: 1; }
+header a.nav { font-size: 11.5px; color: #94a3b8; text-decoration: none; border: 1px solid #334155; padding: 4px 12px; border-radius: 999px; }
+header a.nav:hover, header a.nav.active { background: #1e40af; color: #fff; border-color: #3b82f6; }
+main { max-width: 880px; margin: 0 auto; padding: 28px 24px 60px; }
+h2 { font-size: 11px; color: #64748b; margin: 32px 0 14px; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600; }
+h2:first-child { margin-top: 0; }
+p, li { font-size: 14px; color: #cbd5e1; }
+ul, ol { padding-left: 22px; } li { margin: 5px 0; }
+li code { white-space: nowrap; }
+a { color: #38bdf8; text-decoration: none; } a:hover { color: #7dd3fc; text-decoration: underline; }
+code { background: #0f172a; border: 1px solid #1e293b; border-radius: 4px; padding: 1px 6px; font-size: 12px; color: #7dd3fc; font-family: Consolas, monospace; }
+pre { background: #0b1120; border: 1px solid #1e293b; border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 12px 0; font-size: 12.5px; line-height: 1.6; color: #cbd5e1; font-family: Consolas, monospace; }
+footer { text-align: center; padding: 26px; color: #475569; font-size: 12px; border-top: 1px solid #1e293b; }
+footer a { color: #38bdf8; }
+</style>
+</head>
+<body>
+<header>
+    <h1>&#x25C8; STM32 Bluepill Emulator</h1>
+    <span class="sub">Docs · API</span>
+    <span class="spacer"></span>
+    <a class="nav" href="index.html">Demo</a>
+    <a class="nav active" href="docs.html">Docs</a>
+    <a class="nav" href="about.html">About</a>
+    <a class="nav" href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">GitHub</a>
+</header>
+<main>
+<h2>High-level wrapper</h2>
+<pre>import { STM32F1 } from 'stm32f1-emu';   // or './stm32f1.js' on the page
+const mcu = await STM32F1.fromELF(firmware);  // fromBin / fromHex too
+mcu.usart1.onData = (b) =&gt; process.stdout.write(String.fromCharCode(b));
+mcu.gpio.pin('C', 13).on('change', (high) =&gt; console.log('LED', high));
+mcu.onUsbIn = (ep, data) =&gt; {};
+mcu.step(20000);                           // run + auto-drain events</pre>
+<h2>Core emulator</h2>
+<pre>import { createEmulator, chipInfo } from 'stm32f1-emu/emulator';
+const emu = await createEmulator({
+  firmware,                                // ELF / BIN / Intel HEX
+  chip: 'gd32f103c8',                      // or { name, svd } for SVD maps
+  ext_devices: { i2c_eeprom: [{ peripheral: 'I2C1', address: 0x50, data }] },
+});
+emu.run(200000000);                        // adaptive 20K/50K batches
+emu.step(20000);                           // one batch + DMA + IRQ dispatch
+chipInfo('gd32f103c8');                    // { flash, ram, idcode, label }</pre>
+<h2>Host injection (test benches drive the firmware)</h2>
+<ul>
+<li><code>emu.uartRx(byte)</code>, <code>emu.gpioSetInput(port, pin, level)</code></li>
+<li><code>emu.canInjectMessage(addr, tir, tdtr, tdlr, tdhr)</code></li>
+<li><code>emu.usbInjectSetup(bytes8)</code>, <code>emu.usbInjectOut(ep, bytes)</code> — IN completions arrive as <code>UsbIn</code> events</li>
+<li><code>emu.i2cInjectStart(ch, addr, isRead)</code>, <code>i2cInjectWrite</code>, <code>i2cInjectRead</code> (<code>-1</code> = stretch), <code>i2cInjectStop</code></li>
+<li><code>emu.spiInjectMiso(ch, bytes)</code>, <code>emu.uartInjectBreak(addr)</code></li>
+<li><code>emu.periphRead/Write(addr, w, v)</code>, <code>emu.memRead32(addr)</code>, <code>emu.pwmDuty(base, ch)</code></li>
+<li><code>emu.onPeriphWrite(fn)</code> — tap every peripheral write (decode shift registers, CS tracking)</li>
+<li><code>emu.addJsPeripheral(base, size, read, write)</code> — custom rp2040js-style peripherals</li>
+<li><code>emu.drainEvents()</code> — flat event queue (SPI/I2C/USART/EXTI/ADC/TIM/DAC/CRC/RTC/WDG/CAN/FSMC/USB)</li>
+</ul>
+<h2>Debugger surface</h2>
+<p><code>emu.memWriteBytes(addr, bytes)</code> (probe-style raw writes), <code>emu.takeFault()</code> (one-shot fault observer), <code>emu.setReg(i, v)</code>, <code>emu.setPc(pc)</code> — the building blocks behind <code>stm32f1-emu/gdb</code>.</p>
+<h2>Full reference</h2>
+<p>Types in <code>pkg/emulator.d.ts</code> / <code>pkg/stm32f1.d.ts</code> / <code>pkg/gdbstub.d.ts</code>; guides in <a href="https://github.com/danish9661/STM32-Bluepill-emu/blob/master/docs/USAGE.md">USAGE.md</a> and <a href="https://github.com/danish9661/STM32-Bluepill-emu/blob/master/docs/STM32F1_API.md">STM32F1_API.md</a>.</p>
+</main>
+<footer>
+    STM32 Bluepill Emulator &middot; <a href="docs.html">Docs</a> &middot; <a href="index.html">Live Demo</a> &middot;
+    <a href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">Source</a>
+</footer>
+</body>
+</html>

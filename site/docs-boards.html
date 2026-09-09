@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Supported boards: STM32F103 Blue Pill, Maple Mini, Nucleo-F103RB, Generic F103RC, GD32F103, STM32F105 — chip options, ID codes, pin aliases, bring-up checklist.">
+<link rel="canonical" href="https://danish9661.github.io/STM32-Bluepill-emu/docs-boards.html">
+<title>Boards — STM32 Bluepill Emulator Docs</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.65; }
+header { background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%); border-bottom: 1px solid #1e3a5f; padding: 12px 24px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; position: sticky; top: 0; z-index: 100; }
+header h1 { font-size: 17px; font-weight: 700; background: linear-gradient(90deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+header .sub { font-size: 12px; color: #64748b; }
+header .spacer { flex: 1; }
+header a.nav { font-size: 11.5px; color: #94a3b8; text-decoration: none; border: 1px solid #334155; padding: 4px 12px; border-radius: 999px; }
+header a.nav:hover, header a.nav.active { background: #1e40af; color: #fff; border-color: #3b82f6; }
+main { max-width: 880px; margin: 0 auto; padding: 28px 24px 60px; }
+h2 { font-size: 11px; color: #64748b; margin: 32px 0 14px; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600; }
+h2:first-child { margin-top: 0; }
+p, li { font-size: 14px; color: #cbd5e1; }
+ol { padding-left: 22px; } li { margin: 5px 0; }
+a { color: #38bdf8; text-decoration: none; } a:hover { color: #7dd3fc; text-decoration: underline; }
+code { background: #0f172a; border: 1px solid #1e293b; border-radius: 4px; padding: 1px 6px; font-size: 12px; color: #7dd3fc; font-family: Consolas, monospace; }
+pre { background: #0b1120; border: 1px solid #1e293b; border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 12px 0; font-size: 12.5px; line-height: 1.6; color: #cbd5e1; font-family: Consolas, monospace; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #1e293b; }
+th { color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+td { color: #cbd5e1; font-family: Consolas, monospace; font-size: 12.5px; }
+footer { text-align: center; padding: 26px; color: #475569; font-size: 12px; border-top: 1px solid #1e293b; }
+footer a { color: #38bdf8; }
+</style>
+</head>
+<body>
+<header>
+    <h1>&#x25C8; STM32 Bluepill Emulator</h1>
+    <span class="sub">Docs · Boards</span>
+    <span class="spacer"></span>
+    <a class="nav" href="index.html">Demo</a>
+    <a class="nav active" href="docs.html">Docs</a>
+    <a class="nav" href="about.html">About</a>
+    <a class="nav" href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">GitHub</a>
+</header>
+<main>
+<h2>Supported boards</h2>
+<p>One peripheral map covers the family: GD32F103 is register-identical at everything modeled, so variants differ only in flash/RAM sizes and the DBGMCU IDCODE. Timing stays instruction-budget based on every chip.</p>
+<table>
+<tr><th>Board / chip</th><th><code>chip</code></th><th>Flash/RAM</th><th>IDCODE</th></tr>
+<tr><td>Blue Pill F103C8 (default)</td><td>stm32f103c8</td><td>64K/20K</td><td>0x10016410</td></tr>
+<tr><td>Blue Pill F103CB</td><td>stm32f103cb</td><td>128K/20K</td><td>0x10016410</td></tr>
+<tr><td>Maple Mini</td><td>maple_mini</td><td>128K/20K</td><td>0x10016410</td></tr>
+<tr><td>Nucleo-F103RB</td><td>nucleo_f103rb</td><td>128K/20K</td><td>0x10016410</td></tr>
+<tr><td>Generic F103RC</td><td>stm32f103rc</td><td>256K/48K</td><td>0x10016410</td></tr>
+<tr><td>GD32F103C8 / CB / RB</td><td>gd32f103c*</td><td>64–128K/20K</td><td>0x2BA01477</td></tr>
+<tr><td>STM32F105 (SVD map)</td><td>{ name, svd }</td><td>256K/64K</td><td>0x10016418</td></tr>
+</table>
+<h2>Bring-up checklist</h2>
+<ol>
+<li>Pick the chip in the page selector (or the <code>chip:</code> opt) — Blue Pill default, <code>maple_mini</code>, <code>nucleo_f103rb</code>, <code>stm32f103rc</code>, <code>gd32f103c8/cb/rb</code>.</li>
+<li>Read back <code>DBGMCU_IDCODE @ 0xE0042000</code> (F103 <code>0x10016410</code>, GD32 <code>0x2BA01477</code>) — one register read proves the variant is live. The page stats bar shows it after every load.</li>
+<li>Check the GPIO grid aliases (<code>board_pins.json</code>): Nucleo LED is <code>D13</code>/<code>PA5</code>, Maple LED is <code>D33</code>/<code>PB1</code>, Pill LED is <code>D17</code>/<code>PC13</code>.</li>
+<li>Watch the UART: Nucleo/RC <code>Serial</code> is USART2 (page <code>uart_addr</code> / test <code>uart_addr</code> opt selects it); Maple/Pill use USART1.</li>
+<li>DFU-layout (bootloader-offset) firmware boots via <code>vector_table</code> (e.g. <code>0x08005000</code> on 128K parts).</li>
+</ol>
+<h2>Per-board demo firmware</h2>
+<p><code>tests/arduino_board_demo/</code> compiles one sketch per FQBN (Blue Pill, Maple Mini, Nucleo-F103RB, Generic F103RC — shipped as <code>site/arduino_board_*.elf</code>). Each prints its board banner, blinks <code>LED_BUILTIN</code> and ticks; the page has a preset per board that sets chip + ELF together.</p>
+<h2>Deliberately out of scope</h2>
+<p>Maple DFU uploader / STLink probe emulation (flashing transports and debugger hardware — firmware loads directly); GD32 flash-timing / UID quirks (no observable surface); printer hardware for SKR-class boards. Full matrix in <a href="https://github.com/danish9661/STM32-Bluepill-emu/blob/master/docs/BOARDS.md">docs/BOARDS.md</a>.</p>
+</main>
+<footer>
+    STM32 Bluepill Emulator &middot; <a href="docs.html">Docs</a> &middot; <a href="index.html">Live Demo</a> &middot;
+    <a href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">Source</a>
+</footer>
+</body>
+</html>

@@ -418,6 +418,21 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
   gdbstub/board data, `.d.ts` updated (CHIPS/chipInfo/i2cInject/mem/takeFault).
 - **Verified**: full gate re-run at commit.
 
+### 38. Website remake + docs pages + headed screenshot gate [this sprint]
+- **Demo page**: hero strip (stats chips, CTA buttons), Docs/About nav,
+  fixed a real pin-label overlap bug (left labels drew into the PCB;
+  end-anchored + widened viewBox), stats-row wrap. All demo machinery
+  untouched (deliberately no rewrite — regression risk for zero gain).
+- **Docs pages** (`site/docs.html` hub + `docs-boards/debugging/api.html`,
+  shared header/footer/nav): condensed from the markdown sources with
+  links back (no content fork). `about.html` nav aligned.
+- **Verification** (`tests/test_browser_site.mjs`, CI line): every static
+  page loads headed with zero console/page errors + screenshots to
+  `test-results/`; demo↔docs nav round-trip asserted. Found live: ws-viewer
+  dials a missing server (allowlisted with comment), nav URL assertion.
+- **Verified**: 8/8 headed (screenshots reviewed: hero, docs hub, boards,
+  API, live blink 283M instr @ 47 MIPS with aliases in grid).
+
 ### 38. Dual-CAN demo + real GDB + deeper fuzz [this sprint]
 - **CAN2/F105 demo** (`tests/arduino_can_dual/`, `tests/test_can_dual.mjs`
   5/5, CI, preset, browser): CAN1+CAN2 loopback self-talk on the F105 SVD

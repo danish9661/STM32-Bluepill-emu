@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Documentation for the STM32 Bluepill emulator: getting started, supported boards, debugging with GDB, and the JavaScript API.">
+<link rel="canonical" href="https://danish9661.github.io/STM32-Bluepill-emu/docs.html">
+<title>Docs — STM32 Bluepill Emulator</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.65; }
+header { background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%); border-bottom: 1px solid #1e3a5f; padding: 12px 24px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; position: sticky; top: 0; z-index: 100; }
+header h1 { font-size: 17px; font-weight: 700; background: linear-gradient(90deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+header .sub { font-size: 12px; color: #64748b; }
+header .spacer { flex: 1; }
+header a.nav { font-size: 11.5px; color: #94a3b8; text-decoration: none; border: 1px solid #334155; padding: 4px 12px; border-radius: 999px; }
+header a.nav:hover, header a.nav.active { background: #1e40af; color: #fff; border-color: #3b82f6; }
+main { max-width: 880px; margin: 0 auto; padding: 28px 24px 60px; }
+h2 { font-size: 11px; color: #64748b; margin: 32px 0 14px; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600; }
+h2:first-child { margin-top: 0; }
+p, li { font-size: 14px; color: #cbd5e1; }
+ul, ol { padding-left: 22px; } li { margin: 5px 0; }
+a { color: #38bdf8; text-decoration: none; } a:hover { color: #7dd3fc; text-decoration: underline; }
+code { background: #0f172a; border: 1px solid #1e293b; border-radius: 4px; padding: 1px 6px; font-size: 12px; color: #7dd3fc; font-family: Consolas, monospace; }
+pre { background: #0b1120; border: 1px solid #1e293b; border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 12px 0; font-size: 12.5px; line-height: 1.6; color: #cbd5e1; font-family: Consolas, monospace; }
+.card { background: linear-gradient(145deg, #1e293b, #172033); border: 1px solid #2d3f56; border-radius: 12px; padding: 20px; margin: 14px 0; }
+.card:hover { border-color: #334155; }
+.card h3 { margin: 0 0 6px; font-size: 16px; } .card h3 a { color: #e2e8f0; }
+.card p { color: #94a3b8; font-size: 13.5px; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #1e293b; }
+th { color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+td { color: #cbd5e1; font-family: Consolas, monospace; font-size: 12.5px; }
+footer { text-align: center; padding: 26px; color: #475569; font-size: 12px; border-top: 1px solid #1e293b; }
+footer a { color: #38bdf8; }
+</style>
+</head>
+<body>
+<header>
+    <h1>&#x25C8; STM32 Bluepill Emulator</h1>
+    <span class="sub">Documentation</span>
+    <span class="spacer"></span>
+    <a class="nav" href="index.html">Demo</a>
+    <a class="nav active" href="docs.html">Docs</a>
+    <a class="nav" href="about.html">About</a>
+    <a class="nav" href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">GitHub</a>
+</header>
+<main>
+<h2>Start here</h2>
+<div class="card">
+    <h3><a href="index.html">Live demo</a></h3>
+    <p>Run real firmware in your browser: pick a preset (blink, UART echo, CAN chat, USB CDC, RTOS, per-board builds…), press Run, watch the terminal, GPIO grid and pin activity. Load your own <code>.bin</code> / <code>.hex</code> / <code>.elf</code> plus an optional <code>.map</code> for symbol names.</p>
+</div>
+<h2>Topics</h2>
+<div class="card">
+    <h3><a href="docs-boards.html">Supported boards &amp; chips</a></h3>
+    <p>Blue Pill, Maple Mini, Nucleo-F103RB, Generic F103RC, GD32F103, STM32F105 — flash sizes, DBGMCU ID codes, Arduino pin aliases, and the 5-step bring-up checklist.</p>
+</div>
+<div class="card">
+    <h3><a href="docs-debugging.html">Debugging with GDB</a></h3>
+    <p>Attach <code>arm-none-eabi-gdb</code> over TCP (<code>target remote :1234</code>): breakpoints, step, registers, memory — plus what the stub deliberately doesn't do.</p>
+</div>
+<div class="card">
+    <h3><a href="docs-api.html">JavaScript API</a></h3>
+    <p><code>STM32F1</code> wrapper, <code>createEmulator</code> options, virtual-peripheral events, host-injection calls (UART/GPIO/CAN/USB/I2C/SPI), custom JS peripherals.</p>
+</div>
+<h2>Tools</h2>
+<div class="card">
+    <h3><a href="ws-viewer.html">WebSocket viewer</a></h3>
+    <p>Stream a headless Node emulation into a browser: UART terminal, GPIO grid, event log. Pair with <code>pkg/ws-server.mjs</code>.</p>
+</div>
+<h2>Full reference</h2>
+<p>These pages are the short path. The complete reference lives with the source: <a href="https://github.com/danish9661/STM32-Bluepill-emu/blob/master/docs/USAGE.md">USAGE.md</a>, <a href="https://github.com/danish9661/STM32-Bluepill-emu/blob/master/docs/PERIPHERALS.md">PERIPHERALS.md</a>, <a href="https://github.com/danish9661/STM32-Bluepill-emu/blob/master/docs/BOARDS.md">BOARDS.md</a>, <a href="https://github.com/danish9661/STM32-Bluepill-emu/blob/master/docs/GDB.md">GDB.md</a>, <a href="https://github.com/danish9661/STM32-Bluepill-emu/blob/master/docs/STM32F1_API.md">STM32F1_API.md</a>.</p>
+</main>
+<footer>
+    STM32 Bluepill Emulator &middot; <a href="index.html">Live Demo</a> &middot; <a href="about.html">About</a> &middot;
+    <a href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">Source</a>
+</footer>
+</body>
+</html>

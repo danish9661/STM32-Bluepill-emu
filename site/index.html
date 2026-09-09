@@ -66,6 +66,34 @@ header a.nav:hover { background: #1e40af; color: #fff; border-color: #3b82f6; }
 .badge.running { background: #22c55e; color: #052e16; animation: pulse 1.5s infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
 
+/* ── Hero ────────────────────────────────────────────────────────────────── */
+.hero {
+  max-width: 1400px; margin: 0 auto; padding: 26px 24px 6px;
+  display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: center;
+}
+@media (max-width: 960px) { .hero { grid-template-columns: 1fr; } }
+.hero-text h2 { font-size: 24px; font-weight: 800; letter-spacing: -0.3px; margin-bottom: 8px; }
+.hero-text p { font-size: 13.5px; color: #94a3b8; line-height: 1.65; max-width: 860px; }
+.hero-text code {
+  background: #0f172a; border: 1px solid #1e293b; border-radius: 4px;
+  padding: 0 5px; font-size: 12px; color: #7dd3fc;
+}
+.hero-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.hero-chips .chip {
+  font-size: 11.5px; font-weight: 700; color: #7dd3fc;
+  background: rgba(14,165,233,0.10); border: 1px solid #155e75;
+  padding: 3px 12px; border-radius: 999px;
+}
+.hero-links { display: flex; gap: 10px; flex-wrap: wrap; }
+.btn {
+  font-size: 13px; font-weight: 700; text-decoration: none; color: #e2e8f0;
+  background: #1e293b; border: 1px solid #334155; padding: 9px 18px; border-radius: 8px;
+  transition: all 0.15s ease; white-space: nowrap;
+}
+.btn:hover { border-color: #3b82f6; background: #273449; }
+.btn.primary { background: #0ea5e9; border-color: #0ea5e9; color: #082f49; }
+.btn.primary:hover { background: #38bdf8; }
+
 /* ── Layout ──────────────────────────────────────────────────────────────── */
 .wrap {
   display: grid; grid-template-columns: 380px 1fr;
@@ -133,8 +161,8 @@ select:focus { outline: none; border-color: #0ea5e9; }
 
 /* ── Stats ───────────────────────────────────────────────────────────────── */
 .stats {
-  display: flex; gap: 16px; margin-bottom: 12px; font-size: 11.5px;
-  color: #64748b; overflow-x: auto;
+  display: flex; gap: 8px 16px; margin-bottom: 12px; font-size: 11.5px;
+  color: #64748b; overflow-x: auto; flex-wrap: wrap;
 }
 .stats > span { white-space: nowrap; }
 .stats b {
@@ -281,12 +309,36 @@ select:focus { outline: none; border-color: #0ea5e9; }
     <h1>&#x25C8; STM32 Bluepill Emulator</h1>
     <span class="sub">STM32F103C8 &middot; full-system WASM emulation in your browser</span>
     <span class="spacer"></span>
-    <a class="nav" href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">GitHub</a>
+    <a class="nav" href="index.html">Demo</a>
+    <a class="nav" href="docs.html">Docs</a>
     <a class="nav" href="about.html">About</a>
+    <a class="nav" href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">GitHub</a>
     <span id="stateBadge" class="badge off">Idle</span>
 </header>
 
-<div class="wrap">
+<section class="hero">
+    <div class="hero-text">
+        <h2>Run real STM32 firmware in your browser.</h2>
+        <p>Full-system emulation of the STM32F103 Blue Pill (and GD32, Maple Mini,
+        Nucleo, F103RC, F105 variants) — a native Rust ARM Cortex-M3 core plus
+        the complete peripheral set, compiled to one WebAssembly module.
+        Pick a preset below and press <b>Run</b>, or load your own
+        <code>.bin</code> / <code>.hex</code> / <code>.elf</code>.</p>
+        <div class="hero-chips">
+            <span class="chip">~70M IPS headless</span>
+            <span class="chip">39/39 firmware checks</span>
+            <span class="chip">8 chip variants</span>
+            <span class="chip">20+ live demos</span>
+        </div>
+    </div>
+    <div class="hero-links">
+        <a class="btn primary" href="#demo">Try the demo</a>
+        <a class="btn" href="docs.html">Read the docs</a>
+        <a class="btn" href="about.html">About the project</a>
+    </div>
+</section>
+
+<div class="wrap" id="demo">
     <div>
         <div class="card">
             <h2>Blue Pill Board</h2>
@@ -746,7 +798,7 @@ function boardSvg(ledOn) {
         top: ['3V3','GND','D-','D+'],
         bottom: ['5V','GND','BOOT0','NRST'],
     };
-    let out = `<svg class="board" width="330" height="440" viewBox="0 0 330 440">`;
+    let out = `<svg class="board" width="330" height="440" viewBox="-16 0 362 440">`;
     // PCB
     out += `<rect x="30" y="10" width="270" height="420" rx="14" fill="#0b3d91" stroke="#1d4ed8" stroke-width="1.5"/>`;
     out += `<rect x="36" y="16" width="258" height="408" rx="11" fill="none" stroke="rgba(255,255,255,0.08)"/>`;
@@ -788,30 +840,30 @@ function boardSvg(ledOn) {
                 const body = act ? `${act.count} toggles` : 'idle';
                 title = ` title="${name} — ${body}${lvl ? ', ' + lvl : ''}"`;
             }
-            let r, x1, y1, x2, y2, tx, ty;
+            let r, x1, y1, x2, y2, tx, ty, anchor;
             if (side === 'left') {
                 const y = 60 + i * (300 / (n - 1));
                 r = `<line x1="30" y1="${y}" x2="12" y2="${y}" stroke="${stroke}" stroke-width="3"${title}/>`;
-                x1 = 24; y1 = y; x2 = 20; y2 = y; tx = 14; ty = y + 3;
+                x1 = 24; y1 = y; x2 = 20; y2 = y; tx = 8; ty = y + 3; anchor = 'end';
             } else if (side === 'right') {
                 const y = 60 + i * (300 / (n - 1));
                 r = `<line x1="300" y1="${y}" x2="318" y2="${y}" stroke="${stroke}" stroke-width="3"${title}/>`;
-                x1 = 306; y1 = y; x2 = 310; y2 = y; tx = 322; ty = y + 3;
+                x1 = 306; y1 = y; x2 = 310; y2 = y; tx = 322; ty = y + 3; anchor = 'start';
             } else if (side === 'top') {
                 const x = 48 + i * (234 / (n - 1));
                 r = `<line x1="${x}" y1="10" x2="${x}" y2="26" stroke="${stroke}" stroke-width="3"${title}/>`;
-                x1 = x; y1 = 20; x2 = x; y2 = 24; tx = x - 9; ty = 32;
+                x1 = x; y1 = 20; x2 = x; y2 = 24; tx = x - 9; ty = 32; anchor = 'start';
             } else {
                 const x = 48 + i * (234 / (n - 1));
                 r = `<line x1="${x}" y1="430" x2="${x}" y2="414" stroke="${stroke}" stroke-width="3"${title}/>`;
-                x1 = x; y1 = 420; x2 = x; y2 = 416; tx = x - 9; ty = 406;
+                x1 = x; y1 = 420; x2 = x; y2 = 416; tx = x - 9; ty = 406; anchor = 'start';
             }
             out += r;
             if (flash) {
                 out += `<circle cx="${x2}" cy="${y2}" r="4" fill="rgba(251,191,36,0.5)"/>`;
             }
             if (name.length <= 4) {
-                out += `<text x="${tx}" y="${ty}" fill="#cbd5e1" font-size="7.5">${name}</text>`;
+                out += `<text x="${tx}" y="${ty}" fill="#cbd5e1" font-size="7.5" text-anchor="${anchor}">${name}</text>`;
             }
         });
     };
@@ -1625,6 +1677,7 @@ log('Pick a preset firmware, or load a .bin/.hex/.elf firmware and a .map for sy
 <footer>
     STM32 Bluepill Emulator &middot; full-system emulation via WebAssembly + native Rust ARM Cortex-M3 &middot;
     <a href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">Source</a> &middot;
+    <a href="docs.html">Docs</a> &middot;
     <a href="about.html">About</a>
     <span style="margin-left:12px; color:#1e293b;">|</span>
     <span style="margin-left:12px; font-size:10px; color:#334155;">Built with Rust + WASM</span>
