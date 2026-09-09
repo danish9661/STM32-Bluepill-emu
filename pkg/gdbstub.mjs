@@ -35,11 +35,11 @@ const pkt = (data) => {
     return `$${data}#${c.toString(16).padStart(2, '0')}`;
 };
 
-const TARGET_XML = `<?xml version="1.0"?><!DOCTYPE target SYSTEM "gdb-target.dtd">` +
+const TARGET_XML = `<?xml version="1.0"?>` +
     `<target version="1.0"><architecture>arm</architecture><feature name="org.gnu.gdb.arm.m-profile">` +
-    Array.from({ length: 13 }, (_, i) => `<reg name="r${i}" bitsize="32" type="uint32"/>`).join('') +
-    `<reg name="sp" bitsize="32" type="data_ptr"/><reg name="lr" bitsize="32" type="uint32"/>` +
-    `<reg name="pc" bitsize="32" type="code_ptr"/><reg name="xpsr" bitsize="32" type="uint32"/>` +
+    Array.from({ length: 13 }, (_, i) => `<reg name="r${i}" bitsize="32"/>`).join('') +
+    `<reg name="sp" bitsize="32"/><reg name="lr" bitsize="32"/>` +
+    `<reg name="pc" bitsize="32"/><reg name="xpsr" bitsize="32"/>` +
     `</feature></target>`;
 
 /**
@@ -115,17 +115,25 @@ export async function serveGdb(opts = {}) {
             const q = cmd.split(',')[0].split(':')[0].split(';')[0];
             if (cmd === '?') return send(stopReply());
             if (cmd.startsWith('qSupported')) {
+                // NOTE: no qXfer:features:read advertisement — GDB 15's XML
+                // parser rejects our minimal doc, while its default ARM
+                // layout matches our 17-register g packet exactly. The
+                // endpoint below still serves it to explicit requesters.
                 if (!noAck) sendRaw('+');
-                return send('PacketSize=3fff;qXfer:features:read+;QStartNoAckMode+;vContSupported+');
+                return send('PacketSize=3fff;QStartNoAckMode+;vContSupported+');
             }
             if (cmd === 'QStartNoAckMode') { noAck = true; return send('OK'); }
             if (cmd === 'qAttached') return send('1');
             if (cmd === 'qfThreadInfo') return send('m1');
             if (cmd === 'qsThreadInfo') return send('l');
-            if (cmd === 'qXfer:features:read:target.xml:0,fff') {
+            if (cmd.startsWith('qXfer:features:read:target.xml:')) {
+                const [off, len] = cmd.split(':').pop().split(',').map((x) => parseInt(x, 16));
                 const hex = Buffer.from(TARGET_XML, 'utf8').toString('hex');
-                return send(`l${hex}`);
+                const start = (off || 0) * 2, piece = hex.slice(start, start + (len || 0xfff) * 2);
+                return send((start + piece.length >= hex.length ? 'l' : 'm') + piece);
             }
+            if (cmd.startsWith('qXfer:features:read:target-features')) return send('');
+            if (cmd === 'qC') return send('QC1');
             if (cmd === 'g') return send(regs());
             if (/^p\d+$/.test(cmd)) {
                 const n = parseInt(cmd.slice(1), 10);

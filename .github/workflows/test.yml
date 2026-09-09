@@ -160,6 +160,8 @@ jobs:
         run: node tests/test_gdbstub.mjs
       - name: Per-board demo firmware (4 targets x chips)
         run: node tests/test_board_demo.mjs
+      - name: Dual-CAN demo (CAN1+CAN2 on F105 SVD map)
+        run: node tests/test_can_dual.mjs
       - name: STM32F1 wrapper API (ergonomic class over emulator.js)
         run: node tests/test_stm32f1_api.mjs
       - name: I2C/SPI/USART virtual-peripheral event queue

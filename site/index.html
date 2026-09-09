@@ -330,6 +330,7 @@ select:focus { outline: none; border-color: #0ea5e9; }
                     <option value="board_maple">Board: Maple Mini (LED D33)</option>
                     <option value="board_nucleo">Board: Nucleo-F103RB (LED D13)</option>
                     <option value="board_rc">Board: Generic F103RC</option>
+                    <option value="can_dual">Dual CAN (CAN1+CAN2 on F105)</option>
                 </select>
                 <select id="chipSelect" title="Chip / board (rp2040js-style: pick the peripheral map)">
                     <option value="stm32f103c8">STM32F103C8 (builtin map)</option>
@@ -1396,6 +1397,11 @@ $('loadPresetBtn').addEventListener('click', async () => {
             const buf = await fetch('arduino_mini_rtos.elf').then(r => r.arrayBuffer());
             await initEmulator(new Uint8Array(buf), 'arduino_mini_rtos.elf (preemptive tasks)');
             log('Press Run — tasks A/B preempt every 1ms via PendSV; sequences must stay gap-free.', 't-in');
+        } else if (preset === 'can_dual') {
+            $('chipSelect').value = 'stm32f105';
+            const buf = await fetch('arduino_can_dual.elf').then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(buf), 'arduino_can_dual.elf (CAN1+CAN2 on F105)');
+            log('Press Run — CAN1 and CAN2 talk to themselves in loopback; tx/rx pairs print per bus.', 't-in');
         } else if (preset.startsWith('board_')) {
             // Per-board demo: matching ELF + chip variant together.
             const boards = {

@@ -32,7 +32,13 @@ const send = (data) => new Promise((resolve) => {
     sock.write(want);
 });
 
-ok((await send('qSupported')).includes('qXfer:features:read+'), 'qSupported advertises target.xml');
+ok((await send('qSupported')).includes('vContSupported+'), 'qSupported advertises vCont');
+{
+    // Explicit qXfer still serves the target description (GDB 15 uses its
+    // default ARM layout unprompted, which matches our 17-reg g packet).
+    const xml = await send('qXfer:features:read:target.xml:0,100');
+    ok(xml[0] === 'l' || xml[0] === 'm', 'explicit qXfer serves target doc');
+}
 ok((await send('?')) === 'S05', 'halted query -> S05');
 const xml = await send('qXfer:features:read:target.xml:0,fff');
 ok(Buffer.from(xml.slice(1), 'hex').toString().includes('m-profile'), 'target.xml describes ARM core');

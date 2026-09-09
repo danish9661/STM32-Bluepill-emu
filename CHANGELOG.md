@@ -22,6 +22,12 @@ All notable changes to this project will be documented in this file.
   SCB ACTRL store; ADC temp nominal fix (0x6EE)
 - Demos: usb_cdc, pwm_wave, i2c_slave, mini_rtos (preemptive PendSV kernel),
   sd_logger (SDIO+ADC+RTC); page presets + browser coverage for all
+- Dual-CAN demo (`tests/arduino_can_dual`, CAN1+CAN2 loopback on the F105
+  SVD map) + preset + browser + CI
+- GDB stub proven against real arm-none-eabi-gdb 15 (connect/break/
+  continue/stepi/detach green; `tests/gdb_live_session.sh` dev-only):
+  offset/length-aware `qXfer`, no `qXfer` advertisement (GDB 15 rejects
+  minimal target.xml; its default ARM layout matches)
 - Per-board demo firmware (`tests/arduino_board_demo`, one sketch × 4 FQBNs:
   Blue Pill / Maple Mini / Nucleo-F103RB / Generic F103RC, shipped ELFs +
   page presets setting chip+ELF together); DFU-layout offset-vector boot

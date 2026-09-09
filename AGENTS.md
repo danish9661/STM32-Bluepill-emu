@@ -418,6 +418,26 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
   gdbstub/board data, `.d.ts` updated (CHIPS/chipInfo/i2cInject/mem/takeFault).
 - **Verified**: full gate re-run at commit.
 
+### 38. Dual-CAN demo + real GDB + deeper fuzz [this sprint]
+- **CAN2/F105 demo** (`tests/arduino_can_dual/`, `tests/test_can_dual.mjs`
+  5/5, CI, preset, browser): CAN1+CAN2 loopback self-talk on the F105 SVD
+  map — the one modeled feature with zero demo coverage. Each CAN keeps
+  its own filter bank in the model (silicon shares them; documented).
+- **Real GDB vs the stub** (arm-none-eabi-gdb 15 from the Arduino toolchain,
+  `tests/gdb_live_session.sh` dev-only): full session green (connect, regs
+  with symbols, mem, break loop, continue→hit, stepi, detach). Found by a
+  real client: `qXfer` exact-match broke on offset reads (now offset/length
+  aware) and GDB 15 rejects minimal target.xml while its default ARM layout
+  matches our 17-reg `g` exactly — so `qSupported` no longer advertises
+  qXfer (endpoint still served). Test client 17/17.
+- **Deeper fuzz**: 300 cases seeds 2+3, 0 divergences after triage. Seed 3
+  found E842/F2F2 (STREX with Rt==PC, UNPREDICTABLE: oracle faults, we
+  execute status-1): capstone mis-decodes it as `ttat`, defeating the
+  mnemonic-based STREX resample — fixed with structural
+  `skip_excl_rt_pc` (LDREX/STREX Rt==PC + STREX Rd==PC). 1100 cases total,
+  0 real divergences.
+- **Verified**: full gate re-run at commit.
+
 
 
 ## Next Phase — Long-term Optimizations

@@ -180,6 +180,25 @@ def skip_oracle_limits(first, second):
         return False
 
 
+def skip_excl_rt_pc(first, second):
+    """LDREX/STREX with Rt==PC (o2[15:12]==0xF), or STREX status to PC
+    (o2[11:8]==0xF): UNPREDICTABLE. The oracle faults; we execute
+    (STREX-fail status / LDREX load). Structural check (not capstone's
+    mnemonic — capstone mis-decodes some of these shapes, e.g. E842/F2F2
+    as `ttat`, which sailed past the strex resample and diverged on
+    seed 3). Resample; valid forms are probe-verified (ldrex_strex_forms).
+    """
+    if second is None:
+        return False
+    if (first & 0xFFF0) not in (0xE840, 0xE850, 0xE8D0, 0xE8C0):
+        return False
+    if ((second >> 12) & 0xF) == 0xF:
+        return True
+    if (first & 0xFFF0) in (0xE840, 0xE8C0) and ((second >> 8) & 0xF) == 0xF:
+        return True
+    return False
+
+
 def skip_wb_to_rt(first, second):
     """Single-transfer writeback-to-Rt (Rn==Rt with pre-index `!` or
     post-index): UNPREDICTABLE — the oracle keeps the loaded value while
@@ -318,6 +337,9 @@ def gen_single(rng, ops16, ops32):
         return None
     # Oracle limits (faults valid encodings): resample.
     if skip_oracle_limits(first, second):
+        return None
+    # UNPREDICTABLE exclusive-into-PC: resample (structural, not mnemonic).
+    if skip_excl_rt_pc(first, second):
         return None
     # UNPREDICTABLE writeback-to-Rt: resample.
     if skip_wb_to_rt(first, second):
