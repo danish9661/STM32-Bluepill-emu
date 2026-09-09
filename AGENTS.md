@@ -45,8 +45,8 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 
 ## Current Status (all work below is committed; see git log)
 
-> Last updated: 2026-08-22. The emulator is **feature-complete and stable**:
-> 236/236 unit tests, 39/39 firmware checks, ~22M IPS headless. Recent work:
+> Last updated: 2026-09-09. The emulator is **feature-complete and stable**:
+> 532 unit tests, 39/39 firmware checks, ~70M IPS headless (shared-box noise ±30%). Recent work:
 > `--help`/`--verbose` CLI + better errors, comprehensive About page, **removed all
 > `panic!` from user-input paths** (bad pin names / empty bus ranges now degrade
 > gracefully instead of aborting the WASM module), and an audit document
@@ -281,7 +281,7 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - **Method**: for every status bit in the big-5 peripherals, verify BOTH the set-condition and the clear-condition exist and are tested. Bits the model sets-but-never-clears wedge firmware (ORE proved it); bits never set at all are benign (firmware reads 0; document).
 - **USART**: ORE fixed last sprint (SR→DR sequence via `sr_read_armed`). TXE/RXNE/TC managed; IDLE/PE/FE/NE/LBD/CTS never set (no error injection; IDLE-line RX noted as future work, not a wedge risk).
 - **SPI**: RXNE/TXE managed; OVR/MODF/BSY/CRCERR never set (transfers complete synchronously, so no overrun can occur) — benign, documented.
-- **I2C — real bug found & fixed**: BTF was set when ITBUFEN cleared mid-transfer but cleared NOWHERE except full reset → stuck EV re-pends for the rest of the transfer (HAL clears ITBUFEN near every transfer end, so this fired constantly). Fix: clear BTF on DR read + DR write (transfer progress), matching RM0008. AF is set-on-NACK and clears on next START/reset (not W1C — benign: HAL never reuses AF state across transfers). OVR/BERR/ARLO/PECERR never set (benign). `stretch_until` is dead (never assigned — noted, harmless).
+- **I2C — real bug found & fixed**: BTF was set when ITBUFEN cleared mid-transfer but cleared NOWHERE except full reset → stuck EV re-pends for the rest of the transfer (HAL clears ITBUFEN near every transfer end, so this fired constantly). Fix: clear BTF on DR read + DR write (transfer progress), matching RM0008. AF is set-on-NACK and clears on next START/reset (not W1C — benign: HAL never reuses AF state across transfers). OVR/BERR/ARLO/PECERR never set (benign).
 - **TIM**: UIF/CCxIF set + W0C-cleared (`sr &= value`) ✓; TIF/COMIF/BIF/CCxOF never set (slave/motor features, out of scope) — benign.
 - **ADC**: AWD/EOC/JEOC/JSTRT/STRT set + cleared (EOC on DR read, rest on SR write; SR uses direct-assign `= value & 0x3F`, equivalent to W0C for sane firmware); F103 has no OVR bit — N/A.
 - **Recovery-test template** (new standard for error states): force the error, assert the flag, exercise the clear sequence, assert normal operation resumes. Added I2C-BTF block (7 asserts: SB→ADDR→Active→BTF set→DR-write clears→STOP clean→bus reusable; device on 0x51 so the later NACK-at-0x50 test still NACKs; `reset_ext_devices()` after to leave no residue).
@@ -348,6 +348,13 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - **I2C slave mode** (`src/peripherals/i2c.rs`, `src/lib.rs`, `pkg/emulator.js`, 19 unit asserts → 526/526): `SlaveAddr`/`SlaveActive` states + host inject API (`i2c_inject_start/write/read/stop` → `i2cInject*`): OAR1/OAR2 + general-call match, ADDR/STOPF sequences (STOPF via SR1-read-arms-CR1-write), RXNE/TXE + EV IRQs, NACK/None stretch-equivalents (RXNE-unread, TXE-empty, ACK-cleared), no slave DMA, 10-bit still out. Demo `arduino_i2c_slave` (Wire @ 0x42, 11/11 headless) + page host card (worker cases + single-flight ack sequencer; `postMessage` can't clone op closures — send explicit fields) + browser live write/read + CI. HAL quirk noted: first slave-read serves nothing (priming transaction needed — identical on silicon, test does write-then-read).
 - **Mini-RTOS demo** (`tests/arduino_mini_rtos/`, `tests/test_mini_rtos.mjs` 6/6, CI, preset, browser): hand-rolled 2-task preemptive kernel (PSP stacks, naked PendSV save/restore + `orr lr,#4` EXC_RETURN reshape + CONTROL.SPSEL, TIM4 1ms HardwareTimer tick, LDREX/STREX spinlock prints). Gap-free seqs prove context integrity; 200-tick cadence proves rate. Bugs found in the DEMO (not the model): C++-mangled `PendSV_Handler` never installed (vector hit the weak default spin — `extern "C"` required, incl. for asm-referenced globals); TIM7 doesn't exist on C8 (TIM4 instead). Model insight re-verified: pending bits coalesce intra-batch events (one delivery per batch per IRQ) — headless tests must use production-sized batches (20K), never 1M steps, for rate-accurate runs.
 - **Verified**: full gate re-run at commit.
+
+### 34. I2C 10-bit + SD logger + exception-policy tests + hygiene [this sprint]
+- **I2C 10-bit** (`src/peripherals/i2c.rs`, 6 unit asserts → 532/532): OAR1 mask widened to ADDMODE+ADD[9:0], full-10-bit slave match (no 7-bit aliasing), master headers NACK (no 10-bit peers — correct, reserved range); inject addr widened u8→u16. COVERAGE I2C row closed.
+- **SD data-logger demo** (`tests/arduino_sd_logger/`, `tests/test_sd_logger.mjs` 8/8, CI, preset, browser): register-level SDIO init + per-RTC-second ADC-temp sample, CMD24 log + CMD17 read-back verify (`log N rtc=R adc=A ok`); ADC shows live RC charging curve to nominal. Page preset ships a blank 1MiB SDHC image.
+- **Exception-policy tests** (`src/cpu/core_tests.rs` 10/10): same-priority non-nesting (0x1234), priority-ordered dispatch, bad-EXC_RETURN faults, SysTick debt re-pend-once-per-return (pins the §32 fix natively). No Unicorn differential: the oracle runs generic ARM without M-profile stacking (cortex-m3 bring-up probed, dropped as binding-fragile) — noted in `fuzz_diff.py`.
+- **Hygiene**: removed dead `stretch_until` (never assigned; transfer-level NACKs are the stretch model — doc paragraph removed too), AGENTS header date/counts refreshed, NVIC coalescing guidance in PERIPHERALS, `i2cInject*` in USAGE.
+- **Verified**: full gate re-run at commit (browser local 15/15; 3 gh-pages tests need external network).
 
 
 

@@ -442,13 +442,3 @@ Full protocol reference, event-type field layout, and custom-client examples:
 - Rebuild after Rust changes with the pinned toolchain and re-sync `pkg/` →
   `site/` (CI byte-exact guard):
   `PATH=binaryen-version_132/bin:$PATH RUSTFLAGS="--remap-path-prefix=$HOME=/build" wasm-pack build --target web`
-
-## I2C clock stretching note
-
-Clock stretching (`stretch_until` in `i2c.rs`) defers `fire_interrupts()` for a
-configurable number of instructions after a byte transfer, simulating the slave
-device holding SCL low during internal write cycles. This is only applied by the
-slave device's callback, **not** unconditionally on every DR write — the latter
-would deadlock the ISR-driven `HAL_I2C_Master_Transmit_IT` path (the TXE
-interrupt that drives subsequent byte writes would be deferred, stalling the
-transfer after the first byte).

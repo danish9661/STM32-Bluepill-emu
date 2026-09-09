@@ -162,17 +162,6 @@ export function clear_current_interrupt() {
 }
 
 /**
- * TEMPORARY DEBUG (remove before commit): last exception take.
- * @returns {Uint32Array}
- */
-export function dbg_last_take() {
-    const ret = wasm.dbg_last_take();
-    var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
-    return v1;
-}
-
-/**
  * DMA periph->mem pump: pop `size` bytes from the peripheral at `addr` via
  * the normal periph_read path (chunks <= 4, little-endian packed), so JS only
  * writes the result to RAM once per transfer instead of one crossing per chunk.

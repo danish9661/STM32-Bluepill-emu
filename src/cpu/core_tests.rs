@@ -387,3 +387,196 @@ fn mpu_register_file_and_enforcement() {
     assert_eq!(r(0xE000ED28) & 0xFF, 0x01, "IACCVIOL, no MMARVALID");
     assert!(cpu.fault.as_ref().unwrap().pc == 0x20002000);
 }
+
+/// Same-priority IRQs never nest: with both pending at equal priority the
+/// first runs to completion before the second starts (log 0x1234; any
+/// interleave would read 0x1324).
+#[test]
+fn same_priority_no_nesting() {
+    let _held = crate::test_util::lock();
+    init();
+    let sys = sys();
+    let mut mem = FlatMemory::new(0x100, 0x200);
+    // Handler A (IRQ6) @ 0x80: log(1); log(2); bx lr. Literal math
+    // (ldr addr = ALIGN(pc+4) + imm*4): log(1)@0x80 -> 0x98 (imm 5),
+    // log(2)@0x8A -> 0x98 (imm 3); SEQ word at 0x98.
+    mem.load(
+        &[
+            0x05, 0x48, 0x01, 0x68, 0x09, 0x01, 0x01, 0x31, 0x01, 0x60, //
+            0x03, 0x48, 0x01, 0x68, 0x09, 0x01, 0x02, 0x31, 0x01, 0x60, //
+            0x70, 0x47, 0x00, 0xBF, //
+            0x70, 0x01, 0x00, 0x20, // SEQ @ 0x20000170
+        ],
+        0x08000080,
+    );
+    // Handler B (IRQ7) @ 0xB0: log(3); log(4); bx lr (same layout).
+    mem.load(
+        &[
+            0x05, 0x48, 0x01, 0x68, 0x09, 0x01, 0x03, 0x31, 0x01, 0x60, //
+            0x03, 0x48, 0x01, 0x68, 0x09, 0x01, 0x04, 0x31, 0x01, 0x60, //
+            0x70, 0x47, 0x00, 0xBF, //
+            0x70, 0x01, 0x00, 0x20, //
+        ],
+        0x080000B0,
+    );
+    mem.load(&[0x81u8, 0x00, 0x00, 0x08], 0x08000000 + 22 * 4); // IRQ6 -> A
+    mem.load(&[0xB1u8, 0x00, 0x00, 0x08], 0x08000000 + 23 * 4); // IRQ7 -> B
+    let mut cpu = Cpu::new(0x200001C0, 0x080000C1);
+    cpu.dsp = false;
+    cpu.deliver_irqs = true;
+    set_intr_masks(0, 0);
+    sys.p.write(sys, 0x40010400, 4, 0x3); // IMR lines 0+1
+    sys.p.write(sys, 0xE000E404, 4, 0x80800000); // both prio 0x80
+    sys.p.nvic.borrow_mut().enable_irq(6);
+    sys.p.nvic.borrow_mut().enable_irq(7);
+    sys.p.write(sys, 0x40010410, 4, 0x3); // pend both lines
+    let mut guard = 0u32;
+    while (cpu.ipsr != 0 || sys.p.nvic.borrow().has_pending()) && guard < 500 && cpu.fault.is_none() {
+        set_intr_masks(0, 0);
+        // Batch-boundary style dispatch when idle (mirrors the drivers).
+        if cpu.ipsr == 0 {
+            if let Some(irq) = sys.p.nvic.borrow_mut().get_next_pending_intr() {
+                cpu.take_exception(sys, &mut mem, irq);
+            } else {
+                break;
+            }
+        }
+        cpu.run(sys, &mut mem, 1);
+        guard += 1;
+    }
+    assert!(cpu.fault.is_none(), "{:?}", cpu.fault);
+    assert_eq!(cpu.ipsr, 0);
+    assert_eq!(mem.read32(0x20000170), 0x1234, "same-priority handlers must not interleave");
+    assert!(!sys.p.nvic.borrow().is_in_interrupt(), "active stack balanced");
+}
+
+/// Pending IRQs dispatch strictly by priority (high first), independent of
+/// pend order: pend the low one first; the shift-register log must read 0x12
+/// (IRQ6's mark before IRQ7's), proving the high take won.
+#[test]
+fn priority_orders_dispatch() {
+    let _held = crate::test_util::lock();
+    init();
+    let sys = sys();
+    let mut mem = FlatMemory::new(0x100, 0x200);
+    // Handler @ 0x80 (IRQ6): log(1); bx lr. Literal math: log@0x80,
+    // pc=0x84 -> SEQ at 0x8C (imm 2). Body 12 B, word-aligned literal.
+    mem.load(
+        &[
+            0x02, 0x48, 0x01, 0x68, 0x09, 0x01, 0x01, 0x31, 0x01, 0x60, //
+            0x70, 0x47, //
+            0x70, 0x01, 0x00, 0x20, // SEQ @ 0x20000170
+        ],
+        0x08000080,
+    );
+    // Handler @ 0xA0 (IRQ7): log(2); bx lr (same layout).
+    mem.load(
+        &[
+            0x02, 0x48, 0x01, 0x68, 0x09, 0x01, 0x02, 0x31, 0x01, 0x60, //
+            0x70, 0x47, //
+            0x70, 0x01, 0x00, 0x20, //
+        ],
+        0x080000A0,
+    );
+    mem.load(&[0x81u8, 0x00, 0x00, 0x08], 0x08000000 + 22 * 4); // IRQ6
+    mem.load(&[0xA1u8, 0x00, 0x00, 0x08], 0x08000000 + 23 * 4); // IRQ7
+    let mut cpu = Cpu::new(0x200001C0, 0x080000C1);
+    cpu.dsp = false;
+    cpu.deliver_irqs = true;
+    set_intr_masks(0, 0);
+    sys.p.write(sys, 0xE000E404, 4, 0xC0400000); // IRQ6 prio 0x40, IRQ7 0xC0
+    sys.p.nvic.borrow_mut().enable_irq(6);
+    sys.p.nvic.borrow_mut().enable_irq(7);
+    // Pend LOW first, then HIGH (IMR needed for the SWIER path).
+    sys.p.write(sys, 0x40010400, 4, 0x3);
+    sys.p.write(sys, 0x40010410, 4, 1 << 1); // SWIER line 1 -> IRQ7
+    sys.p.write(sys, 0x40010410, 4, 1 << 0); // SWIER line 0 -> IRQ6
+    // First pop must be HIGH despite pend order (single pop: the pop pushes
+    // active priority, so take+return before the next pop).
+    assert_eq!(sys.p.nvic.borrow_mut().get_next_pending_intr(), Some(6));
+    cpu.take_exception(sys, &mut mem, 6);
+    let mut guard = 0u32;
+    // Drain everything (inline takes + returns) to idle.
+    while (cpu.ipsr != 0 || sys.p.nvic.borrow().has_pending()) && guard < 500 && cpu.fault.is_none() {
+        set_intr_masks(0, 0);
+        if cpu.ipsr == 0 {
+            if let Some(irq) = sys.p.nvic.borrow_mut().get_next_pending_intr() {
+                cpu.take_exception(sys, &mut mem, irq);
+                continue;
+            }
+            break;
+        }
+        cpu.run(sys, &mut mem, 1);
+        guard += 1;
+    }
+    assert!(cpu.fault.is_none(), "{:?}", cpu.fault);
+    assert_eq!(cpu.ipsr, 0);
+    assert_eq!(mem.read32(0x20000170), 0x12, "high-priority mark must come first");
+    assert!(!sys.p.nvic.borrow().is_in_interrupt(), "active stack balanced");
+}
+
+/// Branching to a non-EXC_RETURN value from handler mode faults loudly
+/// (UsageFault-worthy garbage return), instead of flying off to nowhere.
+#[test]
+fn bad_exc_return_faults() {
+    let _held = crate::test_util::lock();
+    init();
+    let sys = sys();
+    let mut mem = FlatMemory::new(0x100, 0x200);
+    // Handler @ 0x80: ldr r0, =0x12345678; bx r0.
+    mem.load(
+        &[0x00, 0x48, 0x80, 0x47, 0x78, 0x56, 0x34, 0x12],
+        0x08000080,
+    );
+    mem.load(&[0x81u8, 0x00, 0x00, 0x08], 0x08000000 + 22 * 4); // IRQ6
+    let mut cpu = Cpu::new(0x200001C0, 0x080000C1);
+    cpu.dsp = false;
+    cpu.deliver_irqs = true;
+    set_intr_masks(0, 0);
+    sys.p.nvic.borrow_mut().enable_irq(6);
+    sys.p.nvic.borrow_mut().set_intr_pending(6);
+    let irq = sys.p.nvic.borrow_mut().get_next_pending_intr();
+    assert_eq!(irq, Some(6));
+    cpu.take_exception(sys, &mut mem, 6);
+    let mut guard = 0u32;
+    while cpu.ipsr != 0 && guard < 50 && cpu.fault.is_none() {
+        set_intr_masks(0, 0);
+        cpu.run(sys, &mut mem, 1);
+        guard += 1;
+    }
+    assert!(cpu.fault.is_some(), "garbage EXC_RETURN must fault");
+}
+
+/// SysTick debt survives preemption accounting: with 2 ticks owed, one
+/// delivery + return leaves debt 1 and the IRQ re-pended (exactly-once
+/// re-pend per return — whole-debt drains would coalesce and lose one).
+#[test]
+fn systick_debt_repends_once_per_return() {
+    let _held = crate::test_util::lock();
+    init();
+    let sys = sys();
+    let mut mem = FlatMemory::new(0x100, 0x200);
+    mem.load(&[0x70, 0x47], 0x08000080); // SysTick handler: bx lr
+    mem.load(&[0x81u8, 0x00, 0x00, 0x08], 0x08000000 + 15 * 4); // exc 15
+    let mut cpu = Cpu::new(0x200001C0, 0x080000C1);
+    cpu.dsp = false;
+    // No inline re-take: observe exactly one delivery + return.
+    cpu.deliver_irqs = false;
+    set_intr_masks(0, 0);
+    sys.p.nvic.borrow_mut().systick_debt = 2;
+    sys.p.nvic.borrow_mut().set_intr_pending(-1);
+    let irq = sys.p.nvic.borrow_mut().get_next_pending_intr();
+    assert_eq!(irq, Some(-1));
+    cpu.take_exception(sys, &mut mem, -1);
+    assert_eq!(cpu.ipsr, 15);
+    let mut guard = 0u32;
+    while cpu.ipsr != 0 && guard < 50 && cpu.fault.is_none() {
+        set_intr_masks(0, 0);
+        cpu.run(sys, &mut mem, 1);
+        guard += 1;
+    }
+    assert!(cpu.fault.is_none(), "{:?}", cpu.fault);
+    assert_eq!(cpu.ipsr, 0);
+    assert_eq!(sys.p.nvic.borrow().systick_debt, 1, "one debt tick consumed per return");
+    assert_eq!(sys.p.nvic.borrow_mut().get_next_pending_intr(), Some(-1), "re-pended exactly once");
+}

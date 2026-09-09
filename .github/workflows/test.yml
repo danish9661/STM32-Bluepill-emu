@@ -148,6 +148,8 @@ jobs:
         run: node tests/test_i2c_slave.mjs
       - name: Mini-RTOS demo (PendSV preemptive tasks)
         run: node tests/test_mini_rtos.mjs
+      - name: SD data-logger demo (SDIO + ADC + RTC)
+        run: node tests/test_sd_logger.mjs
       - name: USB CDC serial demo (EP0 control + EP1 bulk echo)
         run: node tests/test_usb_cdc.mjs
       - name: CoreMark CPU-semantics check (known-answer CRCs)

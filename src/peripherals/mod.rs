@@ -67,7 +67,7 @@ pub trait Peripheral {
     fn usb_inject(&mut self, _sys: &System, _ep: usize, _data: &[u8], _is_setup: bool) -> bool { false }
     /// Host-side I2C slave transactions (this peripheral addressed as slave).
     /// Defaults: unhandled (NACK / no data).
-    fn i2c_slave_start(&mut self, _sys: &System, _addr: u8, _is_read: bool) -> bool { false }
+    fn i2c_slave_start(&mut self, _sys: &System, _addr: u16, _is_read: bool) -> bool { false }
     fn i2c_slave_write(&mut self, _sys: &System, _byte: u8) -> bool { false }
     fn i2c_slave_read(&mut self, _sys: &System) -> Option<u8> { None }
     fn i2c_slave_stop(&mut self, _sys: &System) -> bool { false }
@@ -683,7 +683,7 @@ impl Peripherals {
 
     /// Host-side I2C slave transactions (this peripheral addressed as slave
     /// by an external host). See the `I2c::slave_*` methods for semantics.
-    pub fn i2c_inject_start(&self, sys: &System, channel: u32, addr: u8, is_read: bool) -> bool {
+    pub fn i2c_inject_start(&self, sys: &System, channel: u32, addr: u16, is_read: bool) -> bool {
         if let Some(b) = Self::i2c_base(channel) {
             if let Some(slot) = self.bus.borrow().get(b) {
                 return slot.peripheral.borrow_mut().i2c_slave_start(sys, addr, is_read);

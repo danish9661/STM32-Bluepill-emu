@@ -19,6 +19,13 @@ Deliberately excluded (divergent by design, covered elsewhere):
   trivially equal; APSR forms INCLUDED), SETEND/CPS underground, DSP/FPU/
   copro (we fault, oracle executes; census proves the fault), hints except
   NOP/YIELD/DMB/DSB/ISB/CLREX/DBG/PLD.
+  Exceptions structurally (stacking, nesting order, EXC_RETURN misuse,
+  SysTick debt) are NOT fuzzable here: the oracle runs generic ARM
+  (UC_ARCH_ARM, no M-profile stacking — a cortex-m3 bring-up was probed
+  and dropped as binding-fragile). They are covered natively instead:
+  src/cpu/core_tests.rs (WFI, nesting, SVC balance, PSP switch, same-prio
+  non-nesting, priority order, bad EXC_RETURN, debt re-pend) plus the
+  periph39 SVC/PendSV and mini_rtos PendSV firmware proofs.
 Exit 0 on full agreement; exit 1 listing divergences for triage.
 """
 import os

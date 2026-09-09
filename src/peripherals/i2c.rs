@@ -48,9 +48,6 @@ pub struct I2c {
     /// DMA channel: I2C1 TX=ch4/ch6 (remap), RX=ch5/ch7 (remap); I2C2=none
     dma_channel_tx: u8,
     dma_channel_rx: u8,
-    /// Clock stretching: instruction count until SCL is released by the slave.
-    /// If non-zero, interrupts are deferred until the stretch period expires.
-    stretch_until: u64,
     /// STOPF clear sequence: set by an SR1 read while STOPF is up, consumed
     /// by the next CR1 write (RM0008: SR1 read followed by CR1 write).
     stopf_armed: bool,
@@ -68,7 +65,6 @@ impl Default for I2c {
             state: I2cState::Idle, sr1_addr_flag: false, stopf_armed: false,
             irq_ev: 0, irq_er: 0,
             dma_channel_tx: 0, dma_channel_rx: 0,
-            stretch_until: 0,
             pec: 0,
         }
     }
@@ -121,17 +117,24 @@ impl I2c {
     fn pec_xfer(&self) -> bool { self.cr1 & (1 << 12) != 0 }
     fn engc(&self) -> bool { self.cr1 & (1 << 6) != 0 }
 
-    /// Slave address match against OAR1 (7-bit), OAR2 (dual, ENDUAL) and
-    /// general call (addr 0 with ENGC). 10-bit mode (OAR1 ADDMODE) is not
-    /// modeled — the OAR1 write mask drops bit 15, so it can't be selected.
-    fn slave_match(&self, addr: u8) -> bool {
+    /// Slave address match: OAR1 (7-bit ADD[7:1], or 10-bit ADD[9:0] with
+    /// ADDMODE), OAR2 dual 7-bit (ENDUAL), general call (addr 0 with ENGC).
+    /// 10-bit matches compare the full 10 bits (no 7-bit aliasing); the
+    /// ADD10 staging flag is abbreviated (single-shot inject sets ADDR).
+    fn slave_match(&self, addr: u16) -> bool {
         if addr == 0 {
             return self.engc();
         }
-        if ((self.oar1 >> 1) & 0x7F) as u8 == addr {
+        if self.oar1 & (1 << 15) != 0 {
+            return (self.oar1 & 0x3FF) as u16 == (addr & 0x3FF);
+        }
+        if addr > 0x7F {
+            return false;
+        }
+        if ((self.oar1 >> 1) & 0x7F) as u16 == addr {
             return true;
         }
-        if self.oar2 & 1 != 0 && ((self.oar2 >> 1) & 0x7F) as u8 == addr {
+        if self.oar2 & 1 != 0 && ((self.oar2 >> 1) & 0x7F) as u16 == addr {
             return true;
         }
         false
@@ -140,7 +143,7 @@ impl I2c {
     /// Host START + address (slave mode). ACKs on OAR match (PE must be set,
     /// master engine idle): ADDR flag, BUSY (MSL=0), GENCALL for addr 0.
     /// Returns false (NACK) when busy, disabled or unmatched.
-    pub fn slave_start(&mut self, sys: &System, addr: u8, is_read: bool) -> bool {
+    pub fn slave_start(&mut self, sys: &System, addr: u16, is_read: bool) -> bool {
         if self.cr1 & 1 == 0 {
             return false;
         }
@@ -154,7 +157,10 @@ impl I2c {
         self.sr2 = (1 << 1) | if addr == 0 { 1 << 4 } else { 0 }; // BUSY[+GENCALL]
         if self.pec_enabled() {
             self.pec = 0;
-            self.pec_feed(addr << 1 | is_read as u8);
+            if addr > 0x7F {
+                self.pec_feed((addr >> 8) as u8);
+            }
+            self.pec_feed(((addr << 1) & 0xFF) as u8 | is_read as u8);
         }
         self.state = I2cState::SlaveAddr { is_read };
         self.fire_interrupts(sys);
@@ -222,17 +228,10 @@ impl I2c {
     }
 
     fn fire_interrupts(&mut self, sys: &System) {
-        // Clock stretching: defer interrupts while SCL is held low by a slave device.
-        // The stretch_until is set when a byte/address transfer completes; this
-        // method defers interrupt delivery until the stretch period expires.
-        if self.stretch_until != 0 {
-            let ic = crate::system::instruction_count();
-            if ic < self.stretch_until {
-                return; // defer until SCL released
-            }
-            self.stretch_until = 0; // stretch period expired
-        }
-
+        // NOTE: no clock-stretch deferral here. Stretching is modeled at the
+        // transfer level instead (slave inject NACKs/None while not ready),
+        // never by delaying IRQs — deferring TXE interrupts deadlocked the
+        // ISR-driven HAL_I2C_Master_Transmit_IT path (stall after 1st byte).
         let itevten = (self.cr2 >> 9) & 1;  // bit 9 = ITEVTEN
         let iterren = (self.cr2 >> 8) & 1;  // bit 8 = ITERREN
         let itbufen = (self.cr2 >> 10) & 1; // bit 10 = ITBUFEN
@@ -258,7 +257,7 @@ impl Peripheral for I2c {
         sys.p.afio_remap_status(&self.name)
     }
 
-    fn i2c_slave_start(&mut self, sys: &System, addr: u8, is_read: bool) -> bool {
+    fn i2c_slave_start(&mut self, sys: &System, addr: u16, is_read: bool) -> bool {
         self.slave_start(sys, addr, is_read)
     }
     fn i2c_slave_write(&mut self, sys: &System, byte: u8) -> bool {
@@ -445,7 +444,7 @@ impl Peripheral for I2c {
                 }
                 self.fire_interrupts(sys);
             }
-            0x08 => self.oar1 = value & 0x3FFF,
+            0x08 => self.oar1 = value & 0x87FF, // ADD[9:0] + ADDMODE(15)
             0x0C => self.oar2 = value & 0x3FF,
             0x10 => {
                 // Driver hook parity (was a JS mem hook): the HAL

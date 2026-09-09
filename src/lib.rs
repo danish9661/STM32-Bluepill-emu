@@ -490,7 +490,7 @@ pub fn i2c_inject_rx(channel: u8, bytes: &[u8]) {
 /// slave-RX, RXNE unread or ACK cleared; read returns -1 when not in
 /// slave-TX or DR empty (stretch equivalents).
 #[wasm_bindgen]
-pub fn i2c_inject_start(channel: u8, addr: u8, is_read: bool) -> bool {
+pub fn i2c_inject_start(channel: u8, addr: u16, is_read: bool) -> bool {
     match try_sys() {
         Some(sys) => sys.p.i2c_inject_start(sys, channel as u32, addr, is_read),
         None => false,

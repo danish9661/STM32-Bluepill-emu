@@ -324,6 +324,7 @@ select:focus { outline: none; border-color: #0ea5e9; }
                     <option value="pwm_wave">TIM DMA-Burst PWM Wave (TIM3+DMA1)</option>
                     <option value="i2c_slave">I2C Slave @ 0x42 (write + read)</option>
                     <option value="mini_rtos">Mini-RTOS (PendSV preemptive tasks)</option>
+                    <option value="sd_logger">SD Data Logger (SDIO+ADC+RTC)</option>
                 </select>
                 <select id="chipSelect" title="Chip / board (rp2040js-style: pick the peripheral map)">
                     <option value="stm32f103c8">STM32F103C8 (builtin map)</option>
@@ -1361,6 +1362,13 @@ $('loadPresetBtn').addEventListener('click', async () => {
             const buf = await fetch('arduino_mini_rtos.elf').then(r => r.arrayBuffer());
             await initEmulator(new Uint8Array(buf), 'arduino_mini_rtos.elf (preemptive tasks)');
             log('Press Run — tasks A/B preempt every 1ms via PendSV; sequences must stay gap-free.', 't-in');
+        } else if (preset === 'sd_logger') {
+            // 1 MiB blank SDHC image (written blocks land here, in RAM only)
+            const buf = await fetch('arduino_sd_logger.elf').then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(buf), 'arduino_sd_logger.elf (SD data logger)', {
+                sd_card: [{ peripheral: 'SDIO', data: new Uint8Array(2048 * 512) }],
+            });
+            log('Press Run — every RTC second the ADC temp is logged to the next SD block and verified.', 't-in');
         }
     } catch (e) {
         log(`Failed to load preset: ${e.message || e}`, 't-err');

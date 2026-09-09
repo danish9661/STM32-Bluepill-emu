@@ -950,6 +950,23 @@ assert_eq(i2c_inject_read(1), -1, 'slave TXE re-arms after byte');
 assert_eq(i2c_inject_stop(1), true, 'slave STOP after read');
 reset();
 
+// 10-bit slave addressing (OAR1 ADDMODE + ADD[9:0])
+periph_write(0x4002101C, 4, 1 << 21); // I2C1 clock
+periph_write(I2C1 + 0x00, 4, 1 | (1 << 10)); // PE + ACK
+periph_write(I2C1 + 0x08, 4, (1 << 15) | 0x2A5); // ADDMODE + addr 677
+assert_eq(i2c_inject_start(1, 677, false), true, 'slave ACKs 10-bit match');
+assert_eq(i2c_inject_stop(1), true, 'slave STOP after 10-bit match');
+assert_eq(i2c_inject_start(1, 676, false), false, 'slave NACKs 10-bit mismatch');
+assert_eq(i2c_inject_start(1, 0x25, false), false, 'no 7-bit alias of 10-bit addr');
+// 7-bit mode ignores high address bits (no false match)
+periph_write(I2C1 + 0x08, 4, 0x42 << 1); // back to 7-bit 0x42
+assert_eq(i2c_inject_start(1, 0x142, false), false, '7-bit mode rejects 10-bit addr');
+// Master 10-bit header (0xF0 range, no 10-bit peers) NACKs with AF
+periph_write(I2C1 + 0x00, 4, 1 | (1 << 8)); // START
+periph_write(I2C1 + 0x10, 4, 0xF2); // header for 10-bit write to 0x255
+assert_eq(periph_read(I2C1 + 0x14, 4) & (1 << 10), 1 << 10, 'master 10-bit header NACKs (AF)');
+reset();
+
 // ============================================================
 // RTC
 // ============================================================

@@ -20,7 +20,7 @@ SPI3, GPIOE-G) are harmless supersets, marked *(S)* below.
 | WWDG | 0x40002C00 | Full | Counter + reset + early-wakeup interrupt (EWI → IRQ0) |
 | IWDG | 0x40003000 | Full | Down-counter + reset; runs through STOP/STANDBY |
 | USART1-3, UART4/5 | APB1/2 | Full | Byte-time pacing, RXNE/TXE IRQs, DMA channels (incl. DMA2 for UART4/5) |
-| I2C1/2 | APB1 | Full | Master TX/RX state machine + slave mode (host inject: OAR match, ADDR/STOPF, RXNE/TXE, EV IRQs); **no 10-bit addressing** (OAR registers store only) |
+| I2C1/2 | APB1 | Full | Master TX/RX state machine + slave mode (host inject: OAR match incl. 10-bit, ADDR/STOPF, RXNE/TXE, EV IRQs) |
 | USB (FS device) | 0x40005C00 | Full | EP0-7R toggle semantics, CNTR masks, ISTR (W0C flags; CTR/DIR/EP_ID derived), DADDR, BTABLE, 512 B PMA (byte-exact), RESET on FRES release, SETUP/OUT injection with DTOG sequencing, IN completion as `UsbIn` event + IRQ20. SOF engine (FNR/RXDP, SOF/SUSP/WKUP IRQs, wakeup IRQ42, auto-suspend, RESUME), double-buffered bulk endpoints. Still out: isochronous endpoints (treated as bulk) |
 | CAN1 (+CAN2 via F105 SVD) | APB1 | Full | Mailboxes, ID-list + mask filters, TX/RX IRQs, RX injection |
 | BKP | 0x40006C00 | Full | Backup registers (RM0008 map) + tamper pin (TPE/TPAL, IRQ2, DR clear) |
@@ -125,7 +125,7 @@ every real Blue Pill storage project uses SD.
 
 ## 5. Test coverage of the above
 
-- `tests/test_all.mjs` (507): SDIO init/R/W/IRQ/DMA/no-card/SVD; DMA global
+- `tests/test_all.mjs` (532): SDIO init/R/W/IRQ/DMA/no-card/SVD; DMA global
   streams; WWDG EWI; PVD edges; RTC second/overflow + flags; RCC clock decode;
   tamper; USB toggles/RESET/control/bulk/IRQ/SOF/suspend/double-buffer; TIM
   DMA-burst window; CAN TX edge-trigger (no-re-pend); ACTRL store; ADC temp/
