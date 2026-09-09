@@ -120,6 +120,11 @@ test.describe('Browser firmware tests', () => {
 
   test('chip selector works (STM32F105)', async ({ page }) => {
     await page.goto('http://localhost:8765/');
+    // All builtin chips are offered, GD32 included.
+    const values = await page.$eval('#chipSelect', el => [...el.options].map(o => o.value));
+    for (const c of ['stm32f103c8', 'gd32f103c8', 'maple_mini', 'nucleo_f103rb', 'stm32f103rc']) {
+      expect(values).toContain(c);
+    }
     await page.selectOption('#chipSelect', 'stm32f105');
     await page.selectOption('#presetSelect', 'periph37');
     await page.click('#loadPresetBtn');

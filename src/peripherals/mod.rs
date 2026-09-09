@@ -205,6 +205,11 @@ impl Peripherals {
     /// Implemented ACTRL bits: DISMCYCINT(0)/DISFOLD(2) (DISFPCA is M4).
     pub const ACTRL_MASK: u32 = 0x7;
 
+    /// Debug MCU IDCODE register (DBGMCU_IDCODE @ 0xE0042000, read-only).
+    /// Reports the selected chip (STM32F103: 0x10016410, GD32F103:
+    /// 0x2BA01477). Routed here so both maps answer without a bus window.
+    pub const DBG_IDCODE_ADDR: u32 = 0xE004_2000;
+
     pub const MEMORY_MAPS: [(u32, u32); 2] = [
         (0x4000_0000, 0xB000_0000),
         (0xE000_0000, 0xE100_0000),
@@ -510,6 +515,9 @@ impl Peripherals {
         }
         if addr == Self::ACTRL_ADDR {
             return self.actrl.get();
+        }
+        if addr == Self::DBG_IDCODE_ADDR {
+            return crate::dbg_idcode();
         }
         // NVIC priority registers are byte-addressable, bypass alignment
         if Self::nvic_priority_check(addr) {

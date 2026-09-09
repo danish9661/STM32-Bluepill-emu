@@ -148,9 +148,18 @@ export function parseElf(buffer) {
  * @param {number}    [opts.ram_size=0x5000]    SRAM size (20KB default)
  * @param {number}    [opts.vector_table=0x08000000] Vector table base address
  * @param {string}    [opts.svd]                SVD XML string (optional; defaults to hardcoded F103C8 map)
- * @param {string|object} [opts.chip]           'stm32f103c8' (builtin hardcoded map, default) or
- *                                              { name, svd } to build the peripheral map from an SVD
- *                                              (any F1-family chip, e.g. STM32F105 with CAN2)
+ * @param {string|object} [opts.chip]           Chip selector (builtin map + sizes
+ *                                              + DBGMCU IDCODE). Known names (flash/RAM/IDCODE):
+ *                                              'stm32f103c8' (64K/20K, default),
+ *                                              'stm32f103cb' / 'maple_mini' (128K/20K),
+ *                                              'stm32f103rc' (256K/48K),
+ *                                              'nucleo_f103rb' (128K/20K),
+ *                                              'gd32f103c8' / 'gd32f103cb' / 'gd32f103rb'
+ *                                              (64/128K/20K, IDCODE 0x2BA01477).
+ *                                              Unknown names warn and behave like
+ *                                              f103c8. Or { name, svd, flash?,
+ *                                              ram?, idcode? } to build the map
+ *                                              from an SVD (e.g. STM32F105 + CAN2).
  * @param {Array}     [opts.js_peripherals=[]]  rp2040js-style custom peripherals:
  *                                              [{ base, size, read(addr,size), write(addr,value,size) }]
  * @param {number}    [opts.uart_addr=0x40013800] USART used for uartRx()
@@ -174,10 +183,25 @@ export function parseElf(buffer) {
  * @returns {Promise<BluepillEmulator>}
  */
 export async function createEmulator(opts = {}) {
+    // Builtin chip table: flash/RAM sizes + DBGMCU IDCODE. GD32F103 is
+    // register-identical at everything modeled, so no SVD is needed —
+    // only sizes and the IDCODE differ (timing stays instruction-based).
+    const CHIPS = {
+        stm32f103c8: { flash: 0x10000, ram: 0x5000, idcode: 0x10016410, label: 'STM32F103C8' },
+        stm32f103cb: { flash: 0x20000, ram: 0x5000, idcode: 0x10016410, label: 'STM32F103CB' },
+        maple_mini:  { flash: 0x20000, ram: 0x5000, idcode: 0x10016410, label: 'Maple Mini (F103CB)' },
+        nucleo_f103rb: { flash: 0x20000, ram: 0x5000, idcode: 0x10016410, label: 'Nucleo-F103RB' },
+        stm32f103rc: { flash: 0x40000, ram: 0xC000, idcode: 0x10016410, label: 'STM32F103RC' },
+        gd32f103c8:  { flash: 0x10000, ram: 0x5000, idcode: 0x2BA01477, label: 'GD32F103C8' },
+        gd32f103cb:  { flash: 0x20000, ram: 0x5000, idcode: 0x2BA01477, label: 'GD32F103CB' },
+        gd32f103rb:  { flash: 0x20000, ram: 0x5000, idcode: 0x2BA01477, label: 'GD32F103RB' },
+    };
+    const chipEntry = (typeof opts.chip === 'string' && CHIPS[opts.chip]) ? CHIPS[opts.chip]
+        : (typeof opts.chip === 'object' && opts.chip !== null ? opts.chip : null);
     const {
         firmware = new Uint8Array(0),
-        flash_size = 0x10000,
-        ram_size = 0x5000,
+        flash_size = chipEntry?.flash ?? 0x10000,
+        ram_size = chipEntry?.ram ?? 0x5000,
         vector_table = 0x08000000,
         svd = null,
         chip = 'stm32f103c8',
@@ -203,7 +227,7 @@ export async function createEmulator(opts = {}) {
      i2c_oled_fb, lcd_fb, gpio_take_pin_events,     drain_events, spi_inject_miso, i2c_inject_rx, i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop, usb_inject_setup, usb_inject_out,
     rustcpu_init, rustcpu_load, rustcpu_run, rustcpu_fault, rustcpu_fault_clear, rustcpu_dispatch,
     rustcpu_regs, rustcpu_set_pc, rustcpu_mem_read, rustcpu_mem_write, rustcpu_dma_pump, rustcpu_i2c_hook_fired,
-    rustcpu_write_tap, rustcpu_take_writes } = periph;
+    rustcpu_write_tap, rustcpu_take_writes, set_dbg_idcode } = periph;
 
     // Register external devices BEFORE init()
     reset_ext_devices();
@@ -233,7 +257,7 @@ export async function createEmulator(opts = {}) {
     }
 
     const chipSvd = (typeof chip === 'string') ? (svd ?? null) : (chip.svd ?? null);
-    if (typeof chip === 'string' && chip !== 'stm32f103c8' && !chipSvd) {
+    if (typeof chip === 'string' && !CHIPS[chip] && !chipSvd) {
         console.warn(`createEmulator: unknown chip "${chip}" (no SVD provided), using builtin STM32F103C8 map`);
     }
     if (chipSvd) {
@@ -241,6 +265,8 @@ export async function createEmulator(opts = {}) {
     } else {
         init();
     }
+    // DBGMCU IDCODE for the selected chip (init() resets it to F103).
+    set_dbg_idcode((chipEntry?.idcode ?? 0x10016410) >>> 0);
 
     // rp2040js-style custom peripherals: JS callbacks on the peripheral bus.
     for (const jp of js_peripherals || []) {

@@ -101,10 +101,27 @@ pub fn reset_ext_devices() {
 pub fn init() {
     console_error_panic_hook::set_once();
     system::INSTRUCTION_COUNT.store(0, Ordering::Relaxed);
+    DBG_IDCODE.store(0x1001_6410, Ordering::Relaxed);
     peripherals::gpio::clear_pin_events();
     native::reset();
     set_sys(WasmSystem::new());
     system::sync_mpu_gate(sys());
+}
+
+/// Debug MCU IDCODE reported at 0xE0042000 (set per chip; defaults to the
+/// STM32F103 value). GD32F103 reports 0x2BA01477. Timing stays
+/// instruction-budget based regardless of the chip's rated MHz.
+static DBG_IDCODE: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0x1001_6410);
+
+/// Select the emulated chip's IDCODE (see DBG_IDCODE). Call after init().
+#[wasm_bindgen]
+pub fn set_dbg_idcode(code: u32) {
+    DBG_IDCODE.store(code, Ordering::Relaxed);
+}
+
+pub(crate) fn dbg_idcode() -> u32 {
+    DBG_IDCODE.load(Ordering::Relaxed)
 }
 
 /// Initialize the emulator from an SVD XML string (e.g., STM32F407.svd).

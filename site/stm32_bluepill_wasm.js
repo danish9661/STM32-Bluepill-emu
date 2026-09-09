@@ -827,6 +827,14 @@ export function rustcpu_write_tap(on) {
 }
 
 /**
+ * Select the emulated chip's IDCODE (see DBG_IDCODE). Call after init().
+ * @param {number} code
+ */
+export function set_dbg_idcode(code) {
+    wasm.set_dbg_idcode(code);
+}
+
+/**
  * Set PRIMASK and BASEPRI values from CPU state.
  * @param {number} primask
  * @param {number} basepri

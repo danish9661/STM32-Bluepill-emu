@@ -46,7 +46,7 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 ## Current Status (all work below is committed; see git log)
 
 > Last updated: 2026-09-09. The emulator is **feature-complete and stable**:
-> 532 unit tests, 39/39 firmware checks, ~70M IPS headless (shared-box noise ±30%). Recent work:
+> 537 unit tests, 39/39 firmware checks, ~70M IPS headless (shared-box noise ±30%). Recent work:
 > `--help`/`--verbose` CLI + better errors, comprehensive About page, **removed all
 > `panic!` from user-input paths** (bad pin names / empty bus ranges now degrade
 > gracefully instead of aborting the WASM module), and an audit document
@@ -362,6 +362,24 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - **USB isochronous proven** (5 asserts → test_all 537/537): ISO OUT/IN move data exactly like bulk; TYPE stored, no SOF-gating. COVERAGE USB rows closed (no data-path gaps left).
 - **Maintenance audit**: deps stay pinned deliberately (capstone 5.0.9 / unicorn 2.1.4 — oracle parity); CI already covers 4 suites this agent initially missed (`test_i2c_busy`, `test_dma_requests`, `test_dma_signals`, `test_slave_pwm_dma2` — all green, unaffected by I2C/CAN/TIM changes); browser-launch failures traced to /tmp contention on this box (TMPDIR workaround, CI runners unaffected); TI frame format / SMBus ALERT / USART IrDA-smartcard documented as no-consumer gaps (IrDA is pulse-shaping-invisible at register level).
 - **Verified**: full gate re-run at commit.
+
+### 36. Chip variants: GD32 toggle + board options [this sprint]
+- **No SVD needed**: GD32F103 is register-identical at everything modeled, so
+  variants are a chip table (`pkg/emulator.js` CHIPS: flash/RAM sizes +
+  DBGMCU IDCODE), not a new map. New `set_dbg_idcode` export + minimal
+  `DBG_IDCODE @ 0xE0042000` readout (Peripherals-level routing, STIR/ACTRL
+  precedent; init() resets it to the F103 ID). Timing stays
+  instruction-budget based on every chip (108 MHz changes nothing).
+- **Chips**: stm32f103c8 (default, unchanged), stm32f103cb, maple_mini,
+  nucleo_f103rb, stm32f103rc (256K/48K), gd32f103c8/cb/rb (IDCODE
+  0x2BA01477). Page selector + main-thread size plumbing fixed to pass
+  names through (was hardcoded to f103c8 sizes).
+- **Tests**: `tests/test_chips.mjs` 9/9 (IDCODE per chip + GD32 UART echo
+  round-trip), CI line, browser chip-option assertions. README refreshed
+  (stale Unicorn-era numbers → 70M IPS, 537 tests, current depth).
+- **Verified**: full gate re-run at commit (no behavior change for existing
+  firmware: nothing addressed 0xE0042000 before; default IDCODE is the
+  real F103 value).
 
 
 

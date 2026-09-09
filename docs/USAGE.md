@@ -81,6 +81,11 @@ node pkg/cli.mjs firmware.elf --periph-plugin=./my_periph.mjs
 
 Multi-chip: `chip: 'stm32f103c8'` uses the builtin hardcoded map; any F1-family
 chip works from an SVD (`svd/STM32F105xx.svd` is shipped — adds CAN2@0x40006800).
+Register-compatible variants need no SVD — pick a builtin name and get the
+right flash/RAM sizes plus DBGMCU IDCODE (`tests/test_chips.mjs` asserts all):
+`stm32f103cb`, `maple_mini` (F103CB 128K), `nucleo_f103rb` (128K),
+`stm32f103rc` (256K/48K), `gd32f103c8/cb/rb` (IDCODE 0x2BA01477).
+Timing stays instruction-budget based on every chip.
 Unsupported SVD peripherals (e.g. F105's ETH) are skipped, and the ARM core
 peripherals (NVIC/SysTick/SCB) are auto-registered at their fixed addresses even
 when the SVD omits them. F4/G0-class chips (MODER-style GPIO, different RCC)

@@ -329,6 +329,10 @@ select:focus { outline: none; border-color: #0ea5e9; }
                 <select id="chipSelect" title="Chip / board (rp2040js-style: pick the peripheral map)">
                     <option value="stm32f103c8">STM32F103C8 (builtin map)</option>
                     <option value="stm32f105">STM32F105 (SVD: CAN1+CAN2)</option>
+                    <option value="gd32f103c8">GD32F103C8 (ID 0x2BA01477)</option>
+                    <option value="maple_mini">Maple Mini (F103CB 128K)</option>
+                    <option value="nucleo_f103rb">Nucleo-F103RB (128K)</option>
+                    <option value="stm32f103rc">Generic F103RC (256K/48K)</option>
                 </select>
                 <button id="loadPresetBtn" class="primary">Load Preset</button>
                 <label class="file-btn">Load .bin / .hex <input type="file" id="binInput" accept=".bin,.hex"></label>
@@ -475,7 +479,7 @@ function handleWorkerMsg(e) {
     $('resetBtn').disabled = false;
     $('uartInput').disabled = false;
     $('sendBtn').disabled = false;
-    if (firmwareData) log(`Loaded ${firmwareData.name || 'firmware'} on ${firmwareData.chip === 'stm32f105' ? 'STM32F105' : 'STM32F103C8'} (${firmwareData.bytes?.length || '?'} bytes) — worker ready. PC=0x${regs.PC.toString(16).padStart(8,'0')}`);
+    if (firmwareData) log(`Loaded ${firmwareData.name || 'firmware'} on ${firmwareData.chip === 'stm32f105' ? 'STM32F105' : (firmwareData.chip || 'stm32f103c8')} (${firmwareData.bytes?.length || '?'} bytes) — worker ready. PC=0x${regs.PC.toString(16).padStart(8,'0')}`);
     updateRegsWorker(m.pc, m.sp, null);
     setState('Ready');
   } else if (m.type === 'frame') {
@@ -1089,7 +1093,7 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
         handleWorkerMsg._lastInst = 0;
         handleWorkerMsg._t0 = performance.now();
         setState('Initializing… (worker)');
-        const chip = chipSel === 'stm32f105' ? { name: 'STM32F105', svd: f105SvdXml || svdXml || undefined } : 'stm32f103c8';
+        const chip = chipSel === 'stm32f105' ? { name: 'STM32F105', svd: f105SvdXml || svdXml || undefined } : chipSel;
         const svdForWorker = (chipSel === 'stm32f103c8' && svdXml) ? svdXml : undefined;
         // autoBytes for periph_test autopilot
         const ab = (name.includes('periph_test') || name.includes('arduino_periph_test')) ? [0x41, 0x42] : [];
@@ -1115,19 +1119,17 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
     try {
         const chip = chipSel === 'stm32f105'
             ? { name: 'STM32F105', svd: f105SvdXml || svdXml || undefined }
-            : 'stm32f103c8';
+            : chipSel;
         emu = await createEmulator({
             chip,
             svd: (chipSel === 'stm32f103c8' && svdXml) ? svdXml : undefined,
             firmware: data,
-            flash_size: 0x10000,
-            ram_size: 0x5000,
             vector_table: 0x08000000,
             ext_devices: extDevices,
         });
         emu.onPinChange(onPinActivity);
         usbListenMain = !!opts.usbListen;
-        log(`Loaded ${name} on ${chipSel === 'stm32f105' ? 'STM32F105' : 'STM32F103C8'} (${data.length} bytes). PC=0x${emu.getRegisters().PC.toString(16).padStart(8, '0')}`);
+        log(`Loaded ${name} on ${chipSel === 'stm32f105' ? 'STM32F105' : chipSel} (${data.length} bytes). PC=0x${emu.getRegisters().PC.toString(16).padStart(8, '0')}`);
         if (symbolsData) emu.setSymbols(symbolsData);
         $('runBtn').disabled = false;
         $('stopBtn').disabled = true;

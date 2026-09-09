@@ -5,10 +5,11 @@
 [![Live Demo](https://img.shields.io/badge/live%20demo-github%20pages-38bdf8)](https://danish9661.github.io/STM32-Bluepill-emu/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-A full-system emulator for the **STM32F1 family** (STM32F103C8 "Blue Pill", STM32F105, etc.)
+A full-system emulator for the **STM32F1 family** (STM32F103C8 "Blue Pill",
+STM32F105, GD32F103, Maple Mini, Nucleo-F103RB, etc.)
 that runs **real, unmodified Arduino / STM32Cube firmware** in Node.js or the browser.
 
-**~23M instructions/sec** headless (`50M` in `~2.1s`, emulator.js `200M` in `8.2s`) and **~21M in headless Chromium** (`200M` in `9.3s`, SAB OFF) — the browser matches Node since the CAN-autopilot timing fix. The interactive page loop stays frame-budgeted (`~8-9M` headed, `SAB ON +6.6%`).
+**~70M instructions/sec** headless (`200M` in `~2.8s`, native Rust CPU + Rust peripherals in one WASM module with full MPU enforcement) and multi-MIPS in the browser demo loop. The interactive page loop stays frame-budgeted.
 
 ---
 
@@ -407,10 +408,11 @@ RUSTFLAGS="--remap-path-prefix=$HOME=/build" \
 wasm-pack build --target web --out-dir pkg
 
 # Run tests
-node tests/test_all.mjs              # 277 unit tests
+node tests/test_all.mjs              # 537 unit tests
 node tests/canary.mjs                # 39/39 firmware checks (~25s)
 node tests/test_emulator_js.mjs      # browser run-loop path (200M, 39/39)
-node tests/test_browser.mjs          # Playwright browser tests
+node tests/test_chips.mjs            # chip variants (IDCODE per chip + GD32 boot)
+npx playwright test                  # browser tests (needs local server + Chromium)
 
 # Run firmware directly
 node pkg/cli.mjs firmware.elf
@@ -421,13 +423,15 @@ echo -n "AB" | node pkg/cli.mjs --config=config.yaml --max=200000000
 
 ## Supported Peripherals
 
-GPIO (A–D) with electrical model, USART1–3, SPI1–2, I2C1–2, TIM1–14
-(PWM, input capture, external triggers, slave modes, DMA requests), ADC1–2
-(real conversion timing, RC sample-and-hold, DAC→ADC loopback, external triggers),
-DAC1–2, DMA1 (7ch) + DMA2 (5ch), CAN1 (RX injection + filters), RTC (alarm),
+GPIO (A–G) with electrical model, USART1–3 (+LIN), SPI1–2 (+CRC), I2C1–2
+(master + slave mode, 10-bit, PEC), TIM1–14
+(PWM, input capture, external triggers, slave modes, DMA burst + requests), ADC1–2
+(real conversion timing, RC sample-and-hold, DAC→ADC loopback, external triggers, dual mode),
+DAC1–2, DMA1 (7ch) + DMA2 (5ch), CAN1 (RX injection + filters, TTCM), RTC (alarm),
 CRC, NVIC (priority dispatch + 64-IRQ budget), SysTick, SCB (deep sleep, SHPR
-routing, fault escalation), EXTI, AFIO (pin remap), BKP, WWDG, IWDG, PWR, FLASH,
-FSMC (NOR/NAND/PC-Card), SDIO (SDHC card image, CMD engine, DMA2 CH4), USB FS device (endpoints, packet memory, enumeration events).
+routing, fault escalation, ACTRL), EXTI, AFIO (pin remap), BKP (tamper), PWR (PVD), FLASH (WRP),
+FSMC (NOR/NAND/PC-Card + ECC), SDIO (SDHC/MMC, CMD engine, DMA2 CH4), USB FS device (SOF engine,
+double-buffered bulk, enumeration events), DBG IDCODE per chip.
 
 ---
 
