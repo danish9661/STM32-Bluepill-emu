@@ -380,6 +380,15 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - **Verified**: full gate re-run at commit (no behavior change for existing
   firmware: nothing addressed 0xE0042000 before; default IDCODE is the
   real F103 value).
+- **Protocol/chip verification matrix** (one-off, not all in CI): the Bluepill-
+  targeted periph39 firmware passes **39/39 on all six chips** (f103c8,
+  gd32c8/cb, maple_mini, nucleo_f103rb, f103rc) — protocols are identical
+  across variants by construction (same map; only sizes/IDCODE differ).
+  Real arduino-cli firmware for other targets boots + echoes on its chip:
+  MAPLEMINI_F103CB → USART1 echo OK; GENERIC_F103RCTX + NUCLEO_F103RB →
+  USART2 echo OK (their `Serial` is USART2, `uart_addr` opt selects it).
+  No GD32 Arduino core installed locally — GD32 runs identical F103
+  binaries (the clone contract), covered by the GD32 boot+echo test.
 
 
 
