@@ -183,6 +183,7 @@ select:focus { outline: none; border-color: #0ea5e9; }
 .gpio-pin.in { color: #fbbf24; }
 .gpio-pin.pwm { color: #166534; font-weight: bold; }
 .gpio-pin b { font-weight: 600; }
+.gpio-pin .alias { font-weight: 400; opacity: 0.65; font-size: 9px; }
 .legend { font-size: 10.5px; color: #64748b; margin-top: 10px; display: flex; gap: 14px; flex-wrap: wrap; }
 .legend span { display: inline-flex; align-items: center; gap: 5px; }
 .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
@@ -688,6 +689,18 @@ let lastTotalInst = 0;
 
 const PORTS = ['A', 'B', 'C', 'D'];
 const PIN_NAMES = ['0','1','2','3','4','5','6','7','8','9','10','11','12','13','14','15'];
+// Arduino pin aliases per board (physical -> "D13/A8"), fetched once.
+// Lets Nucleo/Maple users read the grid in Arduino numbering.
+let boardPins = null;
+fetch('board_pins.json').then(r => r.json()).then(j => { boardPins = j; }).catch(() => {});
+function pinAlias(chip, phys) {
+    if (!boardPins || !chip || !boardPins[chip]) return '';
+    return boardPins[chip][phys] || '';
+}
+function currentChip() {
+    try { return ($('chipSelect')?.value) || (firmwareData?.chip) || 'stm32f103c8'; }
+    catch { return 'stm32f103c8'; }
+}
 
 const termAtBottom = () => terminal.scrollTop + terminal.clientHeight >= terminal.scrollHeight - 8;
 
@@ -840,7 +853,8 @@ function renderGpio(snap) {
                     else if (idr) { cls = 'in'; label = 'Z'; }
                 }
             } catch (e) { cls = 'low'; }
-            cells += `<div class="gpio-pin ${cls}"${style} title="P${port}${PIN_NAMES[p]}${label === 'Z' || label === '0' || label === '1' ? '' : ' PWM ' + label}"><b>${port}${PIN_NAMES[p]}</b>${label}</div>`;
+            const alias = pinAlias(currentChip(), `P${port}${PIN_NAMES[p]}`);
+            cells += `<div class="gpio-pin ${cls}"${style} title="P${port}${PIN_NAMES[p]}${alias ? ' (' + alias + ')' : ''}${label === 'Z' || label === '0' || label === '1' ? '' : ' PWM ' + label}"><b>${port}${PIN_NAMES[p]}${alias ? ' <span class="alias">' + alias + '</span>' : ''}</b>${label}</div>`;
         }
         html += `<div class="gpio-port"><h3>P${port}</h3>${cells}</div>`;
     }

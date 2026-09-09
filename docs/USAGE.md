@@ -86,6 +86,10 @@ right flash/RAM sizes plus DBGMCU IDCODE (`tests/test_chips.mjs` asserts all):
 `stm32f103cb`, `maple_mini` (F103CB 128K), `nucleo_f103rb` (128K),
 `stm32f103rc` (256K/48K), `gd32f103c8/cb/rb` (IDCODE 0x2BA01477).
 Timing stays instruction-budget based on every chip.
+Board Arduino-pin aliases (`site/board_pins.json`, extracted from the
+STM32duino variant files) label the page GPIO grid in Arduino numbering
+(Nucleo D13 = PA5 LED, Maple D33 = PB1 LED, Pill D17 = PC13); the model
+itself works in physical pins on every board.
 Unsupported SVD peripherals (e.g. F105's ETH) are skipped, and the ARM core
 peripherals (NVIC/SysTick/SCB) are auto-registered at their fixed addresses even
 when the SVD omits them. F4/G0-class chips (MODER-style GPIO, different RCC)

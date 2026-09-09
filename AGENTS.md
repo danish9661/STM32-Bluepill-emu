@@ -377,6 +377,11 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - **Tests**: `tests/test_chips.mjs` 9/9 (IDCODE per chip + GD32 UART echo
   round-trip), CI line, browser chip-option assertions. README refreshed
   (stale Unicorn-era numbers → 70M IPS, 537 tests, current depth).
+- **Board pinouts**: `site/board_pins.json` (Arduino aliases extracted from
+  STM32duino 2.12.0 variants: Nucleo D13=PA5/A0=PA0, Maple D33=PB1/button
+  PB8, Pill D17=PC13) shown in the page GPIO grid; pin asserts in
+  test_chips (15/15) + live browser alias check. Maple Mini shares the
+  Pill variant except its own header map — verified, not assumed.
 - **Verified**: full gate re-run at commit (no behavior change for existing
   firmware: nothing addressed 0xE0042000 before; default IDCODE is the
   real F103 value).

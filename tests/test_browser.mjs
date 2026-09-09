@@ -125,6 +125,12 @@ test.describe('Browser firmware tests', () => {
     for (const c of ['stm32f103c8', 'gd32f103c8', 'maple_mini', 'nucleo_f103rb', 'stm32f103rc']) {
       expect(values).toContain(c);
     }
+    // Nucleo board shows Arduino aliases in the GPIO grid (D13 = PA5 LED).
+    await page.selectOption('#chipSelect', 'nucleo_f103rb');
+    await page.selectOption('#presetSelect', 'blink');
+    await page.click('#loadPresetBtn');
+    await page.click('#runBtn');
+    await expect(page.locator('#gpioGrid')).toContainText('D13', { timeout: 30000 });
     await page.selectOption('#chipSelect', 'stm32f105');
     await page.selectOption('#presetSelect', 'periph37');
     await page.click('#loadPresetBtn');

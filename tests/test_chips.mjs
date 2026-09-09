@@ -4,7 +4,6 @@
 // run proves the whole path there too.
 import { readFileSync } from 'fs';
 import { createEmulator } from '../pkg/emulator.js';
-
 const ELF = 'site/arduino_echo.elf';
 const IDCODE = 0xE0042000;
 const F103 = 0x10016410, GD32 = 0x2BA01477;
@@ -27,6 +26,18 @@ for (const [chip, id] of [
     emu.uartRxBytes([72, 105]);
     for (let i = 0; i < 10; i++) await emu.run(1000000);
     ok(String(emu.getUartOutput() || '').includes('Hi'), 'GD32F103C8 UART echo round-trip');
+}
+
+// Board Arduino-pin aliases (site/board_pins.json, extracted from the
+// STM32duino variant files): physical pin -> Arduino names.
+{
+    const pins = JSON.parse(readFileSync('site/board_pins.json', 'utf8'));
+    ok(pins['nucleo_f103rb']['PA5'] === 'D13/A8', 'Nucleo D13 LED = PA5');
+    ok(pins['nucleo_f103rb']['PA0'] === 'D46/A0', 'Nucleo A0 = PA0');
+    ok(pins['maple_mini']['PB1'] === 'D33', 'Maple D33 LED = PB1');
+    ok(pins['maple_mini']['PB8'] === 'D32', 'Maple button = PB8');
+    ok(pins['stm32f103c8']['PC13'] === 'D17', 'BluePill LED = PC13 (D17)');
+    ok(pins['stm32f103cb']['PC13'] === 'D17', 'F103CB shares the Pill map');
 }
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
