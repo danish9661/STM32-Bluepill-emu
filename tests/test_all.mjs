@@ -9,7 +9,7 @@ const { init, init_svd, periph_read, periph_write, tick, step_batch, has_pending
         add_fsmc_bank, gpio_set_analog, adc_set_rc_tau, register_js_peripheral,
         add_sd_card, reset_ext_devices, rcc_sysclk_hz, rcc_fail_hse, add_i2c_eeprom,
         drain_events, usb_inject_setup, usb_inject_out, pwm_duty,
-        i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop,
+        i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop, i2c_inject_alert,
         gpio_take_pin_events } = periph;
 
 let passed = 0, failed = 0;
@@ -224,7 +224,7 @@ assert_eq(periph_read(USART1 + 0x04, 4) & 0xFF, 0x7A, 'USART RX post-ORE byte z'
 
 // LIN break (RM0008 27.6.5): HDSEL loopback + LINEN, SBK transmits a break
 // that returns to our own receiver as LBD (SR.8) with a 0x00 framing byte.
-periph_write(USART1 + 0x14, 4, 1 << 2); // CR3 HDSEL (loopback)
+periph_write(USART1 + 0x14, 4, 1 << 3); // CR3 HDSEL (half-duplex loopback)
 periph_write(USART1 + 0x10, 4, (1 << 14) | (1 << 6)); // CR2 LINEN + LBDIE
 periph_write(0xE000E100 + 0x04, 4, 1 << 5); // ISER1: USART1 IRQ 37 enable
 periph_write(USART1 + 0x0C, 4, (1 << 13) | (1 << 3) | (1 << 2) | 1); // UE/TE/RE + SBK
@@ -249,6 +249,32 @@ assert_eq(sr & (1 << 8), 0, 'USART SR no LBD outside LIN mode');
 assert_eq(periph_read(USART1 + 0x04, 4) & 0xFF, 0x00, 'USART DR break byte 0x00');
 sr = periph_read(USART1 + 0x00, 4);
 assert_eq(sr & (1 << 1), 0, 'USART SR FE cleared by DR read');
+
+// Half-duplex single-wire (RM0008 CR3 HDSEL = bit 3): transmitted bytes
+// loop back to our own receiver. Bit 2 is IRLP (IrDA low-power), NOT
+// loopback — the model and this test once shared that off-by-one.
+get_uart_output(); // flush
+periph_write(USART1 + 0x14, 4, 0); // normal mode
+periph_write(USART1 + 0x04, 4, 0x4B); // 'K' goes to the wire
+assert_eq(get_uart_output(), 'K', 'USART normal TX reaches output');
+periph_write(USART1 + 0x14, 4, 1 << 3); // HDSEL
+periph_write(USART1 + 0x04, 4, 0x55);
+assert_eq(periph_read(USART1 + 0x04, 4) & 0xFF, 0x55, 'USART HDSEL loops TX back to DR');
+assert_eq(periph_read(USART1 + 0x00, 4) & (1 << 5), 1 << 5, 'USART HDSEL sets RXNE');
+assert_eq(get_uart_output(), 'U', 'USART HDSEL byte still on the shared wire');
+periph_write(USART1 + 0x14, 4, 1 << 2); // IRLP alone: no loopback
+periph_write(USART1 + 0x04, 4, 0x4D); // 'M' goes to the wire
+assert_eq(get_uart_output(), 'M', 'USART IRLP does not loop back');
+periph_write(USART1 + 0x14, 4, 1 << 1); // IREN: pulse shaping only, TX unaffected
+periph_write(USART1 + 0x04, 4, 0x4E); // 'N'
+assert_eq(get_uart_output(), 'N', 'USART IrDA mode transmits normally');
+// Smartcard registers: GTPR + SCEN/NACK stored; NACK-on-parity stays a
+// no-op (PE is never set — no error injection — so nothing can NACK).
+periph_write(USART1 + 0x18, 4, 0x0105); // GTPR guard time + prescaler
+assert_eq(periph_read(USART1 + 0x18, 4), 0x0105, 'USART GTPR readback');
+periph_write(USART1 + 0x14, 4, (1 << 5) | (1 << 4)); // SCEN + NACK
+assert_eq(periph_read(USART1 + 0x14, 4) & 0x30, 0x30, 'USART CR3 SCEN/NACK stored');
+periph_write(USART1 + 0x14, 4, 0); // back to normal
 
 // ============================================================
 // ADC
@@ -836,6 +862,17 @@ assert_eq(periph_read(SPI1 + 0x08, 4) & (1 << 4), 1 << 4, 'SPI1 SR CRCERR on CRC
 assert_eq(periph_read(SPI1 + 0x0C, 4), 0xFF, 'SPI1 DR read clears CRCERR');
 assert_eq(periph_read(SPI1 + 0x08, 4) & (1 << 4), 0, 'SPI1 SR CRCERR cleared');
 
+// TI frame format (CR2 FRF, bit 4): NSS pulses per frame, CPOL/CPHA are
+// don't-care; the shifted data is identical to Motorola mode.
+periph_write(SPI1 + 0x04, 4, 1 << 4); // CR2 FRF (TI mode)
+assert_eq(periph_read(SPI1 + 0x04, 4) & (1 << 4), 1 << 4, 'SPI1 CR2 FRF readback');
+periph_write(SPI1 + 0x00, 4, (3 << 3) | (1 << 2) | (1 << 6) | (1 << 1) | (1 << 0)); // +CPOL+CPHA
+periph_write(SPI1 + 0x0C, 4, 0xA5);
+spi_sr = periph_read(SPI1 + 0x08, 4);
+assert_eq(spi_sr & 3, 3, 'SPI1 TI-mode SR TXE+RXNE');
+assert_eq(periph_read(SPI1 + 0x0C, 4), 0xFF, 'SPI1 TI-mode xfer returns 0xFF (no device)');
+periph_write(SPI1 + 0x04, 4, 0); // FRF off (Motorola)
+
 // ============================================================
 // I2C
 // ============================================================
@@ -965,6 +1002,41 @@ assert_eq(i2c_inject_start(1, 0x142, false), false, '7-bit mode rejects 10-bit a
 periph_write(I2C1 + 0x00, 4, 1 | (1 << 8)); // START
 periph_write(I2C1 + 0x10, 4, 0xF2); // header for 10-bit write to 0x255
 assert_eq(periph_read(I2C1 + 0x14, 4) & (1 << 10), 1 << 10, 'master 10-bit header NACKs (AF)');
+
+// SMBus ALERT (RM0008 26.6.7): peer pulls SMBA low -> SR1 SMBALERT
+// (bit 15) + error IRQ via ITERREN (I2C1_ER = IRQ 32 -> ISPR1 bit 0);
+// firmware clears it by writing SR1 with the bit 0. CR1 ALERT (bit 13)
+// drives SMBA -> I2cAlert bus event (own drive never sets own flag).
+periph_write(0x4002101C, 4, 1 << 21); // I2C1 clock
+periph_write(I2C1 + 0x00, 4, 1); // PE
+assert_eq(i2c_inject_alert(1), true, 'SMBALERT inject flags when enabled');
+assert_eq(periph_read(I2C1 + 0x14, 4) & (1 << 15), 1 << 15, 'I2C SR1 SMBALERT set');
+assert_eq(periph_read(0xE000E204, 4) & 1, 0, 'no ER IRQ without ITERREN');
+periph_write(I2C1 + 0x14, 4, 0); // SR1 write-0 clears SMBALERT
+assert_eq(periph_read(I2C1 + 0x14, 4) & (1 << 15), 0, 'SMBALERT clears on SR1 write-0');
+periph_write(I2C1 + 0x04, 4, 1 << 8); // ITERREN
+assert_eq(i2c_inject_alert(1), true, 'SMBALERT re-flags with ITERREN');
+assert_eq(periph_read(0xE000E204, 4) & 1, 1, 'ER IRQ pends with ITERREN');
+periph_write(I2C1 + 0x14, 4, 0); // clear flag; pending bit needs ICPR
+periph_write(0xE000E284, 4, 1); // ICPR1 bit 0: clear I2C1_ER pending
+assert_eq(periph_read(0xE000E204, 4) & 1, 0, 'ER pending clears via ICPR');
+periph_write(I2C1 + 0x00, 4, 0); // PE off
+assert_eq(i2c_inject_alert(1), false, 'no ALERT flag when disabled');
+assert_eq(periph_read(I2C1 + 0x14, 4), 0, 'SR1 clean when disabled');
+periph_write(I2C1 + 0x00, 4, 1); // PE back on
+drain_events(); // flush stale bus events
+periph_write(I2C1 + 0x00, 4, 1 | (1 << 13)); // drive SMBA low
+const aev = drain_events();
+assert_eq(aev.length, 3, 'ALERT edge emits exactly one event');
+assert_eq(aev[0], 19, 'I2cAlert discriminant');
+assert_eq(aev[1], 1, 'I2cAlert channel');
+assert_eq(aev[2], 1, 'I2cAlert asserted');
+periph_write(I2C1 + 0x00, 4, 1); // release SMBA
+const rev = drain_events();
+assert_eq(rev.length, 3, 'ALERT release emits exactly one event');
+assert_eq(rev[0], 19, 'I2cAlert discriminant on release');
+assert_eq(rev[2], 0, 'I2cAlert deasserted');
+assert_eq(periph_read(I2C1 + 0x14, 4) & (1 << 15), 0, 'own drive never sets own flag');
 reset();
 
 // ============================================================

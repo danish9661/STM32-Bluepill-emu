@@ -5,45 +5,101 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="description" content="STM32 Bluepill emulator documentation, rendered live from the repo sources.">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="STM32 Bluepill Emulator">
+<meta property="og:title" content="Docs — STM32 Bluepill Emulator">
+<meta property="og:description" content="Emulator documentation rendered live from the repo sources: usage, peripherals, boards, GDB, API.">
+<meta property="og:image" content="https://danish9661.github.io/STM32-Bluepill-emu/og-image.png">
+<meta property="og:url" content="https://danish9661.github.io/STM32-Bluepill-emu/docs.html">
+<link rel="canonical" href="https://danish9661.github.io/STM32-Bluepill-emu/docs.html">
 <title>Docs — STM32 Bluepill Emulator</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.65; }
-header { background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%); border-bottom: 1px solid #1e3a5f; padding: 12px 24px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; position: sticky; top: 0; z-index: 100; }
-header h1 { font-size: 17px; font-weight: 700; background: linear-gradient(90deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-header .sub { font-size: 12px; color: #64748b; }
+:root {
+  --ink: #070b14; --panel: #0d1526; --panel-2: #0a1120;
+  --line: #1c2a44; --line-soft: #14203a;
+  --txt: #dbe7f5; --dim: #8ba0bd; --faint: #54678a;
+  --cyan: #22d3ee; --cyan-deep: #0e7490; --amber: #fbbf24;
+  --mono: 'Cascadia Mono', 'JetBrains Mono', ui-monospace, Consolas, monospace;
+}
+body {
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  color: var(--txt); line-height: 1.7;
+  background:
+    radial-gradient(1100px 480px at 12% -8%, rgba(34,211,238,0.10), transparent 60%),
+    radial-gradient(900px 520px at 95% 110%, rgba(129,140,248,0.10), transparent 60%),
+    var(--ink);
+}
+body::before {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image:
+    linear-gradient(rgba(56,189,248,0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56,189,248,0.055) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 30%, transparent 100%);
+}
+body > * { position: relative; z-index: 1; }
+header { background: rgba(7,11,20,0.82); border-bottom: 1px solid var(--line-soft); padding: 10px 24px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; position: sticky; top: 0; z-index: 100; backdrop-filter: blur(12px); }
+header h1 { font-size: 16px; font-weight: 800; background: linear-gradient(90deg, #67e8f9, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+header .sub { font-size: 11.5px; color: var(--faint); max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 header .spacer { flex: 1; }
-header a.nav { font-size: 11.5px; color: #94a3b8; text-decoration: none; border: 1px solid #334155; padding: 4px 12px; border-radius: 999px; }
-header a.nav:hover, header a.nav.active { background: #1e40af; color: #fff; border-color: #3b82f6; }
-main { max-width: 880px; margin: 0 auto; padding: 28px 24px 60px; }
-main h1 { font-size: 24px; font-weight: 800; letter-spacing: -0.3px; margin-bottom: 4px; }
-main h2 { font-size: 11px; color: #64748b; margin: 32px 0 14px; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600; }
-.doc h2 { font-size: 19px; color: #e2e8f0; text-transform: none; letter-spacing: 0; margin: 28px 0 10px; }
-.doc h3 { font-size: 15px; color: #e2e8f0; margin: 22px 0 8px; }
-.doc h4 { font-size: 13.5px; color: #94a3b8; margin: 16px 0 6px; }
-.doc-src { font-size: 11.5px; color: #475569; margin-bottom: 18px; }
-.doc-src a { color: #475569; }
-p, li { font-size: 14px; color: #cbd5e1; }
+header a.nav { font-size: 11.5px; font-weight: 600; color: var(--dim); text-decoration: none; border: 1px solid var(--line); padding: 4px 13px; border-radius: 999px; background: rgba(13,21,38,0.6); transition: all 0.15s ease; }
+header a.nav:hover, header a.nav.active { background: rgba(14,116,144,0.25); color: #a5f3fc; border-color: var(--cyan-deep); box-shadow: 0 0 10px rgba(34,211,238,0.25); }
+main { max-width: 920px; margin: 0 auto; padding: 30px 24px 60px; }
+main h1 { font-size: 27px; font-weight: 800; letter-spacing: -0.4px; margin-bottom: 4px; }
+main h1 .anchor, .doc h2 .anchor, .doc h3 .anchor { display: none; }
+main h2 { font-size: 11px; color: var(--faint); margin: 32px 0 14px; text-transform: uppercase; letter-spacing: 2px; font-weight: 800; }
+.doc h2 { font-size: 20px; color: var(--txt); text-transform: none; letter-spacing: -0.2px; margin: 30px 0 10px; padding-top: 8px; border-top: 1px solid var(--line-soft); }
+.doc h2:first-of-type { border-top: none; }
+.doc h3 { font-size: 15.5px; color: #a5f3fc; margin: 22px 0 8px; }
+.doc h4 { font-size: 13.5px; color: var(--dim); margin: 16px 0 6px; }
+.doc h2:hover::after, .doc h3:hover::after { content: ' #'; color: var(--cyan-deep); font-weight: 400; }
+.doc-src { font-size: 11.5px; color: var(--faint); margin-bottom: 18px; }
+.doc-src a { color: var(--faint); }
+p, li { font-size: 14.5px; color: var(--dim); }
+strong { color: var(--txt); }
 ul, ol { padding-left: 22px; } li { margin: 5px 0; }
 li > ul, li > ol { margin-top: 4px; }
-a { color: #38bdf8; text-decoration: none; } a:hover { color: #7dd3fc; text-decoration: underline; }
-code { background: #0f172a; border: 1px solid #1e293b; border-radius: 4px; padding: 1px 6px; font-size: 12px; color: #7dd3fc; font-family: Consolas, monospace; }
-pre { background: #0b1120; border: 1px solid #1e293b; border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 12px 0; font-size: 12.5px; line-height: 1.6; color: #cbd5e1; font-family: Consolas, monospace; }
+a { color: var(--cyan); text-decoration: none; } a:hover { color: #a5f3fc; text-decoration: underline; }
+code { background: #02060f; border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; font-size: 0.88em; color: #7dd3fc; font-family: var(--mono); }
+pre { background: #02060f; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 12px 0; font-size: 12.5px; line-height: 1.65; color: var(--dim); font-family: var(--mono); box-shadow: inset 0 2px 12px rgba(0,0,0,0.6); }
 pre code { background: none; border: none; padding: 0; }
-blockquote { border-left: 3px solid #1e40af; padding: 6px 14px; margin: 12px 0; color: #94a3b8; background: rgba(30,64,175,0.08); border-radius: 0 8px 8px 0; }
-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; display: block; overflow-x: auto; }
-th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #1e293b; }
-th { color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
-td { color: #cbd5e1; font-family: Consolas, monospace; font-size: 12.5px; }
-hr { border: none; border-top: 1px solid #1e293b; margin: 24px 0; }
-.toc { background: #0b1120; border: 1px solid #1e293b; border-radius: 10px; padding: 12px 18px; margin: 14px 0; }
-.toc b { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
-.toc ul { columns: 2; }
-.toc li { font-size: 12.5px; }
-img { max-width: 100%; }
+blockquote { border-left: 3px solid var(--cyan-deep); padding: 8px 16px; margin: 14px 0; color: var(--dim); background: rgba(14,116,144,0.10); border-radius: 0 10px 10px 0; }
+table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13px; display: block; overflow-x: auto; border: 1px solid var(--line-soft); border-radius: 10px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line-soft); }
+thead tr { background: rgba(13,21,38,0.7); }
+tbody tr:hover { background: rgba(34,211,238,0.04); }
+th { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; white-space: nowrap; }
+td { color: var(--dim); font-family: var(--mono); font-size: 12.5px; }
+td:first-child { color: #a5f3fc; }
+hr { border: none; border-top: 1px solid var(--line-soft); margin: 26px 0; }
+.toc { background: rgba(13,21,38,0.85); border: 1px solid var(--line); border-radius: 12px; padding: 14px 20px; margin: 16px 0 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+.toc b { font-size: 10.5px; color: var(--faint); text-transform: uppercase; letter-spacing: 2px; }
+.toc ul { columns: 2; margin-top: 8px; }
+.toc li { font-size: 13px; }
+img { max-width: 100%; border-radius: 8px; }
 .err { color: #f87171; }
-footer { text-align: center; padding: 26px; color: #475569; font-size: 12px; border-top: 1px solid #1e293b; }
-footer a { color: #38bdf8; }
+footer { text-align: center; padding: 26px; color: var(--faint); font-size: 12px; border-top: 1px solid var(--line-soft); }
+footer a { color: var(--cyan); }
+@media (min-width: 1200px) {
+  main { max-width: 1120px; }
+  /* Real sidebar: TOC owns column 2, article flows in column 1 — never
+     overlapping (float made code blocks squeeze / slide underneath). */
+  #doc-body:has(> .toc) { display: grid; grid-template-columns: minmax(0, 1fr) 270px; column-gap: 26px; align-items: start; }
+  #doc-body > .toc { grid-column: 2; grid-row: 1 / span 500; float: none; width: auto; margin: 6px 0 18px; position: sticky; top: 70px; align-self: start; }
+  #doc-body > .toc ul { columns: 1; }
+}
+@media (max-width: 640px) {
+  header { padding: 10px 14px; gap: 8px; }
+  header .sub { display: none; }
+  main { padding: 20px 14px 44px; }
+  main h1 { font-size: 22px; }
+  .doc h2 { font-size: 18px; }
+  p, li { font-size: 13.5px; }
+  .toc ul { columns: 1; }
+  pre { font-size: 11.5px; padding: 12px; border-radius: 8px; }
+  th, td { padding: 7px 8px; }
+}
 </style>
 </head>
 <body>
@@ -177,6 +233,26 @@ try {
     // The markdown H1 becomes the page title — drop it from the body.
     const bodyHtml = html.replace(/^<h1 id="[^"]+">.*?<\/h1>/, '');
     document.title = title + ' — STM32 Bluepill Emulator Docs';
+    // Per-variant discovery tags (Google executes JS): canonical + OG +
+    // TechArticle schema so each ?f= doc is indexed on its own URL.
+    const pageUrl = 'https://danish9661.github.io/STM32-Bluepill-emu/doc.html?f=' + file;
+    const setMeta = (attr, key, val) => {
+        let el = document.head.querySelector(`meta[${attr}="${key}"]`);
+        if (!el) { el = document.createElement('meta'); el.setAttribute(attr, key); document.head.appendChild(el); }
+        el.setAttribute('content', val);
+    };
+    let canon = document.head.querySelector('link[rel="canonical"]');
+    if (!canon) { canon = document.createElement('link'); canon.setAttribute('rel', 'canonical'); document.head.appendChild(canon); }
+    canon.setAttribute('href', pageUrl);
+    setMeta('property', 'og:title', title + ' — STM32 Bluepill Emulator Docs');
+    setMeta('property', 'og:url', pageUrl);
+    setMeta('property', 'og:description', 'Rendered live from ' + file + ': ' + title);
+    let ld = document.getElementById('doc-jsonld');
+    if (!ld) { ld = document.createElement('script'); ld.id = 'doc-jsonld'; ld.type = 'application/ld+json'; document.head.appendChild(ld); }
+    ld.textContent = JSON.stringify({
+        '@context': 'https://schema.org', '@type': 'TechArticle',
+        headline: title, url: pageUrl, isPartOf: { '@type': 'WebSite', name: 'STM32 Bluepill Emulator' },
+    });
     document.getElementById('doc-title').textContent = title;
     document.getElementById('crumb').textContent = 'Docs · ' + title;
     document.getElementById('doc-src').innerHTML =

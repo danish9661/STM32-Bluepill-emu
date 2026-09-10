@@ -131,6 +131,8 @@ export class STM32F1 {
   onTimCapture: ((tim: number, ch: number, value: number) => void) | null;
   /** FSMC memory transaction (bank=1..7). */
   onFsmcAccess: ((bank: number, offset: number, write: boolean, size: number, value: number) => void) | null;
+  /** SMBus SMBA drive edge (firmware CR1 ALERT bit 13). */
+  onI2cAlert: ((channel: number, asserted: boolean) => void) | null;
 
   // ── Instance methods ──────────────────────────────────────────────────────
 

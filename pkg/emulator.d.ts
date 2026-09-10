@@ -225,6 +225,8 @@ export interface BluepillEmulator {
   i2cInjectRead(channel: number): number;
   /** Host STOP to an addressed slave. */
   i2cInjectStop(channel: number): boolean;
+  /** SMBus ALERT input: peer pulled SMBA low → SR1 SMBALERT + ER IRQ (ITERREN). */
+  i2cInjectAlert(channel: number): boolean;
 
   // ── OLED / LCD framebuffers ───────────────────────────────────────────────
 

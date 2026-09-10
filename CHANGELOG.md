@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.0] — 2026-09-10 — remaining protocol gaps + docs-as-website
+
+### Added
+- SPI TI frame format (CR2 FRF decoded; CPOL/CPHA don't-care, identical shift data)
+- SMBus ALERT: SR1 SMBALERT via `i2c_inject_alert` (write-0-clears, ER IRQ
+  via ITERREN) + CR1 ALERT drive edges as `I2cAlert` bus events
+  (`onI2cAlert`, flat discriminant 19; `i2cInjectAlert` + `.d.ts`)
+- USART: IrDA IREN/IRLP stored, smartcard SCEN/NACK/GTPR stored
+- Docs as website (`site/doc.html` viewer + `site/sync-docs.mjs` + CI drift guard)
+
+### Fixed
+- USART HDSEL half-duplex loopback was on the wrong CR3 bit (bit 2/IRLP
+  instead of bit 3) — model, unit test AND firmware shared the off-by-one
+  (same class as the RTC CRH swap); firmware rebuilt (39/39)
+
 ## [2.1.0] — 2026-09-09 — chips, GDB stub, depth + demos
 
 ### Added

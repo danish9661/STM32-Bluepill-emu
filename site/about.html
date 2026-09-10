@@ -29,77 +29,91 @@
 <title>About — STM32 Bluepill Emulator (STM32F103C8 in WASM)</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.65; }
+:root {
+  --ink: #070b14; --panel: #0d1526; --panel-2: #0a1120;
+  --line: #1c2a44; --line-soft: #14203a;
+  --txt: #dbe7f5; --dim: #8ba0bd; --faint: #54678a;
+  --cyan: #22d3ee; --cyan-deep: #0e7490; --amber: #fbbf24; --green: #4ade80;
+  --mono: 'Cascadia Mono', 'JetBrains Mono', ui-monospace, Consolas, monospace;
+}
+body {
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  color: var(--txt); line-height: 1.7;
+  background:
+    radial-gradient(1100px 480px at 12% -8%, rgba(34,211,238,0.10), transparent 60%),
+    radial-gradient(900px 520px at 95% 110%, rgba(129,140,248,0.10), transparent 60%),
+    var(--ink);
+}
+body::before {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image:
+    linear-gradient(rgba(56,189,248,0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56,189,248,0.055) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 30%, transparent 100%);
+}
+body > * { position: relative; z-index: 1; }
 
 /* ── Header ──────────────────────────────────────────────────────────────── */
-header {
-  background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
-  border-bottom: 1px solid #1e3a5f;
-  padding: 12px 24px;
-  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-  position: sticky; top: 0; z-index: 100;
-  backdrop-filter: blur(10px);
-}
-header h1 {
-  font-size: 17px; font-weight: 700; letter-spacing: 0.3px;
-  background: linear-gradient(90deg, #38bdf8, #818cf8);
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-header .sub { font-size: 12px; color: #64748b; font-weight: 400; }
+header { background: rgba(7,11,20,0.82); border-bottom: 1px solid var(--line-soft); padding: 10px 24px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; position: sticky; top: 0; z-index: 100; backdrop-filter: blur(12px); }
+header h1 { font-size: 16px; font-weight: 800; background: linear-gradient(90deg, #67e8f9, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+header .sub { font-size: 11.5px; color: var(--faint); font-weight: 400; }
 header .spacer { flex: 1; }
-header a.nav {
-  font-size: 11.5px; color: #94a3b8; text-decoration: none;
-  border: 1px solid #334155; padding: 4px 12px; border-radius: 999px;
-  transition: all 0.15s ease;
-}
-header a.nav:hover { background: #1e40af; color: #fff; border-color: #3b82f6; }
+header a.nav { font-size: 11.5px; font-weight: 600; color: var(--dim); text-decoration: none; border: 1px solid var(--line); padding: 4px 13px; border-radius: 999px; background: rgba(13,21,38,0.6); transition: all 0.15s ease; }
+header a.nav:hover { background: rgba(14,116,144,0.25); color: #a5f3fc; border-color: var(--cyan-deep); box-shadow: 0 0 10px rgba(34,211,238,0.25); }
 
 /* ── Layout ──────────────────────────────────────────────────────────────── */
-main { max-width: 880px; margin: 0 auto; padding: 28px 24px 60px; }
-@media (max-width: 640px) { main { padding: 20px 16px 40px; } }
+main { max-width: 920px; margin: 0 auto; padding: 30px 24px 60px; }
+.hero-mini { margin-bottom: 6px; }
+.hero-mini .eyebrow { font-size: 10.5px; font-weight: 800; letter-spacing: 2.5px; color: var(--cyan); margin-bottom: 8px; }
+.hero-mini .eyebrow::before { content: '▸ '; color: var(--amber); }
+.hero-mini h1 { font-size: 27px; font-weight: 800; letter-spacing: -0.4px; }
+.hero-mini h1 .glow { color: var(--cyan); text-shadow: 0 0 24px rgba(34,211,238,0.5); }
 
 /* ── Headings ────────────────────────────────────────────────────────────── */
 h2 {
-  font-size: 11px; color: #64748b; margin: 32px 0 14px;
-  text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600;
+  font-size: 11px; color: var(--faint); margin: 34px 0 14px;
+  text-transform: uppercase; letter-spacing: 2px; font-weight: 800;
+  display: flex; align-items: center; gap: 8px;
 }
+h2::before { content: ''; width: 8px; height: 8px; border-radius: 2px; background: var(--cyan); box-shadow: 0 0 8px rgba(34,211,238,0.7); }
 h2:first-child { margin-top: 0; }
-h3 { font-size: 14px; color: #94a3b8; margin: 20px 0 8px; font-weight: 600; }
+h3 { font-size: 14px; color: var(--dim); margin: 20px 0 8px; font-weight: 700; }
 
 /* ── Text ────────────────────────────────────────────────────────────────── */
-p, li { font-size: 14px; color: #cbd5e1; }
+p, li { font-size: 14.5px; color: var(--dim); }
 ul, ol { padding-left: 22px; }
 li { margin: 5px 0; }
-strong { color: #e2e8f0; }
-a { color: #38bdf8; text-decoration: none; transition: color 0.15s; }
-a:hover { color: #7dd3fc; text-decoration: underline; }
+strong { color: var(--txt); }
+a { color: var(--cyan); text-decoration: none; transition: color 0.15s; }
+a:hover { color: #a5f3fc; text-decoration: underline; }
 code {
-  background: #0f172a; border: 1px solid #1e293b; border-radius: 4px;
-  padding: 1px 6px; font-size: 12px; color: #7dd3fc;
-  font-family: 'Cascadia Mono', 'JetBrains Mono', Consolas, monospace;
+  background: #02060f; border: 1px solid var(--line); border-radius: 4px;
+  padding: 1px 6px; font-size: 0.88em; color: #7dd3fc;
+  font-family: var(--mono);
 }
 
 /* ── Cards ───────────────────────────────────────────────────────────────── */
 .card {
-  background: linear-gradient(145deg, #1e293b, #172033);
-  border: 1px solid #2d3f56; border-radius: 12px; padding: 20px;
+  background: linear-gradient(160deg, var(--panel), var(--panel-2));
+  border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px;
   margin: 14px 0; transition: border-color 0.2s;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.3);
 }
-.card:hover { border-color: #334155; }
-.card p { color: #94a3b8; font-size: 13.5px; }
+.card:hover { border-color: #2b3f61; }
+.card p { color: var(--dim); font-size: 14px; }
 .card p + p { margin-top: 8px; }
 .card ul { margin-top: 8px; }
 
 /* ── Badges ──────────────────────────────────────────────────────────────── */
 .badge-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
 .badge {
-  font-size: 11px; background: #0f172a; color: #64748b;
-  border: 1px solid #1e293b; padding: 4px 12px; border-radius: 999px;
-  font-weight: 600; letter-spacing: 0.2px; transition: all 0.15s;
+  font-size: 11px; background: rgba(13,21,38,0.7); color: var(--dim);
+  border: 1px solid var(--line); padding: 4px 13px; border-radius: 999px;
+  font-weight: 700; letter-spacing: 0.2px; transition: all 0.15s;
 }
-.badge:hover { border-color: #334155; color: #94a3b8; }
-.badge.accent { background: #0ea5e9; color: #082f49; border-color: #0ea5e9; }
+.badge:hover { border-color: var(--cyan-deep); color: #a5f3fc; }
+.badge.accent { background: linear-gradient(180deg, #0ea5e9, #0284c7); color: #04121c; border-color: #38bdf8; box-shadow: 0 0 12px rgba(34,211,238,0.3); }
 
 /* ── Stat grid ───────────────────────────────────────────────────────────── */
 .stat-grid {
@@ -107,97 +121,157 @@ code {
   gap: 10px; margin: 16px 0;
 }
 .stat {
-  background: #0f172a; border: 1px solid #1e293b; border-radius: 10px;
+  background: #02060f; border: 1px solid var(--line-soft); border-radius: 10px;
   padding: 14px 16px; transition: border-color 0.2s;
+  box-shadow: inset 0 2px 8px rgba(0,0,0,0.6);
 }
-.stat:hover { border-color: #334155; }
+.stat:hover { border-color: var(--cyan-deep); }
 .stat b {
-  display: block; font-size: 22px; font-weight: 700;
-  font-family: 'Cascadia Mono', 'JetBrains Mono', Consolas, monospace;
-  background: linear-gradient(135deg, #38bdf8, #818cf8);
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-  background-clip: text;
+  display: block; font-size: 22px; font-weight: 800;
+  font-family: var(--mono); color: var(--cyan);
+  text-shadow: 0 0 12px rgba(34,211,238,0.35);
 }
-.stat span { font-size: 11.5px; color: #64748b; }
+.stat span { font-size: 11px; color: var(--faint); letter-spacing: 0.4px; }
 
 /* ── Code blocks ─────────────────────────────────────────────────────────── */
 pre {
-  background: #020617; border: 1px solid #1e293b; border-radius: 8px;
-  padding: 14px 16px; font-family: 'Cascadia Mono', Consolas, monospace;
-  font-size: 12.5px; line-height: 1.6; overflow-x: auto; color: #e2e8f0;
-  margin: 10px 0 14px;
-  scrollbar-width: thin; scrollbar-color: #334155 #020617;
+  background: #02060f; border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px 16px; font-family: var(--mono);
+  font-size: 12.5px; line-height: 1.65; overflow-x: auto; color: var(--dim);
+  margin: 10px 0 14px; box-shadow: inset 0 2px 12px rgba(0,0,0,0.6);
+  scrollbar-width: thin; scrollbar-color: #22314e transparent;
 }
-pre::-webkit-scrollbar { height: 4px; }
-pre::-webkit-scrollbar-track { background: #020617; }
-pre::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
-pre .c { color: #475569; }  /* comment */
+pre::-webkit-scrollbar { height: 6px; }
+pre::-webkit-scrollbar-track { background: transparent; }
+pre::-webkit-scrollbar-thumb { background: #22314e; border-radius: 3px; }
+pre .c { color: #3b4d6e; }  /* comment */
 pre .k { color: #c084fc; }  /* keyword */
 pre .s { color: #4ade80; }  /* string */
 pre .n { color: #38bdf8; }  /* name */
 pre .g { color: #fbbf24; }  /* number */
 
 /* ── Tables ──────────────────────────────────────────────────────────────── */
+.ptable-wrap { overflow-x: auto; border: 1px solid var(--line-soft); border-radius: 10px; margin: 10px 0 14px; }
 .ptable {
-  width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 10px 0 14px;
+  width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 560px;
 }
 .ptable th {
-  text-align: left; color: #475569; text-transform: uppercase;
-  font-size: 10px; letter-spacing: 1px; border-bottom: 1px solid #1e293b;
-  padding: 8px 10px; font-weight: 700;
+  text-align: left; color: var(--faint); text-transform: uppercase;
+  font-size: 10px; letter-spacing: 1px; border-bottom: 1px solid var(--line);
+  padding: 9px 12px; font-weight: 800; background: rgba(13,21,38,0.7); white-space: nowrap;
 }
 .ptable td {
-  padding: 8px 10px; border-bottom: 1px solid #0f172a;
-  color: #94a3b8; vertical-align: top;
+  padding: 9px 12px; border-bottom: 1px solid var(--line-soft);
+  color: var(--dim); vertical-align: top;
 }
-.ptable tr:hover td { background: rgba(30,41,59,0.4); }
+.ptable tr:hover td { background: rgba(34,211,238,0.04); }
 .ptable td.n {
-  color: #38bdf8; font-family: 'Cascadia Mono', Consolas, monospace;
-  font-weight: 600; font-size: 12px;
+  color: var(--cyan); font-family: var(--mono);
+  font-weight: 700; font-size: 12px; white-space: nowrap;
 }
 .tag {
-  display: inline-block; font-size: 10px; background: #064e3b; color: #6ee7b7;
-  padding: 2px 8px; border-radius: 999px; font-weight: 700; letter-spacing: 0.3px;
+  display: inline-block; font-size: 10px; background: rgba(74,222,128,0.12); color: #6ee7b7;
+  border: 1px solid rgba(74,222,128,0.35); padding: 2px 8px; border-radius: 999px; font-weight: 700; letter-spacing: 0.3px; white-space: nowrap;
 }
-.tag.stub { background: #1e293b; color: #64748b; }
+.tag.stub { background: rgba(13,21,38,0.7); color: var(--faint); border-color: var(--line); }
 
 /* ── FAQ (collapsible) ───────────────────────────────────────────────────── */
 details {
-  background: #0f172a; border: 1px solid #1e293b; border-radius: 8px;
+  background: rgba(13,21,38,0.6); border: 1px solid var(--line-soft); border-radius: 10px;
   margin: 8px 0; transition: border-color 0.2s;
 }
-details:hover { border-color: #334155; }
-details[open] { border-color: #2d3f56; }
+details:hover { border-color: #2b3f61; }
+details[open] { border-color: var(--cyan-deep); }
 details summary {
-  padding: 10px 14px; cursor: pointer; font-size: 13.5px; font-weight: 600;
-  color: #e2e8f0; list-style: none; display: flex; align-items: center; gap: 8px;
+  padding: 11px 15px; cursor: pointer; font-size: 13.5px; font-weight: 700;
+  color: var(--txt); list-style: none; display: flex; align-items: center; gap: 10px;
+  -webkit-tap-highlight-color: transparent;
 }
 details summary::-webkit-details-marker { display: none; }
 details summary::before {
-  content: '+'; font-size: 14px; color: #38bdf8; font-weight: 700;
-  transition: transform 0.15s; display: inline-block; width: 14px;
+  content: '+'; font-size: 15px; color: var(--cyan); font-weight: 800;
+  transition: transform 0.15s; display: inline-block; width: 14px; flex: none;
 }
 details[open] summary::before { content: '−'; }
-details .faq-body { padding: 0 14px 12px; font-size: 13.5px; color: #94a3b8; }
+details .faq-body { padding: 0 15px 13px 39px; font-size: 13.5px; color: var(--dim); }
 
-/* ── Ordered lists (numbered steps) ──────────────────────────────────────── */
-ol { counter-reset: step; list-style: none; padding-left: 0; }
-ol li { counter-increment: step; padding-left: 28px; position: relative; }
+/* ── Ordered lists (numbered steps) ──────────────────────────────────────── */ol { counter-reset: step; list-style: none; padding-left: 0; }
+ol li { counter-increment: step; padding-left: 30px; position: relative; }
 ol li::before {
-  content: counter(step); position: absolute; left: 0; top: 1px;
-  width: 18px; height: 18px; border-radius: 50%;
-  background: #0f172a; border: 1px solid #1e293b;
-  font-size: 10px; font-weight: 700; color: #38bdf8;
+  content: counter(step); position: absolute; left: 0; top: 2px;
+  width: 19px; height: 19px; border-radius: 50%;
+  background: #02060f; border: 1px solid var(--cyan-deep);
+  font-size: 10px; font-weight: 800; color: var(--cyan);
   display: flex; align-items: center; justify-content: center;
 }
 
 /* ── Footer ──────────────────────────────────────────────────────────────── */
 footer {
-  border-top: 1px solid #1e293b; padding: 18px 24px; text-align: center;
-  font-size: 11.5px; color: #475569;
+  border-top: 1px solid var(--line-soft); padding: 20px 24px 30px; text-align: center;
+  font-size: 11.5px; color: var(--faint);
 }
-footer a { color: #64748b; text-decoration: none; transition: color 0.15s; }
-footer a:hover { color: #7dd3fc; text-decoration: underline; }
+footer a { color: var(--dim); text-decoration: none; transition: color 0.15s; }
+footer a:hover { color: var(--cyan); text-decoration: underline; }
+
+/* ── Figures & flowcharts ────────────────────────────────────────────────── */
+figure.shot { margin: 14px 0; }
+figure.shot img {
+  width: 100%; height: auto; display: block; border-radius: 12px;
+  border: 1px solid var(--line);
+  box-shadow: 0 14px 44px rgba(0,0,0,0.5), 0 0 30px rgba(34,211,238,0.10);
+}
+figure.shot figcaption { font-size: 12px; color: var(--faint); margin-top: 8px; line-height: 1.6; }
+.flow {
+  width: 100%; height: auto; display: block; margin: 14px 0 4px;
+  background: #02060f; border: 1px solid var(--line-soft); border-radius: 12px;
+  padding: 10px; box-shadow: inset 0 2px 12px rgba(0,0,0,0.6);
+}
+.flow text { font-family: var(--mono); }
+/* Animated pipeline: packets ride the top run, the core node breathes, the
+   loop-back dashes slide. All pure CSS — no JS to break. */
+.flow .pkt {
+  offset-path: path('M8,80 L792,80');
+  offset-distance: 0%;
+  animation: pktMove 2.8s linear infinite;
+  filter: drop-shadow(0 0 4px rgba(34,211,238,0.9));
+}
+.flow .pkt.p2 { animation-delay: -0.9s; }
+.flow .pkt.p3 { animation-delay: -1.8s; }
+@keyframes pktMove { from { offset-distance: 0%; } to { offset-distance: 100%; } }
+.flow .flow-cpu rect { animation: cpuBreathe 2.4s ease-in-out infinite; }
+@keyframes cpuBreathe {
+  0%, 100% { stroke: #22d3ee; }
+  50% { stroke: #a5f3fc; stroke-width: 2.5; }
+}
+.flow .flow-loop { animation: loopSlide 1.1s linear infinite; }
+@keyframes loopSlide { to { stroke-dashoffset: -22; } }
+.flow .flow-link { animation: linkSlide 1.1s linear infinite; }
+@keyframes linkSlide { to { stroke-dashoffset: -20; } }
+.flow .pkt.q1 { offset-path: path('M8,48 L912,48'); }
+.flow .pkt.q2, .flow .pkt.q3 { offset-path: path('M8,50 L912,50'); }
+.flow .pkt.q3 { animation-delay: -1.4s; }
+@media (prefers-reduced-motion: reduce) {
+  .flow .pkt { animation: none; opacity: 0; }
+  .flow .flow-cpu rect, .flow .flow-loop, .flow .flow-link { animation: none; }
+}
+figcaption.cap { font-size: 12px; color: var(--faint); margin: 2px 0 8px; line-height: 1.6; }
+
+/* ── Mobile ──────────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  header { padding: 10px 14px; gap: 8px; }
+  header .sub { display: none; }
+  main { padding: 20px 14px 44px; }
+  .hero-mini h1 { font-size: 22px; }
+  p, li { font-size: 13.5px; }
+  .card { padding: 15px 16px; }
+  .stat-grid { grid-template-columns: 1fr 1fr; }
+  .stat b { font-size: 18px; }
+  .stat { padding: 11px 13px; }
+  pre { font-size: 11.5px; padding: 12px; }
+  details .faq-body { padding: 0 12px 11px 12px; }
+  .badge-row { gap: 6px; }
+  .ptable { display: block; overflow-x: auto; }
+}
 </style>
 </head>
 <body>
@@ -210,6 +284,10 @@ footer a:hover { color: #7dd3fc; text-decoration: underline; }
     <a class="nav" href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">GitHub</a>
 </header>
 <main>
+<div class="hero-mini">
+    <div class="eyebrow">The project</div>
+    <h1>Why emulate a <span class="glow">Blue Pill?</span></h1>
+</div>
 
 <h2>What is this?</h2>
 <div class="card">
@@ -238,7 +316,7 @@ timing, interrupts and electrical behaviour, all in one WebAssembly module.</p>
 <div class="card">
 <ul>
     <li><strong>Test firmware without hardware</strong> &mdash; blink, UART, SPI Flash, I2C EEPROM, OLED, touchscreen, CAN and DMA sketches run in a browser tab or from the command line.</li>
-    <li><strong>CI &amp; automated testing</strong> &mdash; run firmware headlessly with assertions; the 39-check integration test completes in ~9 seconds.</li>
+    <li><strong>CI &amp; automated testing</strong> &mdash; run firmware headlessly with assertions; the 39-check integration test completes in a couple of seconds.</li>
     <li><strong>Debug visibility</strong> &mdash; <code>--verbose</code> mode traces every peripheral access, register read/write, interrupt delivery and DMA transfer in real time.</li>
     <li><strong>Learn embedded systems</strong> &mdash; see exactly how timers, DMA and interrupts interact, instruction by instruction, with no black boxes.</li>
     <li><strong>No driver headaches</strong> &mdash; no ST-Link, no serial adapters, no USB driver issues. Just open a URL.</li>
@@ -247,15 +325,19 @@ timing, interrupts and electrical behaviour, all in one WebAssembly module.</p>
 
 <h2>At a glance</h2>
 <div class="stat-grid">
-    <div class="stat"><b>~23 MIPS</b><span>headless (50M/~2.1s, pure 26.5)</span></div>
-    <div class="stat"><b>~21 MIPS</b><span>browser direct run (200M/9.3s)</span></div>
-    <div class="stat"><b>~96 MIPS</b><span>browser direct run, native CPU</span></div>
-    <div class="stat"><b>236/236</b><span>peripheral unit tests</span></div>
+    <div class="stat"><b>~70 MIPS</b><span>headless (200M/~2.9s)</span></div>
+    <div class="stat"><b>565/565</b><span>unit test asserts</span></div>
     <div class="stat"><b>39/39</b><span>integration checks</span></div>
-    <div class="stat"><b>30+</b><span>emulated peripherals</span></div>
+    <div class="stat"><b>8</b><span>chip variants</span></div>
+    <div class="stat"><b>26</b><span>browser demo presets</span></div>
+    <div class="stat"><b>40</b><span>Full-coverage peripherals</span></div>
 </div>
 
 <h2>How it works</h2>
+<figure class="shot">
+<img src="og-image.png" alt="STM32 Bluepill Emulator running the peripheral showcase in a browser: live UART terminal at 72.9M IPS, glowing Blue Pill target rig, instruction and program-counter readouts" width="1200" height="675" loading="lazy">
+<figcaption>The live demo: real Arduino firmware executing in the browser — UART terminal, LCD instrument tiles, and the target rig with pin-activity glow.</figcaption>
+</figure>
 <div class="card">
 <p>The emulator uses a <strong>dual-engine architecture</strong>:</p>
 <ol>
@@ -265,7 +347,65 @@ timing, interrupts and electrical behaviour, all in one WebAssembly module.</p>
 </ol>
 </div>
 
+<h3>System map</h3>
+<svg class="flow" viewBox="0 0 920 208" role="img" aria-labelledby="sysTitle sysDesc" xmlns="http://www.w3.org/2000/svg">
+<title id="sysTitle">Emulator system map</title>
+<desc id="sysDesc">Arduino firmware loads into one WebAssembly module holding the Rust CPU, peripherals and RAM. The page and the Node CLI observe it through UART, GPIO, canvas and event bridges, on any F1 chip map.</desc>
+<defs>
+<marker id="arr2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#22d3ee"/></marker>
+</defs>
+<g font-size="12" font-weight="700" text-anchor="middle">
+<g><rect x="8" y="20" width="150" height="56" rx="10" fill="#0a1120" stroke="#0e7490"/><text x="83" y="43" fill="#a5f3fc">Arduino .elf</text><text x="83" y="60" fill="#54678a" font-size="10" font-weight="400">real firmware</text></g>
+<g><rect x="196" y="20" width="220" height="56" rx="10" fill="#0a1120" stroke="#22d3ee" stroke-width="1.5"/><text x="306" y="43" fill="#22d3ee">one WASM module</text><text x="306" y="60" fill="#54678a" font-size="10" font-weight="400">Rust CPU + periphs + RAM</text></g>
+<g><rect x="454" y="20" width="150" height="56" rx="10" fill="#0a1120" stroke="#0e7490"/><text x="529" y="43" fill="#a5f3fc">chip maps</text><text x="529" y="60" fill="#54678a" font-size="10" font-weight="400">F103 · F105 · GD32</text></g>
+<g><rect x="642" y="20" width="130" height="56" rx="10" fill="#0a1120" stroke="#0e7490"/><text x="707" y="43" fill="#a5f3fc">Node CLI</text><text x="707" y="60" fill="#54678a" font-size="10" font-weight="400">headless</text></g>
+<g><rect x="790" y="20" width="122" height="56" rx="10" fill="#0a1120" stroke="#0e7490"/><text x="851" y="43" fill="#a5f3fc">browser</text><text x="851" y="60" fill="#54678a" font-size="10" font-weight="400">worker</text></g>
+</g>
+<g stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arr2)">
+<line x1="158" y1="48" x2="192" y2="48"/><line x1="416" y1="48" x2="450" y2="48"/><line x1="604" y1="48" x2="638" y2="48"/>
+<path d="M690,20 L690,8 L851,8 L851,16" fill="none"/>
+</g>
+<g font-size="11" font-weight="700" text-anchor="middle">
+<g><rect x="196" y="118" width="158" height="52" rx="10" fill="rgba(34,211,238,0.05)" stroke="#0e7490"/><text x="275" y="140" fill="#a5f3fc">UART terminal</text><text x="275" y="156" fill="#54678a" font-size="10" font-weight="400">TX out · RX in</text></g>
+<g><rect x="372" y="118" width="158" height="52" rx="10" fill="rgba(34,211,238,0.05)" stroke="#0e7490"/><text x="451" y="140" fill="#a5f3fc">GPIO + canvas</text><text x="451" y="156" fill="#54678a" font-size="10" font-weight="400">pins · OLED · LCD</text></g>
+<g><rect x="548" y="118" width="168" height="52" rx="10" fill="rgba(251,191,36,0.05)" stroke="#8a6d1f"/><text x="632" y="140" fill="#fbbf24">event queue</text><text x="632" y="156" fill="#54678a" font-size="10" font-weight="400">drainEvents · 19 types</text></g>
+</g>
+<g stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#arr2)" opacity="0.7">
+<line x1="260" y1="76" x2="260" y2="114"/><line x1="420" y1="76" x2="420" y2="114"/><line class="flow-link" x1="580" y1="76" x2="580" y2="114"/>
+</g>
+<circle class="pkt q1" cx="0" cy="0" r="4" fill="#22d3ee"/>
+<text x="460" y="196" fill="#54678a" font-size="10" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace">firmware in · signals out · no hardware</text>
+</svg>
+<figcaption class="cap">One WASM module holds the whole machine; the page and the CLI only observe it through narrow bridges.</figcaption>
 <h3>Batch loop</h3>
+<svg class="flow" viewBox="0 0 920 178" role="img" aria-labelledby="flowTitle flowDesc" xmlns="http://www.w3.org/2000/svg">
+<title id="flowTitle">Emulation batch loop flowchart</title>
+<desc id="flowDesc">Each batch pumps UART input, runs DMA, executes up to twenty thousand instructions, ticks peripherals, dispatches up to sixty-four interrupts, then repeats. Watchdog reset stops the loop.</desc>
+<defs>
+<marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#22d3ee"/></marker>
+<marker id="arrA" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#fbbf24"/></marker>
+</defs>
+<g font-size="12" font-weight="700" text-anchor="middle">
+<g><rect x="8" y="52" width="128" height="56" rx="10" fill="#0a1120" stroke="#0e7490"/><text x="72" y="75" fill="#a5f3fc">pump stdin</text><text x="72" y="92" fill="#54678a" font-size="10" font-weight="400">UART RX</text></g>
+<g><rect x="164" y="52" width="128" height="56" rx="10" fill="#0a1120" stroke="#0e7490"/><text x="228" y="75" fill="#a5f3fc">DMA pump</text><text x="228" y="92" fill="#54678a" font-size="10" font-weight="400">zero JS hops</text></g>
+<g class="flow-cpu"><rect x="320" y="52" width="148" height="56" rx="10" fill="#0a1120" stroke="#22d3ee" stroke-width="1.5"/><text x="394" y="75" fill="#22d3ee">CPU run 20K</text><text x="394" y="92" fill="#54678a" font-size="10" font-weight="400">exact count</text></g>
+<g><rect x="496" y="52" width="128" height="56" rx="10" fill="#0a1120" stroke="#0e7490"/><text x="560" y="75" fill="#a5f3fc">tick periphs</text><text x="560" y="92" fill="#54678a" font-size="10" font-weight="400">step_batch</text></g>
+<g><rect x="652" y="52" width="140" height="56" rx="10" fill="#0a1120" stroke="#fbbf24"/><text x="722" y="75" fill="#fbbf24">dispatch IRQs</text><text x="722" y="92" fill="#54678a" font-size="10" font-weight="400">≤64 / batch</text></g>
+</g>
+<g stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arr)">
+<line x1="136" y1="80" x2="160" y2="80"/><line x1="292" y1="80" x2="316" y2="80"/><line x1="468" y1="80" x2="492" y2="80"/><line x1="624" y1="80" x2="648" y2="80"/>
+</g>
+<path class="flow-loop" d="M722,108 L722,140 L72,140 L72,112" fill="none" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#arrA)"/>
+<circle class="pkt p1" cx="0" cy="0" r="4" fill="#22d3ee"/>
+<circle class="pkt p2" cx="0" cy="0" r="4" fill="#22d3ee"/>
+<circle class="pkt p3" cx="0" cy="0" r="4" fill="#a5f3fc"/>
+<text x="397" y="134" fill="#54678a" font-size="10" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace">next batch · ~70 MIPS</text>
+<g font-size="11" font-weight="700" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace">
+<rect x="820" y="52" width="92" height="56" rx="10" fill="rgba(248,113,113,0.06)" stroke="rgba(248,113,113,0.5)"/><text x="866" y="75" fill="#f87171">watchdog?</text><text x="866" y="92" fill="#54678a" font-size="10" font-weight="400">stop</text>
+<line x1="792" y1="80" x2="816" y2="80" stroke="rgba(248,113,113,0.6)" stroke-width="1.5" marker-end="url(#arr)"/>
+</g>
+</svg>
+<figcaption class="cap">One emulation batch: pump input, move DMA, run the core, advance peripherals, deliver interrupts — then repeat. Interrupt latency ≈1.1 ms at 20K batches.</figcaption>
 <div class="card">
 <p>Each emulation step follows this cycle (adaptive batch):</p>
 <ol>
@@ -279,6 +419,30 @@ timing, interrupts and electrical behaviour, all in one WebAssembly module.</p>
 </ol>
 </div>
 
+<h3>Interrupt path</h3>
+<svg class="flow" viewBox="0 0 920 178" role="img" aria-labelledby="irqTitle irqDesc" xmlns="http://www.w3.org/2000/svg">
+<title id="irqTitle">Interrupt delivery flowchart</title>
+<desc id="irqDesc">Peripheral flags sort by NVIC priority, dispatch up to sixty-four per batch onto a stacked frame, run the handler, restore registers on return. Pending bits coalesce to one delivery per batch; SVC hooks fire synchronously mid-batch.</desc>
+<defs>
+<marker id="arr3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#22d3ee"/></marker>
+<marker id="arr3A" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#fbbf24"/></marker>
+</defs>
+<g font-size="12" font-weight="700" text-anchor="middle">
+<g><rect x="8" y="20" width="150" height="60" rx="10" fill="#0a1120" stroke="#0e7490"/><text x="83" y="44" fill="#a5f3fc">flag sets</text><text x="83" y="61" fill="#54678a" font-size="10" font-weight="400">UIF · RXNE · CCxIF</text></g>
+<g><rect x="182" y="20" width="160" height="60" rx="10" fill="#0a1120" stroke="#0e7490"/><text x="262" y="44" fill="#a5f3fc">NVIC sorts</text><text x="262" y="61" fill="#54678a" font-size="10" font-weight="400">4-bit priority</text></g>
+<g><rect x="366" y="20" width="150" height="60" rx="10" fill="#0a1120" stroke="#22d3ee" stroke-width="1.5"/><text x="441" y="44" fill="#22d3ee">dispatch ≤64</text><text x="441" y="61" fill="#54678a" font-size="10" font-weight="400">intr_next budget</text></g>
+<g><rect x="540" y="20" width="170" height="60" rx="10" fill="#0a1120" stroke="#0e7490"/><text x="625" y="44" fill="#a5f3fc">stack + handle</text><text x="625" y="61" fill="#54678a" font-size="10" font-weight="400">R0–R3 · xPSR frame</text></g>
+<g><rect x="734" y="20" width="178" height="60" rx="10" fill="#0a1120" stroke="#0e7490"/><text x="823" y="44" fill="#a5f3fc">restore + return</text><text x="823" y="61" fill="#54678a" font-size="10" font-weight="400">xPSR back, resume</text></g>
+</g>
+<g stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arr3)">
+<line x1="158" y1="50" x2="178" y2="50"/><line x1="342" y1="50" x2="362" y2="50"/><line x1="516" y1="50" x2="536" y2="50"/><line x1="710" y1="50" x2="730" y2="50"/>
+</g>
+<path class="flow-link" d="M441,80 L441,140 L83,140 L83,84" fill="none" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#arr3A)"/>
+<text x="262" y="134" fill="#54678a" font-size="10" text-anchor="middle" font-family="'Cascadia Mono',Consolas,monospace">pending coalesces → 1 delivery / batch · SVC hooks sync mid-batch</text>
+<circle class="pkt q2" cx="0" cy="0" r="4" fill="#22d3ee"/>
+<circle class="pkt q3" cx="0" cy="0" r="4" fill="#a5f3fc"/>
+</svg>
+<figcaption class="cap">Flags become NVIC pendings, the top ≤64 run per batch on real stacked frames — including xPSR, so flags never leak across handlers.</figcaption>
 <h3>Performance techniques</h3>
 <div class="card">
 <ul>
@@ -312,7 +476,7 @@ timing, interrupts and electrical behaviour, all in one WebAssembly module.</p>
     <td>Master mode, 8/16-bit, CPOL/CPHA, NSS software control. External device bus (flash, touchscreen, LCD).</td>
     <td><span class="tag">Full</span></td></tr>
 <tr><td class="n">I2C</td><td>1, 2</td>
-    <td>Full state machine: START, address ACK, DR read/write, STOP. 7/10-bit addressing, stretching. Bus recovery.</td>
+    <td>Full state machine: START, address ACK, DR read/write, STOP. 7/10-bit addressing, stretching. Slave mode via host inject (OAR match, ADDR/STOPF, RXNE/TXE). SMBus PEC + ALERT. Bus recovery.</td>
     <td><span class="tag">Full</span></td></tr>
 <tr><td class="n">TIM</td><td>1, 2 &ndash; 14</td>
     <td>Up/down/center-aligned counting, PWM output, input capture, output compare, TRGO triggers (ADC, DMA), ARR/CCR registers, prescaler.</td>
@@ -383,9 +547,9 @@ timing, interrupts and electrical behaviour, all in one WebAssembly module.</p>
 <tr><td class="n">WWDG</td><td>&mdash;</td>
     <td>Window watchdog: window size, counter, early interrupt.</td>
     <td><span class="tag">Full</span></td></tr>
-<tr><td class="n">USB</td><td>&mdash;</td>
-    <td>Stub &mdash; register reads return 0.</td>
-    <td><span class="tag stub">Stub</span></td></tr>
+<tr><td class="n">USB</td><td>FS device</td>
+    <td>EP0&ndash;7 toggle semantics, 512&nbsp;B PMA, RESET, SETUP/OUT injection, IN completion events, SOF engine + suspend/resume, double-buffered bulk, isochronous. CDC-ACM demo + page USB host.</td>
+    <td><span class="tag">Full</span></td></tr>
 </tbody>
 </table>
 
@@ -468,7 +632,8 @@ emu.<span class="n">close</span>();                        <span class="c">// fr
 The live demo (<a href="index.html">index.html</a>) runs entirely in the browser with no server needed &mdash; just open the page or serve it with <code>python3 -m http.server -d site</code>. Worker off-thread + OffscreenCanvas + adaptive batch + <code>batch_size</code> option (<code>site/worker.js:1</code>, <code>pkg/emulator.js</code>) — see <code>docs/USAGE.md</code>.
 </p>
 
-<h3>10 built-in presets</h3>
+<h3>26 built-in presets</h3>
+<p style="font-size:13px; color:#54678a; margin-bottom:8px;">Starter ten below — plus TIM DMA-burst PWM, servo, RTC clock, DAC sine, I2C scanner/slave, CAN chat, dual-CAN, USB CDC, Mini-RTOS, SD logger and per-board builds (Blue Pill, Maple Mini, Nucleo, F103RC).</p>
 <table class="ptable">
 <thead>
 <tr><th>Preset</th><th>Description</th></tr>
@@ -542,24 +707,24 @@ The emulator has a three-tier test suite that runs in CI on every push:
 
 <h3>Unit tests &mdash; <code>node tests/test_all.mjs</code></h3>
 <div class="card">
-<p><strong>236 tests</strong> covering every peripheral in isolation: GPIO electrical model, pin events, USART TX/RX, ADC conversion timing, RC sample-and-hold, DAC&rarr;ADC loopback, external triggers (TIM/EXTI), RCC, SysTick, all timer modes, NVIC priority dispatch, CRC, SPI, I2C state machine, RTC alarm, PWR/FLASH, CAN mailboxes + filters, DMA pump, AFIO, EXTI, BKP, DAC, TIM6, FSMC, deep-sleep gating and fault escalation.</p>
+<p><strong>565 asserts</strong> covering every peripheral in isolation: GPIO electrical model, pin events, USART TX/RX (incl. HDSEL loopback, LIN, IrDA/smartcard registers), ADC conversion timing, RC sample-and-hold, DAC&rarr;ADC loopback, external triggers (TIM/EXTI), RCC, SysTick, all timer modes, NVIC priority dispatch, CRC, SPI (incl. TI frame format), I2C state machine (incl. slave mode, 10-bit, PEC, SMBus ALERT), RTC alarm, PWR/FLASH, CAN mailboxes + filters, DMA pump, AFIO, EXTI, BKP, DAC, TIM6, FSMC, SDIO, USB, deep-sleep gating and fault escalation.</p>
 </div>
 
 <h3>Firmware integration &mdash; <code>node tests/canary.mjs</code></h3>
 <div class="card">
-<p>Runs the <strong>24-peripheral Arduino sketch</strong> (<code>tests/arduino_periph_test/</code>) for 200M instructions with UART input &ldquo;AB&rdquo;. Asserts <strong>39/39</strong> checks pass (GPIO, USART TX, UART loopback, RCC, FLASH, PWR, BKP, IWDG, WWDG, RTC, CRC, DAC, ADC, AFIO, EXTI, CAN, SPI flash, I2C EEPROM, OLED, touchscreen, LCD, I2C2, SPI2, USART2, SVC, PendSV, DMA, UART RX, TIM2, EXTI0, EXTI1, EXTI13, CAN RX, SysTick, TIM3 PWM, TIM4, RTC Alarm). Completes in ~9 seconds.</p>
+<p>Runs the <strong>24-peripheral Arduino sketch</strong> (<code>tests/arduino_periph_test/</code>) for 100M instructions with UART input &ldquo;AB&rdquo;. Asserts <strong>39/39</strong> checks pass (GPIO, USART TX, UART loopback, RCC, FLASH, PWR, BKP, IWDG, WWDG, RTC, CRC, DAC, ADC, AFIO, EXTI, CAN, SPI flash, I2C EEPROM, OLED, touchscreen, LCD, I2C2, SPI2, USART2, SVC, PendSV, DMA, UART RX, TIM2, EXTI0, EXTI1, EXTI13, CAN RX, SysTick, TIM3 PWM, TIM4, RTC Alarm). Completes in a couple of seconds; the full 200M run takes ~3s.</p>
 </div>
 
 <h3>Browser tests &mdash; Playwright</h3>
 <div class="card">
-<p><strong>3 browser tests</strong> running the full firmware in Chromium via Playwright: the periph37 200M run (39/39, ~11s), GPIO grid rendering, and F105 chip selector. Runs headlessly in CI on every push.</p>
+<p><strong>24 browser checks</strong> running live firmware in Chromium via Playwright: every demo preset boots and prints (blink through dual-CAN, USB enumeration, I2C slave), every static page loads with zero console errors, and the docs viewer, nav and screenshots are asserted. Runs headlessly in CI on every push.</p>
 </div>
 
 <h3>CI pipeline</h3>
 <div class="card">
 <ul>
     <li><code>cargo check</code> &mdash; Rust compilation sanity</li>
-    <li><code>tests/test_all.mjs</code> &mdash; 236 unit tests</li>
+    <li><code>tests/test_all.mjs</code> &mdash; 565 unit asserts</li>
     <li><code>tests/canary.mjs</code> &mdash; 39/39 firmware checks</li>
     <li>200M full run &mdash; <code>echo -n "AB" | node pkg/cli.mjs --config=... --max=200000000</code></li>
     <li><code>tests/test_emulator_js.mjs</code> &mdash; browser run-loop path (createEmulator + run)</li>
@@ -588,7 +753,7 @@ The emulator has a three-tier test suite that runs in CI on every push:
 
 <details>
   <summary>How fast is it?</summary>
-  <div class="faq-body"><strong>Headless (Node CLI)</strong>: <strong>~23 MIPS</strong> (50M in ~2.1s, pure compute 26.5 MIPS); emulator.js path 200M in 8.2s. <strong>Browser direct run</strong> (headless Chromium): 200M in 9.3s (<strong>~21.5 MIPS</strong>) — parity with Node since the CAN-autopilot timing fix (a stale flag address used to cost 3M-iteration spin storms). <strong>Interactive page loop</strong>: 8.6 MIPS headed (frame-budgeted). The Rust interpreter is ~99% of wall time; JS/Rust layer ~1%. See <code>docs/ARCHITECTURE.md</code>.</div>
+  <div class="faq-body"><strong>Headless (Node CLI)</strong>: <strong>~70 MIPS</strong> (200M in ~2.9s); the emulator.js browser path matches it in Node. <strong>Interactive page loop</strong> is frame-budgeted (step 60fps, paint 6fps) so the UI stays live. The Rust interpreter is ~99% of wall time; the JS/Rust layer ~1%. See <code>docs/ARCHITECTURE.md</code>.</div>
 </details>
 
 <details>

@@ -151,7 +151,12 @@ impl Usart {
     }
 
     fn is_loopback(&self) -> bool {
-        self.cr3 & (1 << 2) != 0 // HDSEL = half-duplex -> software loopback
+        // RM0008 USART_CR3: HDSEL = bit 3 (half-duplex single-wire ->
+        // software loopback). Bit 2 is IRLP (IrDA low-power) and bit 1 is
+        // IREN (IrDA enable): both stored, but IrDA pulse shaping has no
+        // register-level surface — the data path is bit-identical — so
+        // they must NOT enable loopback (was: wrong bit, 1<<2).
+        self.cr3 & (1 << 3) != 0
     }
 
     fn rx_push(&mut self, byte: u8, sys: &System) {

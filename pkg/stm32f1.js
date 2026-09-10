@@ -198,6 +198,8 @@ export class STM32F1 {
         this.onFsmcAccess = null;
         /** USB IN completion callback: onUsbIn(ep, data[]) (device -> host) */
         this.onUsbIn = null;
+        /** SMBus ALERT drive edge callback: onI2cAlert(channel, asserted) */
+        this.onI2cAlert = null;
         this._pinUnsub = null;
         this._wire();
     }
@@ -283,6 +285,9 @@ export class STM32F1 {
                 const ep = flat[i++]; const len = flat[i++];
                 const data = []; for (let k = 0; k < len; k++) data.push(flat[i++] & 0xFF);
                 if (this.onUsbIn) this.onUsbIn(ep, data);
+            } else if (type === 19) { // I2cAlert [channel, asserted]
+                const ch = flat[i++]; const asserted = flat[i++] !== 0;
+                if (this.onI2cAlert) this.onI2cAlert(ch, asserted);
             } else {
                 console.warn('STM32F1: unknown event discriminant', type, 'at index', i - 1);
                 break; // unknown length: stop to avoid desync

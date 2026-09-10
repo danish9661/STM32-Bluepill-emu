@@ -11,6 +11,18 @@ that runs **real, unmodified Arduino / STM32Cube firmware** in Node.js or the br
 
 **~70M instructions/sec** headless (`200M` in `~2.8s`, native Rust CPU + Rust peripherals in one WASM module with full MPU enforcement) and multi-MIPS in the browser demo loop. The interactive page loop stays frame-budgeted.
 
+## Screenshots
+
+Click any screenshot for the full gallery (live demo: https://danish9661.github.io/STM32-Bluepill-emu/).
+
+| Showcase (~73M IPS) | 39/39 firmware checks |
+|---|---|
+| [![Peripheral showcase running in the browser](https://danish9661.github.io/STM32-Bluepill-emu/img/shot-showcase-sm.png)](https://danish9661.github.io/STM32-Bluepill-emu/docs.html#screenshots) | [![39 of 39 firmware checks passing](https://danish9661.github.io/STM32-Bluepill-emu/img/shot-periph37-sm.png)](https://danish9661.github.io/STM32-Bluepill-emu/docs.html#screenshots) |
+
+| Showcase widgets |
+|---|
+| [![OLED, LCD, 7-segment, RGB and GPIO grid live](https://danish9661.github.io/STM32-Bluepill-emu/img/shot-showcase-widgets-sm.png)](https://danish9661.github.io/STM32-Bluepill-emu/docs.html#screenshots) |
+
 ---
 
 ## Install
@@ -219,6 +231,8 @@ These callbacks fire on specific hardware events:
 | `onCanTx` | `(can, id, len, data[8]) => void` | CAN message transmitted |
 | `onCanRx` | `(can, id, len, data[8]) => void` | CAN message received |
 | `onFsmcAccess` | `(bank, offset, write, size, value) => void` | FSMC bus transaction |
+| `onUsbIn` | `(ep, data) => void` | USB IN completion (device → host) |
+| `onI2cAlert` | `(channel, asserted) => void` | SMBus SMBA drive edge (firmware CR1 ALERT) |
 
 ### Display Framebuffers
 
@@ -323,6 +337,12 @@ const emu = await createEmulator({
 |---|---|
 | `spiInjectMiso(channel, bytes)` | Queue MISO bytes for a SPI channel |
 | `i2cInjectRx(channel, bytes)` | Queue RX bytes for an I2C channel |
+| `i2cInjectStart(channel, addr, isRead)` | Host START addressing this MCU as slave (false = NACK) |
+| `i2cInjectWrite(channel, byte)` | Host data byte to the slave (false = NACK when not ready) |
+| `i2cInjectRead(channel)` | Host read from the slave (-1 while TX DR empty = stretch) |
+| `i2cInjectStop(channel)` | Host STOP to the slave |
+| `i2cInjectAlert(channel)` | SMBus: peer pulled SMBA low → SR1 SMBALERT + ER IRQ |
+| `usbInjectSetup(bytes8)` / `usbInjectOut(ep, bytes)` | Host SETUP/OUT into endpoints (NAK unless armed) |
 | `addJsPeripheral(base, size, read, write)` | Register a custom peripheral on the bus |
 
 ### Symbol Resolution
@@ -408,10 +428,12 @@ RUSTFLAGS="--remap-path-prefix=$HOME=/build" \
 wasm-pack build --target web --out-dir pkg
 
 # Run tests
-node tests/test_all.mjs              # 537 unit tests
-node tests/canary.mjs                # 39/39 firmware checks (~25s)
+node tests/test_all.mjs              # 565 unit asserts
+node tests/canary.mjs                # 39/39 firmware checks (~2s)
 node tests/test_emulator_js.mjs      # browser run-loop path (200M, 39/39)
 node tests/test_chips.mjs            # chip variants (IDCODE per chip + GD32 boot)
+node tests/test_stm32f1_api.mjs      # high-level wrapper API
+node tests/test_gdbstub.mjs          # GDB remote stub
 npx playwright test                  # browser tests (needs local server + Chromium)
 
 # Run firmware directly
@@ -423,15 +445,16 @@ echo -n "AB" | node pkg/cli.mjs --config=config.yaml --max=200000000
 
 ## Supported Peripherals
 
-GPIO (A–G) with electrical model, USART1–3 (+LIN), SPI1–2 (+CRC), I2C1–2
-(master + slave mode, 10-bit, PEC), TIM1–14
-(PWM, input capture, external triggers, slave modes, DMA burst + requests), ADC1–2
+GPIO (A–G) with electrical model, USART1–3 + UART4/5 (+LIN, HDSEL loopback,
+IrDA/smartcard registers), SPI1–2 (+CRC, TI frame format), I2C1–2
+(master + slave mode, 10-bit, PEC, SMBus ALERT), TIM1–14
+(PWM, input capture, external triggers, slave modes, DMA burst + requests, BDTR/break), ADC1–2
 (real conversion timing, RC sample-and-hold, DAC→ADC loopback, external triggers, dual mode),
-DAC1–2, DMA1 (7ch) + DMA2 (5ch), CAN1 (RX injection + filters, TTCM), RTC (alarm),
+DAC1–2, DMA1 (7ch) + DMA2 (5ch), CAN1+CAN2 (RX injection + filters, TTCM), RTC (alarm),
 CRC, NVIC (priority dispatch + 64-IRQ budget), SysTick, SCB (deep sleep, SHPR
 routing, fault escalation, ACTRL), EXTI, AFIO (pin remap), BKP (tamper), PWR (PVD), FLASH (WRP),
 FSMC (NOR/NAND/PC-Card + ECC), SDIO (SDHC/MMC, CMD engine, DMA2 CH4), USB FS device (SOF engine,
-double-buffered bulk, enumeration events), DBG IDCODE per chip.
+double-buffered bulk, isochronous, enumeration events), DBG IDCODE per chip.
 
 ---
 

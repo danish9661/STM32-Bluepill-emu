@@ -67,16 +67,23 @@ present — the audit claim was wrong, caught by the compiler).
   internal values.
 - SPI: CRC values now computed (CRC-8/16 MSB-first over TX/RX per DFF,
   CRCNEXT phase sends/compares with CRCERR + SR.4, cleared on DR read).
-  TI frame format not modeled.
+  TI frame format (CR2 FRF) now decoded: NSS pulses per frame and
+  CPOL/CPHA are don't-care, so the shifted data is identical to Motorola
+  mode (transfers complete synchronously — no edge surface, same
+  rationale as DTG); pinned by test.
 - I2C: PEC (CRC-8/SMBus over addr+data, PECR readable, PEC transfer +
   PECERR) + general-call ACK (ENGC, GENCALL flag) now modeled. SMBus
-  alert pin not modeled (register bits stored).
+  ALERT now modeled: SR1 SMBALERT (bit 15) set by host inject
+  (`i2c_inject_alert`), write-0-clears, error IRQ via ITERREN; CR1 ALERT
+  (bit 13) drive edges emit `I2cAlert` bus events (`onI2cAlert`).
 - USART: LIN break (SBK generation + LBD/LBDIE, FE + 0x00 byte outside
-  LIN mode, `uart_inject_break` export) now modeled; IrDA (pulse shaping
-  only — bit-identical at the register level) and smartcard modes stay
-  register-decode.
-- SPI: master 8/16-bit + CRC; TI frame format stays register-decode (no
-  TI peer exists to observe phasing against).
+  LIN mode, `uart_inject_break` export) now modeled; HDSEL half-duplex
+  loopback fixed to the RM0008 bit (CR3 bit 3 — model, unit test AND
+  firmware all shared a bit-2/IRLP off-by-one, same class as the §21 RTC
+  CRH swap); IrDA IREN/IRLP stored (pulse shaping only — bit-identical
+  at the register level) and smartcard SCEN/NACK/GTPR stored (NACK-on-PE
+  stays a no-op: PE is never set, no error injection).
+- SPI: master 8/16-bit + CRC + TI mode decoded (see above).
 - CAN: time-triggered timestamps now modeled (TXRQ/RX stamp TDTxR/RDTxR
   TIME under TTCM); sync/calibration frames out of scope.
 - FSMC: NAND ECC accumulator on data R/W under PCR.ECCEN (ECCR2/3,

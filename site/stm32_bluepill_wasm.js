@@ -289,6 +289,7 @@ export function dma_take_absorbed(offset, len) {
  *  16 TimCapture    [16, tim, ch, value]   (input-capture latch)
  *  17 FsmcAccess    [17, bank, offset, write, size, value]
  *  18 UsbIn         [18, ep, len, bytes...]   (device->host IN completion)
+ *  19 I2cAlert      [19, channel, asserted] (SMBus SMBA drive edge)
  * @returns {Int32Array}
  */
 export function drain_events() {
@@ -431,6 +432,17 @@ export function gpio_take_pin_events() {
  */
 export function has_pending_interrupt() {
     const ret = wasm.has_pending_interrupt();
+    return ret !== 0;
+}
+
+/**
+ * SMBus ALERT input: peer pulled SMBA low on this channel → SR1 SMBALERT
+ * flag (+ error IRQ when ITERREN). Returns false when disabled/no channel.
+ * @param {number} channel
+ * @returns {boolean}
+ */
+export function i2c_inject_alert(channel) {
+    const ret = wasm.i2c_inject_alert(channel);
     return ret !== 0;
 }
 

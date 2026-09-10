@@ -71,6 +71,9 @@ pub trait Peripheral {
     fn i2c_slave_write(&mut self, _sys: &System, _byte: u8) -> bool { false }
     fn i2c_slave_read(&mut self, _sys: &System) -> Option<u8> { None }
     fn i2c_slave_stop(&mut self, _sys: &System) -> bool { false }
+    /// SMBus ALERT input: peer pulled SMBA low → SR1 SMBALERT + error IRQ.
+    /// Default: unhandled (no flag).
+    fn i2c_slave_alert(&mut self, _sys: &System) -> bool { false }
     /// Configured (sysclk, hclk, pclk1, pclk2) in Hz, if this is RCC.
     fn rcc_clocks(&self) -> Option<(u32, u32, u32, u32)> { None }
     /// Returns AFIO MAPR remap bits for this peripheral, if applicable.
@@ -719,6 +722,16 @@ impl Peripherals {
         if let Some(b) = Self::i2c_base(channel) {
             if let Some(slot) = self.bus.borrow().get(b) {
                 return slot.peripheral.borrow_mut().i2c_slave_stop(sys);
+            }
+        }
+        false
+    }
+    /// SMBus ALERT input: peer pulled SMBA low on this channel → SR1
+    /// SMBALERT flag (+ error IRQ when ITERREN). See `I2c::slave_alert`.
+    pub fn i2c_inject_alert(&self, sys: &System, channel: u32) -> bool {
+        if let Some(b) = Self::i2c_base(channel) {
+            if let Some(slot) = self.bus.borrow().get(b) {
+                return slot.peripheral.borrow_mut().i2c_slave_alert(sys);
             }
         }
         false

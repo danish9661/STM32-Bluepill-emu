@@ -43,6 +43,7 @@ emu.usbInjectSetup(bytes8); emu.usbInjectOut(ep, bytes); // host -> device (SETU
 emu.i2cInjectStart(ch, addr7, isRead); emu.i2cInjectWrite(ch, byte); // host addresses this MCU as an I2C slave (false = NACK when busy/unmatched/unready)
 emu.i2cInjectRead(ch);     // returns byte, or -1 while the slave TX DR is empty (stretch)
 emu.i2cInjectStop(ch);
+emu.i2cInjectAlert(ch);   // SMBus: peer pulled SMBA low -> SR1 SMBALERT + ER IRQ (ITERREN)
 emu.gpioReadOutput(port, pin); emu.gpioReadInput(port, pin); emu.gpioSetInput(...);
 emu.gpioSetSlew(n);         // output slew delay in instructions (0 = instant) — IDR readback shows the old level until the transition settles
 emu.pwmDuty(timerAddr, channel);    // duty 0-100, e.g. (0x40000000, 0) = TIM2 CH1

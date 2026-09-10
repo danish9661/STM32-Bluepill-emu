@@ -102,11 +102,11 @@ void testUSART_TX() {
 }
 
 void testUART_Loopback() {
-    reg(USART1_B + 0x14) |= (1 << 2);          /* CR3 HDSEL -> software loopback */
+    reg(USART1_B + 0x14) |= (1 << 3);          /* CR3 HDSEL (bit 3) -> software loopback */
     reg(USART1_B + 0x04) = 0xA5;               /* write DR */
     spin(100);
     uint8_t got = reg(USART1_B + 0x04) & 0xFF; /* read DR */
-    reg(USART1_B + 0x14) &= ~(1 << 2);         /* clear HDSEL */
+    reg(USART1_B + 0x14) &= ~(1 << 3);         /* clear HDSEL */
     char buf[32];
     snprintf(buf, sizeof(buf), "got=%02X", got);
     report("UART Loopback", got == 0xA5, buf);
@@ -420,11 +420,11 @@ void testSPI2() {
 void testUSART2() {
     /* USART2 HDSEL software loopback (register-level) */
     reg(RCC_APB1ENR) |= (1 << 17);            /* USART2EN */
-    reg(USART2_B + 0x14) |= (1 << 2);         /* CR3 HDSEL */
+    reg(USART2_B + 0x14) |= (1 << 3);         /* CR3 HDSEL (bit 3) */
     reg(USART2_B + 0x04) = 0x5A;              /* write DR */
     spin(200);
     uint8_t got = reg(USART2_B + 0x04) & 0xFF;
-    reg(USART2_B + 0x14) &= ~(1 << 2);
+    reg(USART2_B + 0x14) &= ~(1 << 3);
     char buf[32];
     snprintf(buf, sizeof(buf), "echo=%02X", got);
     report("USART2 Loopback", got == 0x5A, buf);

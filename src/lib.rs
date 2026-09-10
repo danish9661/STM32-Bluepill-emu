@@ -412,6 +412,7 @@ pub fn gpio_take_pin_events() -> Vec<u32> {
 ///  16 TimCapture    [16, tim, ch, value]   (input-capture latch)
 ///  17 FsmcAccess    [17, bank, offset, write, size, value]
 ///  18 UsbIn         [18, ep, len, bytes...]   (device->host IN completion)
+///  19 I2cAlert      [19, channel, asserted] (SMBus SMBA drive edge)
 #[wasm_bindgen]
 pub fn drain_events() -> Vec<i32> {
     match try_sys() {
@@ -457,6 +458,11 @@ pub fn drain_events() -> Vec<i32> {
                         out.push(*ep as i32);
                         out.push(data.len() as i32);
                         for &b in data { out.push(b as i32); }
+                    }
+                    VmEvent::I2cAlert { channel, asserted } => {
+                        out.push(19);
+                        out.push(*channel as i32);
+                        out.push(if *asserted { 1 } else { 0 });
                     }
                 }
             }
@@ -531,6 +537,16 @@ pub fn i2c_inject_read(channel: u8) -> i32 {
 pub fn i2c_inject_stop(channel: u8) -> bool {
     match try_sys() {
         Some(sys) => sys.p.i2c_inject_stop(sys, channel as u32),
+        None => false,
+    }
+}
+
+/// SMBus ALERT input: peer pulled SMBA low on this channel → SR1 SMBALERT
+/// flag (+ error IRQ when ITERREN). Returns false when disabled/no channel.
+#[wasm_bindgen]
+pub fn i2c_inject_alert(channel: u8) -> bool {
+    match try_sys() {
+        Some(sys) => sys.p.i2c_inject_alert(sys, channel as u32),
         None => false,
     }
 }

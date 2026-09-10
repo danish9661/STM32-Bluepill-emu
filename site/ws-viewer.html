@@ -103,7 +103,7 @@ function logEvent(text) {
 // Event type names for the log
 const EVT_NAMES = ['','SpiTransfer','I2cStart','I2cWrite','I2cRead','I2cStop','UartTx',
   'ExtiEdge','AdcDone','TimUpdate','DacWrite','CrcResult','RtcAlarm','WdogReset',
-  'CanTx','CanRx','TimCapture','FsmcAccess'];
+  'CanTx','CanRx','TimCapture','FsmcAccess','UsbIn','I2cAlert'];
 
 function decodeEvents(arr) {
   let i = 0;
@@ -130,6 +130,8 @@ function decodeEvents(arr) {
         break; }
       case 16: { const tim = arr[i++], ch = arr[i++], val = arr[i++]; logEvent(`TIM${tim} ch${ch} capture ${val}`); break; }
       case 17: { const bank = arr[i++], off = arr[i++], wr = arr[i++], sz = arr[i++], val = arr[i++]; logEvent(`FSMC bank${bank} ${wr?'W':'R'} off=0x${off.toString(16)} sz=${sz} val=0x${(val>>>0).toString(16)}`); break; }
+      case 18: { const ep = arr[i++], len = arr[i++]; i += len; logEvent(`USB EP${ep} IN ${len}B`); break; }
+      case 19: { const ch = arr[i++], a = arr[i++]; logEvent(`I2C${ch} SMBA ${a?'asserted':'released'}`); break; }
       default: return;
     }
   }

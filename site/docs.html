@@ -5,35 +5,106 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="description" content="Documentation for the STM32 Bluepill emulator: getting started, supported boards, debugging with GDB, and the JavaScript API.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="STM32 Bluepill Emulator">
+<meta property="og:title" content="Docs — STM32 Bluepill Emulator">
+<meta property="og:description" content="Guides and reference for the STM32 Bluepill emulator: usage, peripherals, boards, GDB debugging, JavaScript API.">
+<meta property="og:image" content="https://danish9661.github.io/STM32-Bluepill-emu/og-image.png">
+<meta property="og:url" content="https://danish9661.github.io/STM32-Bluepill-emu/docs.html">
 <link rel="canonical" href="https://danish9661.github.io/STM32-Bluepill-emu/docs.html">
 <title>Docs — STM32 Bluepill Emulator</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.65; }
-header { background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%); border-bottom: 1px solid #1e3a5f; padding: 12px 24px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; position: sticky; top: 0; z-index: 100; }
-header h1 { font-size: 17px; font-weight: 700; background: linear-gradient(90deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-header .sub { font-size: 12px; color: #64748b; }
+:root {
+  --ink: #070b14; --panel: #0d1526; --panel-2: #0a1120;
+  --line: #1c2a44; --line-soft: #14203a;
+  --txt: #dbe7f5; --dim: #8ba0bd; --faint: #54678a;
+  --cyan: #22d3ee; --cyan-deep: #0e7490; --amber: #fbbf24;
+  --mono: 'Cascadia Mono', 'JetBrains Mono', ui-monospace, Consolas, monospace;
+}
+body {
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  color: var(--txt); line-height: 1.65;
+  background:
+    radial-gradient(1100px 480px at 12% -8%, rgba(34,211,238,0.10), transparent 60%),
+    radial-gradient(900px 520px at 95% 110%, rgba(129,140,248,0.10), transparent 60%),
+    var(--ink);
+}
+body::before {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image:
+    linear-gradient(rgba(56,189,248,0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56,189,248,0.055) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 30%, transparent 100%);
+}
+body > * { position: relative; z-index: 1; }
+header { background: rgba(7,11,20,0.82); border-bottom: 1px solid var(--line-soft); padding: 10px 24px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; position: sticky; top: 0; z-index: 100; backdrop-filter: blur(12px); }
+header h1 { font-size: 16px; font-weight: 800; background: linear-gradient(90deg, #67e8f9, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+header .sub { font-size: 11.5px; color: var(--faint); }
 header .spacer { flex: 1; }
-header a.nav { font-size: 11.5px; color: #94a3b8; text-decoration: none; border: 1px solid #334155; padding: 4px 12px; border-radius: 999px; }
-header a.nav:hover, header a.nav.active { background: #1e40af; color: #fff; border-color: #3b82f6; }
-main { max-width: 880px; margin: 0 auto; padding: 28px 24px 60px; }
-h2 { font-size: 11px; color: #64748b; margin: 32px 0 14px; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600; }
+header a.nav { font-size: 11.5px; font-weight: 600; color: var(--dim); text-decoration: none; border: 1px solid var(--line); padding: 4px 13px; border-radius: 999px; background: rgba(13,21,38,0.6); transition: all 0.15s ease; }
+header a.nav:hover, header a.nav.active { background: rgba(14,116,144,0.25); color: #a5f3fc; border-color: var(--cyan-deep); box-shadow: 0 0 10px rgba(34,211,238,0.25); }
+main { max-width: 920px; margin: 0 auto; padding: 30px 24px 60px; }
+.eyebrow { font-size: 10.5px; font-weight: 800; letter-spacing: 2.5px; color: var(--cyan); margin-bottom: 6px; }
+.eyebrow::before { content: '▸ '; color: var(--amber); }
+h2 { font-size: 11px; color: var(--faint); margin: 34px 0 14px; text-transform: uppercase; letter-spacing: 2px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+h2::before { content: ''; width: 8px; height: 8px; border-radius: 2px; background: var(--cyan); box-shadow: 0 0 8px rgba(34,211,238,0.7); }
 h2:first-child { margin-top: 0; }
-p, li { font-size: 14px; color: #cbd5e1; }
+p, li { font-size: 14px; color: var(--dim); }
 ul, ol { padding-left: 22px; } li { margin: 5px 0; }
-a { color: #38bdf8; text-decoration: none; } a:hover { color: #7dd3fc; text-decoration: underline; }
-code { background: #0f172a; border: 1px solid #1e293b; border-radius: 4px; padding: 1px 6px; font-size: 12px; color: #7dd3fc; font-family: Consolas, monospace; }
-pre { background: #0b1120; border: 1px solid #1e293b; border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 12px 0; font-size: 12.5px; line-height: 1.6; color: #cbd5e1; font-family: Consolas, monospace; }
-.card { background: linear-gradient(145deg, #1e293b, #172033); border: 1px solid #2d3f56; border-radius: 12px; padding: 20px; margin: 14px 0; }
-.card:hover { border-color: #334155; }
-.card h3 { margin: 0 0 6px; font-size: 16px; } .card h3 a { color: #e2e8f0; }
-.card p { color: #94a3b8; font-size: 13.5px; }
+a { color: var(--cyan); text-decoration: none; } a:hover { color: #a5f3fc; text-decoration: underline; }
+code { background: #02060f; border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; font-size: 12px; color: #7dd3fc; font-family: var(--mono); }
+pre { background: #02060f; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 12px 0; font-size: 12.5px; line-height: 1.6; color: var(--dim); font-family: var(--mono); box-shadow: inset 0 2px 12px rgba(0,0,0,0.6); }
+#doc-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+main > .card { margin: 14px 0; }
+#shot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.shot-card { margin: 0; overflow: hidden; }
+.shot-card img { width: 100%; height: auto; display: block; border-radius: 8px; border: 1px solid var(--line-soft); cursor: zoom-in; transition: border-color 0.15s ease, transform 0.15s ease; }
+.shot-card img:hover { border-color: var(--cyan-deep); transform: scale(1.01); }
+.shot-card figcaption { font-size: 12px; color: var(--dim); margin-top: 8px; line-height: 1.55; }
+.shot-card figcaption b { color: var(--txt); }
+details.shots { margin: 14px 0; }
+details.shots > summary {
+  cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px;
+  font-size: 13px; font-weight: 700; color: var(--dim);
+  background: rgba(13,21,38,0.6); border: 1px solid var(--line-soft);
+  border-radius: 10px; padding: 11px 15px; -webkit-tap-highlight-color: transparent;
+}
+details.shots > summary::-webkit-details-marker { display: none; }
+details.shots > summary::before { content: '+'; color: var(--cyan); font-weight: 800; font-size: 15px; width: 14px; flex: none; }
+details.shots[open] > summary::before { content: '−'; }
+details.shots > summary:hover { border-color: var(--cyan-deep); color: var(--txt); }
+details.shots > summary .count { font-weight: 400; color: var(--faint); font-size: 12px; }
+details.shots #shot-grid { margin-top: 12px; }
+/* lightbox */
+#lightbox { position: fixed; inset: 0; z-index: 200; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; background: rgba(2,6,15,0.92); backdrop-filter: blur(6px); cursor: zoom-out; }
+#lightbox[hidden] { display: none; }
+#lightbox img { max-width: min(1100px, 94vw); max-height: 82vh; width: auto; height: auto; border-radius: 10px; border: 1px solid var(--line); box-shadow: 0 24px 80px rgba(0,0,0,0.7), 0 0 40px rgba(34,211,238,0.10); }
+#lightbox .cap { font-size: 13px; color: var(--dim); max-width: min(1100px, 94vw); text-align: center; }
+#lightbox .cap b { color: var(--txt); }
+#lightbox .esc { font-size: 11px; color: var(--faint); letter-spacing: 1px; }
+.card { background: linear-gradient(160deg, var(--panel), var(--panel-2)); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin: 0; box-shadow: 0 10px 30px rgba(0,0,0,0.35); transition: border-color 0.2s ease, transform 0.2s ease; }
+.card:hover { border-color: var(--cyan-deep); transform: translateY(-2px); box-shadow: 0 10px 30px rgba(0,0,0,0.35), 0 0 18px rgba(34,211,238,0.12); }
+.card h3 { margin: 0 0 6px; font-size: 16px; }
+.card h3 a { color: var(--txt); }
+.card h3 a::after { content: ' →'; color: var(--cyan); }
+.card p { color: var(--dim); font-size: 13.5px; }
 table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
-th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #1e293b; }
-th { color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
-td { color: #cbd5e1; font-family: Consolas, monospace; font-size: 12.5px; }
-footer { text-align: center; padding: 26px; color: #475569; font-size: 12px; border-top: 1px solid #1e293b; }
-footer a { color: #38bdf8; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line-soft); }
+th { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+td { color: var(--dim); font-family: var(--mono); font-size: 12.5px; }
+footer { text-align: center; padding: 26px; color: var(--faint); font-size: 12px; border-top: 1px solid var(--line-soft); }
+footer a { color: var(--cyan); }
+@media (max-width: 640px) {
+  header { padding: 10px 14px; gap: 8px; }
+  header .sub { display: none; }
+  main { padding: 20px 14px 44px; }
+  #doc-cards { grid-template-columns: 1fr; }
+  #shot-grid { grid-template-columns: 1fr; }
+  .card { padding: 15px 16px; }
+  p, li { font-size: 13.5px; }
+}
 </style>
 </head>
 <body>
@@ -52,6 +123,41 @@ footer a { color: #38bdf8; }
     <h3><a href="index.html">Live demo</a></h3>
     <p>Run real firmware in your browser: pick a preset (blink, UART echo, CAN chat, USB CDC, RTOS, per-board builds…), press Run, watch the terminal, GPIO grid and pin activity. Load your own <code>.bin</code> / <code>.hex</code> / <code>.elf</code> plus an optional <code>.map</code> for symbol names.</p>
 </div>
+<h2 id="screenshots">Screenshots</h2>
+<details class="shots">
+<summary>Captured from the live demo <span class="count">6 shots · click any thumbnail to explode it</span></summary>
+<div id="shot-grid">
+    <figure class="card shot-card">
+        <img src="img/shot-showcase-sm.png" data-full="img/shot-showcase.png" alt="Peripheral showcase demo running in the browser at 73M IPS with live UART log and glowing target rig" width="320" height="180" loading="lazy" tabindex="0">
+        <figcaption><b>Peripheral showcase</b> — live UART log at ~73M IPS, instruments counting, target rig glowing.</figcaption>
+    </figure>
+    <figure class="card shot-card">
+        <img src="img/shot-periph37-sm.png" data-full="img/shot-periph37.png" alt="39-check peripheral integration suite passing 39 of 39 in the browser terminal" width="320" height="410" loading="lazy" tabindex="0">
+        <figcaption><b>39/39 firmware checks</b> — the full integration suite green in the browser.</figcaption>
+    </figure>
+    <figure class="card shot-card">
+        <img src="img/shot-showcase-widgets-sm.png" data-full="img/shot-showcase-widgets.png" alt="Showcase widgets live in the browser: OLED and LCD canvases, 7-segment display, RGB LED and GPIO pin grid" width="320" height="593" loading="lazy" tabindex="0">
+        <figcaption><b>Showcase widgets</b> — OLED, SPI LCD, 7-segment, RGB and the live GPIO grid.</figcaption>
+    </figure>
+    <figure class="card shot-card">
+        <img src="img/shot-blink-sm.png" data-full="img/shot-blink.png" alt="Blink demo running on the Blue Pill target with the PC13 LED lit on the board" width="320" height="410" loading="lazy" tabindex="0">
+        <figcaption><b>Blink</b> — the Arduino classic, PC13 LED live on the rig.</figcaption>
+    </figure>
+    <figure class="card shot-card">
+        <img src="img/shot-echo-sm.png" data-full="img/shot-echo.png" alt="UART echo demo ready in the browser serial terminal" width="320" height="410" loading="lazy" tabindex="0">
+        <figcaption><b>UART echo</b> — type in the terminal, bytes echo back over USART1.</figcaption>
+    </figure>
+    <figure class="card shot-card">
+        <img src="img/shot-comprehensive-sm.png" data-full="img/shot-comprehensive.png" alt="Comprehensive 21-peripheral self-test streaming results in the browser terminal" width="320" height="410" loading="lazy" tabindex="0">
+        <figcaption><b>Comprehensive test</b> — 21 peripherals exercised, results streaming.</figcaption>
+    </figure>
+</div>
+</details>
+<div id="lightbox" hidden>
+    <img id="lightbox-img" src="favicon.svg" alt="">
+    <div class="cap" id="lightbox-cap"></div>
+    <div class="esc">CLICK ANYWHERE OR ESC TO CLOSE</div>
+</div>
 <h2>Reference (rendered live from the repo sources)</h2>
 <div id="doc-cards"><p>Loading…</p></div>
 <h2>Tools</h2>
@@ -69,6 +175,34 @@ try {
         `<div class="card"><h3><a href="doc.html?f=${d.file}">${d.title}</a></h3><p>${d.blurb}</p></div>`).join('');
 } catch (e) {
     document.getElementById('doc-cards').innerHTML = '<p>Could not load the docs index.</p>';
+}
+// Screenshot lightbox: thumbnails explode to full captures.
+{
+    const box = document.getElementById('lightbox');
+    const img = document.getElementById('lightbox-img');
+    const cap = document.getElementById('lightbox-cap');
+    const close = () => { box.hidden = true; };
+    const open = (thumb) => {
+        img.src = thumb.dataset.full || thumb.src;
+        img.alt = thumb.alt;
+        const fig = thumb.closest('figure');
+        cap.innerHTML = fig ? (fig.querySelector('figcaption')?.innerHTML || '') : '';
+        box.hidden = false;
+    };
+    document.getElementById('shot-grid').addEventListener('click', (e) => {
+        const t = e.target.closest('img');
+        if (t) open(t);
+    });
+    document.getElementById('shot-grid').addEventListener('keydown', (e) => {
+        if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('img')) {
+            e.preventDefault();
+            open(e.target);
+        }
+    });
+    box.addEventListener('click', close);
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !box.hidden) close();
+    });
 }
 </script>
 <footer>

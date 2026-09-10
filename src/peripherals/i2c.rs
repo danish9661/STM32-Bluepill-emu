@@ -204,6 +204,18 @@ impl I2c {
         Some(b)
     }
 
+    /// SMBus ALERT input (RM0008 §26.6.7, SR1 bit 15): the SMBA pin pulled
+    /// low by a peer (host side). Sets the SMBALERT flag + error IRQ (via
+    /// ITERREN); firmware clears it by writing SR1 with bit 15 = 0.
+    /// Returns false (no flag) when the peripheral is disabled.
+    pub fn slave_alert(&mut self, sys: &System) -> bool {
+        if self.cr1 & 1 == 0 {
+            return false;
+        }
+        self.sr1 |= 1 << 15; // SMBALERT
+        self.fire_interrupts(sys);
+        true
+    }
     /// Host STOP: STOPF flag, back to Idle. Only valid out of a slave
     /// transaction (a STOP during master activity is a bus error, ignored).
     pub fn slave_stop(&mut self, sys: &System) -> bool {
@@ -238,7 +250,7 @@ impl I2c {
 
         let ev_flags = self.sr1 & 0x17;
         let buf_flags = self.sr1 & 0xC0;
-        let err_flags = self.sr1 & 0x1E00; // BERR/AF/ARLO/OVR + PECERR(12)
+        let err_flags = self.sr1 & (0x1E00 | (1 << 15)); // ARLO/AF/OVR/PECERR(12) + SMBALERT(15); BERR(8) out (pre-existing)
 
         if ev_flags != 0 && itevten != 0 {
             sys.p.nvic.borrow_mut().set_intr_pending(self.irq_ev);
@@ -268,6 +280,9 @@ impl Peripheral for I2c {
     }
     fn i2c_slave_stop(&mut self, sys: &System) -> bool {
         self.slave_stop(sys)
+    }
+    fn i2c_slave_alert(&mut self, sys: &System) -> bool {
+        self.slave_alert(sys)
     }
 
     fn read(&mut self, sys: &System, offset: u32) -> u32 {
@@ -375,6 +390,7 @@ impl Peripheral for I2c {
             0x00 => {
                 let prev_start = self.cr1 & (1 << 8);
                 let prev_pe = self.cr1 & 1;
+                let prev_alert = self.cr1 & (1 << 13);
                 self.cr1 = value;
 
                 // STOPF clear: SR1 read followed by any CR1 write.
@@ -428,6 +444,16 @@ impl Peripheral for I2c {
                         self.reset();
                     }
                     self.cr1 &= !(1 << 9); // Clear STOP
+                }
+                // SMBus ALERT output (CR1.13 drives SMBA low): edge → bus
+                // event for virtual hosts. Own drive never sets the own
+                // SR1 flag (that's the peer-pulled input path, inject only).
+                let new_alert = self.cr1 & (1 << 13);
+                if new_alert != prev_alert {
+                    sys.push_event(crate::system::VmEvent::I2cAlert {
+                        channel: self.i2c_channel(),
+                        asserted: new_alert != 0,
+                    });
                 }
             }
             0x04 => {
@@ -533,9 +559,20 @@ impl Peripheral for I2c {
                     _ => {}
                 }
             }
-            0x1C => self.ccr = value & 0xFFF,
-            0x20 => self.trise = value & 0x3F,
-            _ => {}
+             0x1C => self.ccr = value & 0xFFF,
+             0x20 => self.trise = value & 0x3F,
+             // SR1 write-0-clears for SMBALERT (RM0008: cleared by SW
+             // writing 0). Other status bits keep their existing clear
+             // paths (START/ADDR/STOPF/DR sequences); plain writes to them
+             // stay no-ops so driver read-modify-write cycles can't wipe
+             // live flags.
+             0x14 => {
+                 if value & (1 << 15) == 0 {
+                     self.sr1 &= !(1 << 15);
+                 }
+                 self.fire_interrupts(sys);
+             }
+             _ => {}
         }
     }
 }

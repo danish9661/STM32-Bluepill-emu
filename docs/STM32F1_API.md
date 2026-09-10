@@ -185,6 +185,7 @@ mcu.onCanRx      = (can, id, len, data) => ...; // CAN frame received into a FIF
 mcu.onTimCapture = (tim, ch, value) => ...; // input-capture latch (value = captured CNT)
 mcu.onFsmcAccess = (bank, offset, write, size, value) => ...; // FSMC memory transaction
 mcu.onUsbIn = (ep, data) => ...; // USB IN completion (device -> host bytes)
+mcu.onI2cAlert = (channel, asserted) => ...; // SMBus SMBA drive edge (firmware CR1 ALERT bit 13)
 ```
 
 - `onTimCapture(tim, ch, value)` fires when a TIM channel configured for **input
@@ -220,6 +221,19 @@ mcu.onUsbIn = (ep, data) => ...; // IN transfer completed: `data` bytes for the 
   `usbInjectSetup(bytes8)` / `usbInjectOut(ep, bytes)` (queued through
   `usb_inject_setup` / `usb_inject_out`; NAKed unless the endpoint is armed
   VALID). Encoded as flat discriminant 18 (`UsbIn`: `[ep, len, bytes...]`).
+
+## SMBus ALERT events
+
+```js
+mcu.onI2cAlert = (channel, asserted) => ...; // SMBA driven low (true) / released (false)
+```
+
+- `onI2cAlert(channel, asserted)` fires when firmware toggles CR1 ALERT
+  (bit 13), driving the SMBus SMBA line (`i2c.rs` CR1 write edge; own drive
+  never sets the own SR1 flag). The input direction — a peer pulling SMBA
+  low — comes via injection: `mcu._emu.i2cInjectAlert(ch)` sets SR1 SMBALERT
+  (bit 15, write-0-clears, error IRQ when ITERREN). Encoded as flat
+  discriminant 19 (`I2cAlert`: `[channel, asserted]`).
 
 ## Complete worked examples
 

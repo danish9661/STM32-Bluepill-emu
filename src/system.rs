@@ -109,6 +109,7 @@ pub enum VmEvent {
     TimCapture { tim: u8, ch: u8, value: u32 },
     FsmcAccess { bank: u8, offset: u32, write: bool, size: u8, value: u32 },
     UsbIn { ep: u8, data: Vec<u8> },
+    I2cAlert { channel: u8, asserted: bool },
 }
 
 /// ARMv7-M MPU region (RBAR + RASR shadows). Plain Copy data behind one

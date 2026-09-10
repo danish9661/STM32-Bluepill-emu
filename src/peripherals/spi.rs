@@ -78,6 +78,11 @@ impl Spi {
     fn spi_channel(&self) -> u8 {
         self.name.trim_start_matches("SPI").parse::<u8>().unwrap_or(0)
     }
+    /// TI frame format (SPI_CR2 FRF, bit 4): NSS pulses once per frame and
+    /// CPOL/CPHA are don't-care. Transfers complete synchronously with no
+    /// edge surface, so the shifted bit content is identical to Motorola
+    /// mode — decoded here so the mode is explicit and pinned by test.
+    fn is_ti_mode(&self) -> bool { self.cr2 & (1 << 4) != 0 }
     fn is_i2s(&self) -> bool { self.i2scfgr & 1 != 0 } // I2SMOD
 
     fn active_device(&self, sys: &System) -> Option<Rc<RefCell<dyn ExtDevice<(), u8>>>> {
@@ -197,6 +202,10 @@ impl Peripheral for Spi {
                     self.txe = false;
                     let channel = self.spi_channel();
                     let device = self.active_device(sys);
+                    // TI mode changes only NSS phasing (no edge surface
+                    // here); the data path below is shared with Motorola
+                    // mode by construction, CPOL/CPHA unread in both.
+                    let _ti_frame = self.is_ti_mode();
                     let crc_phase = self.crc_enabled() && self.crc_next();
                     // In a CRCNEXT phase the shifter clocks out TXCRC
                     // instead of data (per DFF width, MSB first).
