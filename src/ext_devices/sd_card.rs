@@ -97,7 +97,13 @@ impl SdCard {
 
     pub fn read_block(&self, lba: u32, out: &mut [u8]) {
         let start = lba as usize * 512;
-        let n = out.len().min(self.image.len().saturating_sub(start.min(self.image.len())));
+        // Out-of-range LBA: zero-fill (an empty range with an out-of-bounds
+        // start still panics, so guard first — same as write_block).
+        if start >= self.image.len() {
+            for b in out.iter_mut() { *b = 0; }
+            return;
+        }
+        let n = out.len().min(self.image.len() - start);
         out[..n].copy_from_slice(&self.image[start..start + n]);
         for b in &mut out[n..] { *b = 0; }
     }

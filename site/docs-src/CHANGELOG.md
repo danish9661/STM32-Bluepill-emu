@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2.2.0] — 2026-09-10 — protocol gaps, multi-board demos, bench UI
+## [3.0.0] — 2026-09-10 — multi-board demos, bench UI, protocol gaps
 
 ### Added
 - SPI TI frame format (CR2 FRF decoded; CPOL/CPHA don't-care, identical shift data)
