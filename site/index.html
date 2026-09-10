@@ -144,15 +144,11 @@ header a.nav:hover { background: rgba(14,116,144,0.25); color: #a5f3fc; border-c
 .btn:hover { border-color: var(--cyan-deep); background: #12203a; box-shadow: 0 0 14px rgba(34,211,238,0.18); }
 .btn.primary { background: linear-gradient(180deg, #0ea5e9, #0284c7); border-color: #38bdf8; color: #04121c; box-shadow: 0 0 18px rgba(34,211,238,0.35); }
 .btn.primary:hover { filter: brightness(1.12); box-shadow: 0 0 26px rgba(34,211,238,0.5); }
-/* animated logic-trace divider */
-.trace {
-  max-width: 1400px; margin: 16px auto 0; padding: 0 24px; height: 14px; opacity: 0.85;
-  background-image: repeating-linear-gradient(90deg, var(--cyan-deep) 0 26px, transparent 26px 34px, var(--amber) 34px 36px, transparent 36px 52px);
-  background-size: 52px 2px; background-repeat: repeat-x; background-position: center;
-  animation: traceMove 1.6s linear infinite;
-  mask-image: linear-gradient(90deg, transparent, black 8%, black 92%, transparent);
+/* Motion safety: kill all animation/transition for users who ask for
+   reduced motion (migraine / vestibular triggers). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
 }
-@keyframes traceMove { to { background-position-x: 52px; } }
 
 /* ── Layout: the bench ─────────────────────────────────────────────────────── */
 .wrap {
@@ -484,7 +480,6 @@ footer .foot-tag {
         <a class="btn" href="about.html">About the project</a>
     </div>
 </section>
-<div class="trace" aria-hidden="true"></div>
 
 <div class="wrap" id="demo">
     <div>

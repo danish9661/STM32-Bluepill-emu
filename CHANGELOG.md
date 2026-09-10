@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2.2.0] — 2026-09-10 — remaining protocol gaps + docs-as-website
+## [2.2.0] — 2026-09-10 — protocol gaps, multi-board demos, bench UI
 
 ### Added
 - SPI TI frame format (CR2 FRF decoded; CPOL/CPHA don't-care, identical shift data)
@@ -11,11 +11,27 @@ All notable changes to this project will be documented in this file.
   (`onI2cAlert`, flat discriminant 19; `i2cInjectAlert` + `.d.ts`)
 - USART: IrDA IREN/IRLP stored, smartcard SCEN/NACK/GTPR stored
 - Docs as website (`site/doc.html` viewer + `site/sync-docs.mjs` + CI drift guard)
+- Multi-board demo family: per-board rig SVG artwork (Blue Pill, GD32,
+  Maple Mini, Nucleo-F103RB, F103RC, F105), chip-filtered preset menu
+  (board-only demos hide on other chips, picking one auto-switches),
+  UART input box follows the board's native Serial (USART2 on Nucleo/RC)
+- 12 board firmwares (echo / 7-peripheral showcase / RTC clock × Blue Pill,
+  Maple Mini, Nucleo-F103RB, Generic F103RC): LED_BUILTIN + board banner +
+  native Serial port per target
+- Bench UI remake (console/rig deck, LCD instruments, serial monitor),
+  docs/viewer/about theme + mobile pass, SEO (sitemap, per-doc
+  canonical/OG/JSON-LD, screenshots gallery, arch flowcharts)
 
 ### Fixed
 - USART HDSEL half-duplex loopback was on the wrong CR3 bit (bit 2/IRLP
   instead of bit 3) — model, unit test AND firmware shared the off-by-one
   (same class as the RTC CRH swap); firmware rebuilt (39/39)
+- Showcase font drew transposed (mirrored OLED/LCD text) — column-major rewrite
+- LCD device ate pixel 0 (`0xFB` queued as arg) and stored post-wrap `0xFC`
+  in `fb[0]` — framing rewrite (resync-safe, saturating cursor) + unit asserts
+- 7-seg latch stuck at `0000`: CS-level gating can't work with batched
+  drains (events flush before taps); decode now keys on the paint protocol
+  (`0xFC` → next 4 bytes), verified live counting with SEC
 
 ## [2.1.0] — 2026-09-09 — chips, GDB stub, depth + demos
 
