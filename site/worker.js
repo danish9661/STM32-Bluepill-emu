@@ -25,6 +25,7 @@ let running = false;
 let runSteps = 0;
 let totalInstBase = 0;
 let autoBytes = [];
+let uartAddr = 0; // USART base for uartRx (0 = default USART1)
 let canInjected = false;
 const CAN_RAM_FLAG = 0x200000b8; // fallback when main thread sends no address
 let canFlagAddr = CAN_RAM_FLAG;
@@ -51,6 +52,7 @@ async function handleMessage(e) {
       runSteps = 0;
       totalInstBase = 0;
       autoBytes = msg.autoBytes ? msg.autoBytes.slice() : [];
+      uartAddr = msg.uartAddr || 0;
       canInjected = false;
       usbListen = !!msg.usbListen;
       usbAck = null;
@@ -94,7 +96,11 @@ async function handleMessage(e) {
       break;
     }
     case 'uartRx': {
-      if (emu) emu.uartRx(msg.byte & 0xFF);
+      if (emu) {
+        const b = msg.byte & 0xFF;
+        if (uartAddr) emu.uartRxAddr(uartAddr, b);
+        else emu.uartRx(b);
+      }
       break;
     }
     case 'gpioSetInput': {

@@ -24,7 +24,17 @@ after every load, and the GPIO grid renders Arduino aliases from
 Each board has runnable demo firmware (`tests/arduino_board_demo/`, one
 sketch compiled per FQBN, shipped as `site/arduino_board_*.elf`) with a
 matching page preset that sets chip + ELF together
-(`tests/test_board_demo.mjs` 8/8, browser presets, CI).
+(`tests/test_board_demo.mjs` 8/8, browser presets, CI). The same ×4 pattern
+covers UART echo (`arduino_board_echo`, native Serial per board),
+the 7-peripheral showcase (`arduino_hw_showcase` + board banner/LED) and
+the RTC clock (`arduino_rtc_clock` + board banner) — `test_board_echo.mjs`
+8/8, `test_board_showcase.mjs` 12/12, `test_board_rtc.mjs` 20/20.
+
+The demo page filters the preset menu to the selected chip (board-only
+demos hide on other chips; picking one auto-switches the chip), and the
+rig SVG redraws per board (chip marking, LED pin, header pins). The UART
+input box follows the board's native Serial port (`uartAddr`: USART2
+`0x40004400` on Nucleo/RC).
 
 ## Verification matrix
 

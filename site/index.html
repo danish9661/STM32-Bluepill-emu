@@ -502,7 +502,7 @@ footer .foot-tag {
     <div>
         <div class="card">
             <h2>Console</h2>
-            <p class="hint">Pick a <b>preset</b> (or load your own <code>.bin</code>/<code>.hex</code>/<code>.elf</code>), then press <b>Run</b>. Some demos auto-run and print results in the terminal below. Load a <code>.map</code> after the firmware for PC&nbsp;→&nbsp;symbol names.</p>
+            <p class="hint">Pick a <b>preset</b> for the selected <b>chip</b> — the menu shows only that board's demos (or load your own <code>.bin</code>/<code>.hex</code>/<code>.elf</code>), then press <b>Run</b>. Some demos auto-run and print results in the terminal below. Load a <code>.map</code> after the firmware for PC&nbsp;→&nbsp;symbol names.</p>
             <div class="field-label">Firmware</div>
             <div class="toolbar">
                 <select id="presetSelect" class="grow">
@@ -541,6 +541,18 @@ footer .foot-tag {
                     <option value="board_maple">Board: Maple Mini (LED D33)</option>
                     <option value="board_nucleo">Board: Nucleo-F103RB (LED D13)</option>
                     <option value="board_rc">Board: Generic F103RC</option>
+                    <option value="board_pill_echo">Board Echo: Blue Pill (UART)</option>
+                    <option value="board_maple_echo">Board Echo: Maple Mini (UART)</option>
+                    <option value="board_nucleo_echo">Board Echo: Nucleo-F103RB (UART)</option>
+                    <option value="board_rc_echo">Board Echo: Generic F103RC (UART)</option>
+                    <option value="board_pill_showcase">Board Showcase: Blue Pill (7 periphs)</option>
+                    <option value="board_maple_showcase">Board Showcase: Maple Mini (7 periphs)</option>
+                    <option value="board_nucleo_showcase">Board Showcase: Nucleo-F103RB (7 periphs)</option>
+                    <option value="board_rc_showcase">Board Showcase: Generic F103RC (7 periphs)</option>
+                    <option value="board_pill_rtc">Board RTC: Blue Pill (clock)</option>
+                    <option value="board_maple_rtc">Board RTC: Maple Mini (clock)</option>
+                    <option value="board_nucleo_rtc">Board RTC: Nucleo-F103RB (clock)</option>
+                    <option value="board_rc_rtc">Board RTC: Generic F103RC (clock)</option>
                     </optgroup>
                 </select>
                 <select id="chipSelect" title="Chip / board (rp2040js-style: pick the peripheral map)">
@@ -661,6 +673,10 @@ let worker = null;
 let useWorker = false;
 
 let firmwareData = null;
+// USART base address the UART input box + autopilot write to (default
+// USART1). Board presets whose native Serial lives on USART2 (Nucleo,
+// Generic RC) set this per load; reset to 0 on every initEmulator.
+let uartAddrMain = 0;
 let symbolsData = null;
 let animId = null;
 let running = false;
@@ -953,19 +969,46 @@ function setState(state) {
     stateBadge.classList.toggle('running', state === 'Running');
 }
 
+const PILL_PINS = {
+    left: ['3V3','GND','PB9','PB8','PB7','PB6','PB5','PB4','PB3','PA15','PA12','PA11','PA10','PA9','PA8','PB15','PB14','PB13','PB12','PB11'],
+    right: ['PB10','PB2','PB1','PB0','PA7','PA6','PA5','PA4','PA3','PA2','PA1','PA0','PC15','PC14','PC13','NRST','GND','5V'],
+    top: ['3V3','GND','D-','D+'],
+    bottom: ['5V','GND','BOOT0','NRST'],
+};
+// Per-board artwork for the rig SVG: same renderer, real header pins, the
+// board's LED pin + button, chip marking and PCB shade. Keyed by chipSelect
+// value (unknown chips fall back to the Blue Pill).
+const BOARD_ART = {
+    stm32f103c8: { board: 'Blue Pill', chip: 'STM32F103C8T6', mem: '64KB Flash · 20KB SRAM', pkg: 'LQFP48', pcb: '#0b3d91',
+        led: { pin: 'PC13', port: 2, num: 13, x: 58, y: 92, label: 'PC13 LED' }, btn: { x: 200, y: 52, label: 'RST' }, pins: PILL_PINS },
+    gd32f103c8: { board: 'GD32 Blue Pill', chip: 'GD32F103C8T6', mem: '64KB Flash · 20KB SRAM', pkg: 'LQFP48', pcb: '#0b3d91',
+        led: { pin: 'PC13', port: 2, num: 13, x: 58, y: 92, label: 'PC13 LED' }, btn: { x: 200, y: 52, label: 'RST' }, pins: PILL_PINS },
+    maple_mini: { board: 'Maple Mini', chip: 'STM32F103CBT6', mem: '128KB Flash · 20KB SRAM', pkg: 'LQFP48', pcb: '#0d4d33',
+        led: { pin: 'PB1', port: 1, num: 1, x: 58, y: 92, label: 'D33 LED' }, btn: { x: 200, y: 52, label: 'BUT' }, pins: {
+        left: ['3V3','GND','PB8','PB7','PB6','PB5','PB4','PB3','PA15','PA12','PA11','PA10','PA9','PA8'],
+        right: ['PB11','PB10','PB1','PB0','PA7','PA6','PA5','PA4','PA3','PA2','PA1','PA0','PC15','PC14','NRST','GND','5V'],
+        top: ['3V3','GND','D-','D+'],
+        bottom: ['5V','GND','BOOT0','NRST'] } },
+    nucleo_f103rb: { board: 'Nucleo-F103RB', chip: 'STM32F103RBT6', mem: '128KB Flash · 20KB SRAM', pkg: 'LQFP64', pcb: '#123a7d',
+        led: { pin: 'PA5', port: 0, num: 5, x: 58, y: 92, label: 'LD2 (D13)' }, btn: { x: 200, y: 52, label: 'B1' }, pins: {
+        left: ['5V','GND','PA5','PA4','PA3','PA2','PA1','PA0','PC15','PC14','PB7','PB6','PB5','PB4','PB3','PA15','PA12','PA11','PA10','PA9'],
+        right: ['3V3','NRST','PA8','PB10','PB2','PB1','PB0','PA7','PA6','PC13','PB15','PB14','PB13','PB12','PA13','PA14','GND','5V'],
+        top: ['3V3','GND','TX','RX'],
+        bottom: ['5V','GND','BOOT0','NRST'] } },
+    stm32f103rc: { board: 'Generic F103RC', chip: 'STM32F103RCT6', mem: '256KB Flash · 48KB SRAM', pkg: 'LQFP64', pcb: '#0e4aa8',
+        led: { pin: 'PC13', port: 2, num: 13, x: 58, y: 92, label: 'PC13 LED' }, btn: { x: 200, y: 52, label: 'RST' }, pins: PILL_PINS },
+    stm32f105: { board: 'STM32F105', chip: 'STM32F105R8T6', mem: '64KB Flash · 64KB SRAM', pkg: 'LQFP64', pcb: '#3730a3',
+        led: { pin: 'PC13', port: 2, num: 13, x: 58, y: 92, label: 'PC13 LED' }, btn: { x: 200, y: 52, label: 'RST' }, pins: PILL_PINS },
+};
+const boardArt = () => BOARD_ART[currentChip()] || BOARD_ART.stm32f103c8;
 function boardSvg(ledOn) {
     const ledFill = ledOn ? '#4ade80' : '#334155';
     const glow = ledOn ? 'rgba(74,222,128,0.45)' : 'none';
-    // Blue Pill layout: headers at top/left/right/bottom, chip center, PC13 LED top-left
-    const pins = {
-        left: ['3V3','GND','PB9','PB8','PB7','PB6','PB5','PB4','PB3','PA15','PA12','PA11','PA10','PA9','PA8','PB15','PB14','PB13','PB12','PB11'],
-        right: ['PB10','PB2','PB1','PB0','PA7','PA6','PA5','PA4','PA3','PA2','PA1','PA0','PC15','PC14','PC13','NRST','GND','5V'],
-        top: ['3V3','GND','D-','D+'],
-        bottom: ['5V','GND','BOOT0','NRST'],
-    };
+    const art = boardArt();
+    const pins = art.pins;
     let out = `<svg class="board" width="330" height="440" viewBox="-16 0 362 440">`;
     // PCB
-    out += `<rect x="30" y="10" width="270" height="420" rx="14" fill="#0b3d91" stroke="#1d4ed8" stroke-width="1.5"/>`;
+    out += `<rect x="30" y="10" width="270" height="420" rx="14" fill="${art.pcb}" stroke="#1d4ed8" stroke-width="1.5"/>`;
     out += `<rect x="36" y="16" width="258" height="408" rx="11" fill="none" stroke="rgba(255,255,255,0.08)"/>`;
     // USB connector (top center)
     out += `<rect x="135" y="4" width="60" height="12" rx="3" fill="#64748b"/>`;
@@ -973,25 +1016,24 @@ function boardSvg(ledOn) {
     // 8 MHz crystal
     out += `<rect x="195" y="330" width="44" height="22" rx="3" fill="#475569" stroke="#64748b"/>`;
     out += `<text x="217" y="344" fill="#cbd5e1" font-size="9" text-anchor="middle">8MHz</text>`;
-    // Reset button
-    out += `<rect x="200" y="52" width="26" height="18" rx="3" fill="#334155" stroke="#475569"/>`;
-    out += `<text x="213" y="46" fill="#94a3b8" font-size="8" text-anchor="middle">RST</text>`;
-    // Chip (LQFP48)
+    // Reset / user button
+    out += `<rect x="${art.btn.x}" y="${art.btn.y}" width="26" height="18" rx="3" fill="#334155" stroke="#64748b"/>`;
+    out += `<text x="${art.btn.x + 13}" y="${art.btn.y - 6}" fill="#94a3b8" font-size="8" text-anchor="middle">${art.btn.label}</text>`;
+    // Chip
     out += `<rect x="85" y="150" width="160" height="140" rx="6" fill="#111827" stroke="#38bdf8" stroke-width="2"/>`;
-    out += `<text x="165" y="205" fill="#38bdf8" font-size="14" text-anchor="middle" font-weight="bold">STM32F103C8T6</text>`;
+    out += `<text x="165" y="205" fill="#38bdf8" font-size="14" text-anchor="middle" font-weight="bold">${art.chip}</text>`;
     out += `<text x="165" y="225" fill="#64748b" font-size="10" text-anchor="middle">ARM Cortex-M3</text>`;
-    out += `<text x="165" y="240" fill="#64748b" font-size="9" text-anchor="middle">64KB Flash · 20KB SRAM</text>`;
-    out += `<text x="165" y="270" fill="#475569" font-size="8" text-anchor="middle">LQFP48</text>`;
-    // PC13 LED (top-left area of board, near PA12/PA13 corner on real board)
-    out += `<circle cx="58" cy="92" r="9" fill="${ledFill}" stroke="#64748b" stroke-width="1.5"/>`;
-    out += `<circle cx="58" cy="92" r="13" fill="${glow}"/>`;
-    out += `<text class="led-label" x="58" y="112" text-anchor="middle">PC13 LED</text>`;
+    out += `<text x="165" y="240" fill="#64748b" font-size="9" text-anchor="middle">${art.mem}</text>`;
+    out += `<text x="165" y="270" fill="#475569" font-size="8" text-anchor="middle">${art.pkg}</text>`;
+    // Board LED
+    out += `<circle cx="${art.led.x}" cy="${art.led.y}" r="9" fill="${ledFill}" stroke="#64748b" stroke-width="1.5"/>`;
+    out += `<circle cx="${art.led.x}" cy="${art.led.y}" r="13" fill="${glow}"/>`;
+    out += `<text class="led-label" x="${art.led.x}" y="${art.led.y + 20}" text-anchor="middle">${art.led.label}</text>`;
     // Pins
     const drawPins = (side, list) => {
         const n = list.length;
         list.forEach((name, i) => {
-            const isPc13 = name === 'PC13';
-            const hi = isPc13 && ledOn;
+            const hi = (name === art.led.pin) && ledOn;
             const fill = hi ? '#4ade80' : (name === '3V3' || name === '5V') ? '#f87171' : name === 'GND' ? '#334155' : '#94a3b8';
             const act = PIN_ACTIVITY[name];
             const flash = act && performance.now() - act.lastToggle < 2000;
@@ -1049,7 +1091,7 @@ function renderBoard(ledOn) {
         const a = PIN_ACTIVITY[k];
         if (performance.now() - a.lastToggle < 2000) flashing.push(k);
     }
-    const sig = `${ledOn ? 1 : 0}|${pinActivityTotal}|${flashing.sort().join(',')}`;
+    const sig = `${ledOn ? 1 : 0}|${pinActivityTotal}|${flashing.sort().join(',')}|${currentChip()}`;
     if (sig === lastBoardSig) return;
     lastBoardSig = sig;
     boardWrap.innerHTML = boardSvg(ledOn);
@@ -1144,21 +1186,27 @@ function renderShowcase() {
     } catch (e) {}
 }
 
-const SEG_CS = 'PA4', SEG_CS_BIT = 4, SEG_SPI_DR = 0x4001300C;
-let segBuf = [], segDigits = [0x3F, 0x3F, 0x3F, 0x3F], segCsLow = false;
+const SEG_SPI_DR = 0x4001300C;
+let segDigits = [0x3F, 0x3F, 0x3F, 0x3F], segNeed = 0;
+let segFrame = [];
 const SEG_PAT = [0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F, 0x77, 0x7C, 0x39, 0x5E, 0x79, 0x71];
-// CS level from the pin-change API (port 0 = GPIOA): the chip drives PA4 to a
-// NEW level (ODR/BSRR/BRR writes, or CRL/CRH mode-change re-drives). Pin events
-// drain before each hook's write watchers, so segCsLow is current when the SPI
-// DR write watcher runs — no ODR/BSRR/BRR register parsing needed.
-const segCsWatch = (port, pin, level) => {
-    if (port === 0 && pin === SEG_CS_BIT) segCsLow = level === 0;
-};
+// 74HC595 decode WITHOUT pin-level gating: pin events and the write tap
+// drain in separate per-batch phases (events first), so any CS-level gate
+// misses a pulse that opens and closes inside one 20K batch — and the LCD
+// paint (8192 bytes) precedes the seg bytes in the same tap, defeating
+// "first N writes" counting too. Instead the watcher speaks the paint
+// protocol itself: 0xFC ends the LCD session, and the 4 bytes right after
+// it are the seg frame (never 0xFC/0xFB as data here: patterns and pixels
+// are 0x00/0x40/0xFF-range). 0xFB re-arms (paint starting). Self-syncs on
+// the first frame end and survives batch splits.
 const segSpiWatch = (addr, width, value) => {
-    if (addr === SEG_SPI_DR && segCsLow) {
-        segBuf.push(value & 0xFF);
-        if (segBuf.length >= 4) { segDigits = segBuf.slice(0, 4); segBuf = []; }
-    }
+    if (addr !== SEG_SPI_DR) return;
+    const b = value & 0xFF;
+    if (b === 0xFC) { segFrame = []; segNeed = 4; return; }
+    if (b === 0xFB) { segFrame = []; segNeed = 0; return; }
+    if (segNeed <= 0) return;
+    segFrame.push(b);
+    if (segFrame.length >= 4) { segDigits = segFrame.slice(0, 4); segNeed = 0; }
 };
 
 // WS2812 strip decoder: the firmware bit-bangs 800kHz WS2812 frames over
@@ -1252,7 +1300,8 @@ function updateRegs() {
 function updateVisuals() {
     if (!emu) return;
     try {
-        const ledOn = !!emu.gpioReadOutput(2, 13);
+        const art = boardArt();
+        const ledOn = !!emu.gpioReadOutput(art.led.port, art.led.num);
         renderBoard(ledOn);
         renderGpio();
         renderShowcase();
@@ -1320,6 +1369,7 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
     uiFrame = 0;
     lastTotalInst = 0;
     firmwareData = { name, bytes: data };
+    uartAddrMain = opts.uartAddr || 0;
     // Resolve the CAN autopilot flag from the ELF symbols — a hardcoded
     // address goes stale on every firmware rebuild (0x200000b8 silently
     // became canRxTries: 3M-iteration RF0R spin storms). Hex/bin keep fallback.
@@ -1346,7 +1396,7 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
         const svdForWorker = (chipSel === 'stm32f103c8' && svdXml) ? svdXml : undefined;
         // autoBytes for periph_test autopilot
         const ab = (name.includes('periph_test') || name.includes('arduino_periph_test')) ? [0x41, 0x42] : [];
-        worker.postMessage({ type: 'init', firmware: data, chip, svd: svdForWorker, ext_devices: extDevices, autoBytes: ab, canFlagAddr, usbListen: !!opts.usbListen });
+        worker.postMessage({ type: 'init', firmware: data, chip, svd: svdForWorker, ext_devices: extDevices, autoBytes: ab, canFlagAddr, usbListen: !!opts.usbListen, uartAddr: opts.uartAddr || 0 });
         // Try OffscreenCanvas transfer for showcase (worker renders directly, no copy)
         try {
           if (typeof OffscreenCanvas !== 'undefined' && $('oledCanvas')?.transferControlToOffscreen) {
@@ -1375,6 +1425,7 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
             firmware: data,
             vector_table: 0x08000000,
             ext_devices: extDevices,
+            uart_addr: opts.uartAddr || undefined,
         });
         emu.onPinChange(onPinActivity);
         usbListenMain = !!opts.usbListen;
@@ -1474,6 +1525,64 @@ function runLoop() {
     animId = requestAnimationFrame(runLoop);
 }
 
+// Preset ↔ chip compatibility: portable demos run on every F103-map chip
+// (GD32 runs identical F103 binaries; F105 passed periph37 39/39 on its SVD
+// map); board_* presets need their board build; can_dual needs CAN2 (F105).
+const PRESET_CHIPS = {
+    board_pill: ['stm32f103c8', 'gd32f103c8'],
+    board_pill_echo: ['stm32f103c8', 'gd32f103c8'],
+    board_pill_showcase: ['stm32f103c8', 'gd32f103c8'],
+    board_pill_rtc: ['stm32f103c8', 'gd32f103c8'],
+    board_maple: ['maple_mini'],
+    board_maple_echo: ['maple_mini'],
+    board_maple_showcase: ['maple_mini'],
+    board_maple_rtc: ['maple_mini'],
+    board_nucleo: ['nucleo_f103rb'],
+    board_nucleo_echo: ['nucleo_f103rb'],
+    board_nucleo_showcase: ['nucleo_f103rb'],
+    board_nucleo_rtc: ['nucleo_f103rb'],
+    board_rc: ['stm32f103rc'],
+    board_rc_echo: ['stm32f103rc'],
+    board_rc_showcase: ['stm32f103rc'],
+    board_rc_rtc: ['stm32f103rc'],
+    can_dual: ['stm32f105'],
+};
+const ALL_DEMO_CHIPS = ['stm32f103c8', 'stm32f105', 'gd32f103c8', 'maple_mini', 'nucleo_f103rb', 'stm32f103rc'];
+const presetChips = (p) => PRESET_CHIPS[p] || ALL_DEMO_CHIPS;
+// The preset menu shows only demos for the selected chip. Picking a
+// board-only preset auto-switches the chip to its board first.
+function filterPresets() {
+    const chip = $('chipSelect').value;
+    const sel = $('presetSelect');
+    let firstVisible = null;
+    sel.querySelectorAll('option').forEach((o) => {
+        const ok = presetChips(o.value).includes(chip);
+        o.hidden = !ok;
+        if (ok && !firstVisible) firstVisible = o;
+    });
+    sel.querySelectorAll('optgroup').forEach((g) => {
+        g.hidden = [...g.children].every((o) => o.hidden);
+    });
+    if (sel.selectedOptions[0]?.hidden && firstVisible) sel.value = firstVisible.value;
+}
+$('chipSelect').addEventListener('change', () => {
+  filterPresets();
+  // Force the rig to redraw in the new board's artwork (the renderBoard
+  // dirty-skip signature already includes the chip, this covers idle).
+  lastBoardSig = '';
+  try {
+    const art = boardArt();
+    renderBoard(emu ? !!emu.gpioReadOutput(art.led.port, art.led.num) : false);
+  } catch (e) {}
+});
+$('presetSelect').addEventListener('change', () => {
+    const chips = presetChips($('presetSelect').value);
+    if (!chips.includes($('chipSelect').value)) {
+        $('chipSelect').value = chips[0];
+        filterPresets();
+    }
+});
+filterPresets();
 $('loadPresetBtn').addEventListener('click', async () => {
     const preset = $('presetSelect').value;
     setState('Loading…');
@@ -1543,14 +1652,24 @@ $('loadPresetBtn').addEventListener('click', async () => {
                 spi_flash: [{ peripheral: 'SPI1', jedec_id: 0xEF4016, data: new Uint8Array(spiflash), cs: 'PA4' }],
             });
             log('Press Run — JEDEC flash ID, I2C EEPROM write/readback and OLED presence print once.', 't-in');
-        } else if (preset === 'showcase') {
-            const fw = await fetch('arduino_hw_showcase.elf').then(r => r.arrayBuffer());
-            await initEmulator(new Uint8Array(fw), 'arduino_hw_showcase.elf (7 peripherals live)', {
+        } else if (preset === 'showcase' || preset.endsWith('_showcase')) {
+            // Board showcase builds share the 7-peripheral wiring; the ELF +
+            // chip come from the board map (plain 'showcase' = Blue Pill).
+            const showBoards = {
+                showcase: ['arduino_hw_showcase.elf', 'stm32f103c8'],
+                board_pill_showcase: ['arduino_board_showcase_pill.elf', 'stm32f103c8'],
+                board_maple_showcase: ['arduino_board_showcase_maple.elf', 'maple_mini'],
+                board_nucleo_showcase: ['arduino_board_showcase_nucleo.elf', 'nucleo_f103rb'],
+                board_rc_showcase: ['arduino_board_showcase_rc.elf', 'stm32f103rc'],
+            };
+            const [elf, chipSelVal] = showBoards[preset];
+            $('chipSelect').value = chipSelVal;
+            const fw = await fetch(elf).then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(fw), `${elf} (7 peripherals live)`, {
                 i2c_oled: [{ peripheral: 'I2C1', address: 0x3C, width: 128, height: 64 }],
                 lcd: [{ peripheral: 'SPI1', cs: 'PA8' }],
-            }, true); // main thread: 7-seg decoder taps onPinChange/onPeriphWrite
-            segBuf = []; segDigits = [0x3F, 0x3F, 0x3F, 0x3F]; segCsLow = false;
-            emu.onPinChange(segCsWatch);
+            }, true); // main thread: 7-seg decoder taps onPeriphWrite
+            segDigits = [0x3F, 0x3F, 0x3F, 0x3F]; segNeed = 0; segFrame = [];
             emu.onPeriphWrite(segSpiWatch);
             $('showcaseCard').hidden = false;
             log('Press Run — OLED + LCD framebuffers, 7-seg, RGB PWM, buzzer at PB14 and the PB13 button widget go live.', 't-in');
@@ -1565,10 +1684,19 @@ $('loadPresetBtn').addEventListener('click', async () => {
             emu.onPeriphWrite(wsWatch);
             $('wsCard').hidden = false;
             log('Press Run — an 8-LED WS2812 strip (rainbow chase, 800kHz) streams from SPI1 via DMA1 CH3; the LEDs light live as frames decode.', 't-in');
-        } else if (preset === 'rtc_clock') {
-            const buf = await fetch('arduino_rtc_clock.elf').then(r => r.arrayBuffer());
-            await initEmulator(new Uint8Array(buf), 'arduino_rtc_clock.elf (RTC wall clock)');
-            log('Press Run — HH:MM:SS ticks every emulated second from the RTC counter (PRL=1M); PC13 blinks each tick.', 't-in');
+        } else if (preset === 'rtc_clock' || preset.endsWith('_rtc')) {
+            const rtcBoards = {
+                rtc_clock: ['arduino_rtc_clock.elf', 'stm32f103c8'],
+                board_pill_rtc: ['arduino_board_rtc_pill.elf', 'stm32f103c8'],
+                board_maple_rtc: ['arduino_board_rtc_maple.elf', 'maple_mini'],
+                board_nucleo_rtc: ['arduino_board_rtc_nucleo.elf', 'nucleo_f103rb'],
+                board_rc_rtc: ['arduino_board_rtc_rc.elf', 'stm32f103rc'],
+            };
+            const [elf, chipSelVal] = rtcBoards[preset];
+            $('chipSelect').value = chipSelVal;
+            const buf = await fetch(elf).then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(buf), `${elf} (RTC wall clock)`);
+            log('Press Run — HH:MM:SS ticks every emulated second from the RTC counter (PRL=1M); the board LED blinks each tick.', 't-in');
         } else if (preset === 'servo') {
             const buf = await fetch('arduino_servo.elf').then(r => r.arrayBuffer());
             await initEmulator(new Uint8Array(buf), 'arduino_servo.elf (servo sweep)');
@@ -1620,18 +1748,26 @@ $('loadPresetBtn').addEventListener('click', async () => {
             await initEmulator(new Uint8Array(buf), 'arduino_can_dual.elf (CAN1+CAN2 on F105)');
             log('Press Run — CAN1 and CAN2 talk to themselves in loopback; tx/rx pairs print per bus.', 't-in');
         } else if (preset.startsWith('board_')) {
-            // Per-board demo: matching ELF + chip variant together.
+            // Per-board demo: matching ELF + chip variant together. Entries
+            // with a third element also retarget the UART input box at that
+            // USART (Nucleo/RC native Serial = USART2 @ 0x40004400).
             const boards = {
                 board_pill: ['arduino_board_pill.elf', 'stm32f103c8'],
                 board_maple: ['arduino_board_maple.elf', 'maple_mini'],
                 board_nucleo: ['arduino_board_nucleo.elf', 'nucleo_f103rb'],
                 board_rc: ['arduino_board_rc.elf', 'stm32f103rc'],
+                board_pill_echo: ['arduino_board_echo_pill.elf', 'stm32f103c8'],
+                board_maple_echo: ['arduino_board_echo_maple.elf', 'maple_mini'],
+                board_nucleo_echo: ['arduino_board_echo_nucleo.elf', 'nucleo_f103rb', 0x40004400],
+                board_rc_echo: ['arduino_board_echo_rc.elf', 'stm32f103rc', 0x40004400],
             };
-            const [elf, chipSelVal] = boards[preset];
+            const [elf, chipSelVal, uart] = boards[preset];
             $('chipSelect').value = chipSelVal;
             const buf = await fetch(elf).then(r => r.arrayBuffer());
-            await initEmulator(new Uint8Array(buf), `${elf} (${chipSelVal})`);
-            log('Press Run — board banner + LED blink + UART ticks on the matched chip.', 't-in');
+            await initEmulator(new Uint8Array(buf), `${elf} (${chipSelVal})`, {}, false, uart ? { uartAddr: uart } : {});
+            log(preset.endsWith('_echo')
+                ? `Press Run — board banner prints, then anything you type echoes back${uart ? ' (Serial = USART2)' : ''}.`
+                : 'Press Run — board banner + LED blink + UART ticks on the matched chip.', 't-in');
         } else if (preset === 'sd_logger') {
             // 1 MiB blank SDHC image (written blocks land here, in RAM only)
             const buf = await fetch('arduino_sd_logger.elf').then(r => r.arrayBuffer());
@@ -1828,9 +1964,13 @@ function sendUart() {
     if (useWorker && worker) {
         for (const ch of val) worker.postMessage({ type: 'uartRx', byte: ch.charCodeAt(0) & 0xFF });
     } else if (emu) {
-        const bytes = [];
-        for (const ch of val) bytes.push(ch.charCodeAt(0) & 0xFF);
-        emu.uartRxBytes(bytes);
+        if (uartAddrMain) {
+            for (const ch of val) emu.uartRxAddr(uartAddrMain, ch.charCodeAt(0) & 0xFF);
+        } else {
+            const bytes = [];
+            for (const ch of val) bytes.push(ch.charCodeAt(0) & 0xFF);
+            emu.uartRxBytes(bytes);
+        }
     } else return;
     log(`TX → ${JSON.stringify(val)}`, 't-in');
     $('uartInput').value = '';

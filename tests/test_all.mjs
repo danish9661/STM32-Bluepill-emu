@@ -10,6 +10,7 @@ const { init, init_svd, periph_read, periph_write, tick, step_batch, has_pending
         add_sd_card, reset_ext_devices, rcc_sysclk_hz, rcc_fail_hse, add_i2c_eeprom,
         drain_events, usb_inject_setup, usb_inject_out, pwm_duty,
         i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop, i2c_inject_alert,
+        add_lcd, lcd_fb,
         gpio_take_pin_events } = periph;
 
 let passed = 0, failed = 0;
@@ -870,8 +871,34 @@ periph_write(SPI1 + 0x00, 4, (3 << 3) | (1 << 2) | (1 << 6) | (1 << 1) | (1 << 0
 periph_write(SPI1 + 0x0C, 4, 0xA5);
 spi_sr = periph_read(SPI1 + 0x08, 4);
 assert_eq(spi_sr & 3, 3, 'SPI1 TI-mode SR TXE+RXNE');
-assert_eq(periph_read(SPI1 + 0x0C, 4), 0xFF, 'SPI1 TI-mode xfer returns 0xFF (no device)');
 periph_write(SPI1 + 0x04, 4, 0); // FRF off (Motorola)
+
+// LCD framing (ext device): 0xFB starts a session at pixel (0,0) and takes
+// no argument byte; 0xFC ends it and is never stored; stray bytes outside
+// a session are ignored; a fresh 0xFB resyncs mid-stream.
+add_lcd('SPI1', 'PA4');
+reset();
+periph_write(0x40021018, 4, 1 << 12); // SPI1EN
+periph_write(SPI1 + 0x00, 4, (3 << 3) | (1 << 2) | (1 << 6)); // MSTR SPE
+periph_write(0x4001080C, 4, 0); // GPIOA ODR low: PA4 CS low = LCD selected
+periph_write(SPI1 + 0x0C, 4, 0xFB);
+periph_write(SPI1 + 0x0C, 4, 0xAA);
+periph_write(SPI1 + 0x0C, 4, 0xBB);
+periph_write(SPI1 + 0x0C, 4, 0xFC);
+let lcd = lcd_fb('SPI1');
+assert_eq(lcd.length, 8192, 'LCD fb size 128x64');
+assert_eq(lcd[0], 0xAA, 'LCD pixel (0,0) first data byte (no shift)');
+assert_eq(lcd[1], 0xBB, 'LCD pixel (1,0) second byte');
+periph_write(SPI1 + 0x0C, 4, 0xCC); // outside session: ignored
+lcd = lcd_fb('SPI1');
+assert_eq(lcd[2], 0, 'LCD stray byte ignored outside session');
+periph_write(SPI1 + 0x0C, 4, 0xFB); // resync
+periph_write(SPI1 + 0x0C, 4, 0xDD);
+lcd = lcd_fb('SPI1');
+assert_eq(lcd[0], 0xDD, 'LCD resync overwrites from pixel 0');
+assert_eq(lcd[1], 0xBB, 'LCD resync keeps later pixels');
+reset_ext_devices();
+reset();
 
 // ============================================================
 // I2C

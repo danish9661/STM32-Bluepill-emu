@@ -26,10 +26,24 @@ static void print2(uint32_t v) {
     Serial.print((char)('0' + v % 10));
 }
 
+static const char *boardName() {
+#if defined(ARDUINO_NUCLEO_F103RB)
+    return "Nucleo-F103RB";
+#elif defined(ARDUINO_MAPLEMINI_F103CB)
+    return "Maple Mini";
+#elif defined(ARDUINO_GENERIC_F103RCTX)
+    return "Generic F103RC";
+#else
+    return "Blue Pill";
+#endif
+}
+
 void setup() {
-    pinMode(PC13, OUTPUT);
+    pinMode(LED_BUILTIN, OUTPUT);
     Serial.begin(115200);
     Serial.println("\r\n=== RTC clock demo ===");
+    Serial.print("board: ");
+    Serial.println(boardName());
     Serial.println("HH:MM:SS prints every emulated second (RTC CNT, PRL=1M).");
 
     RCC->APB1ENR |= RCC_APB1ENR_PWREN | RCC_APB1ENR_BKPEN;
@@ -47,7 +61,7 @@ void loop() {
     if (cnt != last) {
         last = cnt;
         uint32_t day = cnt % 86400u;
-        digitalWrite(PC13, (cnt & 1) ? LOW : HIGH);
+        digitalWrite(LED_BUILTIN, (cnt & 1) ? LOW : HIGH);
         print2(day / 3600u);
         Serial.print(':');
         print2((day / 60u) % 60u);

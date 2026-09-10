@@ -4308,7 +4308,7 @@ LOAD /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-non
                 0x08000000                g_pfnVectors
                 0x0800010c                        . = ALIGN (0x4)
 
-.text           0x0800010c     0x718c
+.text           0x0800010c     0x71ac
                 0x0800010c                        . = ALIGN (0x4)
  *(.text)
  .text          0x0800010c       0x10 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-strlen.o)
@@ -4360,1015 +4360,1016 @@ LOAD /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-non
  .text.frame_dummy
                 0x08000774       0x1c /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
  .text._ZL14oled_draw_textssPKc
-                0x08000790       0x90 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
+                0x08000790       0x94 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
  .text._ZL6btnISRv
-                0x08000820       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
+                0x08000824       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
  .text._ZL13lcd_draw_charhhc.constprop.0
-                0x08000830       0x4c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
+                0x08000834       0x50 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
  .text._ZNSt17_Function_handlerIFvvEPS0_E10_M_managerERSt9_Any_dataRKS3_St18_Manager_operation
-                0x0800087c       0x20 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
-                0x0800087c                std::_Function_handler<void (), void (*)()>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
+                0x08000884       0x20 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
+                0x08000884                std::_Function_handler<void (), void (*)()>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation)
  .text._ZNSt17_Function_handlerIFvvEPS0_E9_M_invokeERKSt9_Any_data
-                0x0800089c        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
-                0x0800089c                std::_Function_handler<void (), void (*)()>::_M_invoke(std::_Any_data const&)
+                0x080008a4        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
+                0x080008a4                std::_Function_handler<void (), void (*)()>::_M_invoke(std::_Any_data const&)
  .text._ZN7TwoWire5writeEi.isra.0
-                0x080008a0        0x8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
+                0x080008a8        0x8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
  .text._ZL8oled_cmdh
-                0x080008a8       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
+                0x080008b0       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
  .text._ZL9oled_showv
-                0x080008d4       0x78 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
- .text.setup    0x0800094c      0x16c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
-                0x0800094c                setup
- .text.loop     0x08000ab8      0x350 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
-                0x08000ab8                loop
+                0x080008dc       0x78 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
+ .text.setup    0x08000954      0x184 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
+                0x08000954                setup
+ .text.loop     0x08000ad8      0x350 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
+                0x08000ad8                loop
  .text._ZN8SPIClassC2Emmmm
-                0x08000e08      0x124 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SPI/SPI.cpp.o
-                0x08000e08                SPIClass::SPIClass(unsigned long, unsigned long, unsigned long, unsigned long)
-                0x08000e08                SPIClass::SPIClass(unsigned long, unsigned long, unsigned long, unsigned long)
+                0x08000e28      0x124 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SPI/SPI.cpp.o
+                0x08000e28                SPIClass::SPIClass(unsigned long, unsigned long, unsigned long, unsigned long)
+                0x08000e28                SPIClass::SPIClass(unsigned long, unsigned long, unsigned long, unsigned long)
  .text._ZN8SPIClass5beginE13SPIDeviceMode
-                0x08000f2c       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SPI/SPI.cpp.o
-                0x08000f2c                SPIClass::begin(SPIDeviceMode)
+                0x08000f4c       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SPI/SPI.cpp.o
+                0x08000f4c                SPIClass::begin(SPIDeviceMode)
  .text._ZN8SPIClass8transferEhb
-                0x08000f58       0x24 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SPI/SPI.cpp.o
-                0x08000f58                SPIClass::transfer(unsigned char, bool)
+                0x08000f78       0x24 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SPI/SPI.cpp.o
+                0x08000f78                SPIClass::transfer(unsigned char, bool)
  .text.startup._GLOBAL__sub_I_SPI
-                0x08000f7c       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SPI/SPI.cpp.o
+                0x08000f9c       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SPI/SPI.cpp.o
  .text.LL_GPIO_SetPinMode
-                0x08000f98       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SPI/utility/spi_com.c.o
+                0x08000fb8       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SPI/utility/spi_com.c.o
  .text.spi_getClkFreqInst
-                0x08000fc4       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SPI/utility/spi_com.c.o
-                0x08000fc4                spi_getClkFreqInst
+                0x08000fe4       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SPI/utility/spi_com.c.o
+                0x08000fe4                spi_getClkFreqInst
  .text.spi_init
-                0x08000ff0      0x280 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SPI/utility/spi_com.c.o
-                0x08000ff0                spi_init
+                0x08001010      0x280 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SPI/utility/spi_com.c.o
+                0x08001010                spi_init
  .text.spi_transfer
-                0x08001270       0x5e /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SPI/utility/spi_com.c.o
-                0x08001270                spi_transfer
+                0x08001290       0x5e /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SPI/utility/spi_com.c.o
+                0x08001290                spi_transfer
  .text._ZN5Print17availableForWriteEv
-                0x080012ce        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x080012ce                Print::availableForWrite()
+                0x080012ee        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x080012ee                Print::availableForWrite()
  .text._ZN7TwoWire9availableEv
-                0x080012d2        0x8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x080012d2                TwoWire::available()
+                0x080012f2        0x8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x080012f2                TwoWire::available()
  .text._ZN7TwoWire4readEv
-                0x080012da       0x1a /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x080012da                TwoWire::read()
+                0x080012fa       0x1a /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x080012fa                TwoWire::read()
  .text._ZN7TwoWire4peekEv
-                0x080012f4       0x12 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x080012f4                TwoWire::peek()
+                0x08001314       0x12 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x08001314                TwoWire::peek()
  .text._ZN7TwoWire16onRequestServiceEP5i2c_s
-                0x08001306       0x16 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x08001306                TwoWire::onRequestService(i2c_s*)
+                0x08001326       0x16 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x08001326                TwoWire::onRequestService(i2c_s*)
  .text._ZNSt14_Function_baseD2Ev
-                0x0800131c       0x12 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x0800131c                std::_Function_base::~_Function_base()
-                0x0800131c                std::_Function_base::~_Function_base()
- *fill*         0x0800132e        0x2 
+                0x0800133c       0x12 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x0800133c                std::_Function_base::~_Function_base()
+                0x0800133c                std::_Function_base::~_Function_base()
+ *fill*         0x0800134e        0x2 
  .text._ZN7TwoWireC2Emm
-                0x08001330       0xcc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x08001330                TwoWire::TwoWire(unsigned long, unsigned long)
-                0x08001330                TwoWire::TwoWire(unsigned long, unsigned long)
+                0x08001350       0xcc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x08001350                TwoWire::TwoWire(unsigned long, unsigned long)
+                0x08001350                TwoWire::TwoWire(unsigned long, unsigned long)
  .text._ZN7TwoWire3endEv
-                0x080013fc       0x28 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x080013fc                TwoWire::end()
+                0x0800141c       0x28 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x0800141c                TwoWire::end()
  .text._ZN7TwoWireD2Ev
-                0x08001424       0x28 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x08001424                TwoWire::~TwoWire()
-                0x08001424                TwoWire::~TwoWire()
+                0x08001444       0x28 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x08001444                TwoWire::~TwoWire()
+                0x08001444                TwoWire::~TwoWire()
  .text._ZN7TwoWire17beginTransmissionEi
-                0x0800144c       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x0800144c                TwoWire::beginTransmission(int)
+                0x0800146c       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x0800146c                TwoWire::beginTransmission(int)
  .text._ZN7TwoWire16allocateRxBufferEj
-                0x0800145c       0x24 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x0800145c                TwoWire::allocateRxBuffer(unsigned int)
+                0x0800147c       0x24 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x0800147c                TwoWire::allocateRxBuffer(unsigned int)
  .text._ZN7TwoWire16onReceiveServiceEP5i2c_s
-                0x08001480       0x4c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x08001480                TwoWire::onReceiveService(i2c_s*)
+                0x080014a0       0x4c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x080014a0                TwoWire::onReceiveService(i2c_s*)
  .text._ZN7TwoWire16allocateTxBufferEj
-                0x080014cc       0x32 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x080014cc                TwoWire::allocateTxBuffer(unsigned int)
+                0x080014ec       0x32 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x080014ec                TwoWire::allocateTxBuffer(unsigned int)
  .text._ZN7TwoWire5writeEh
-                0x080014fe       0x42 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x080014fe                TwoWire::write(unsigned char)
+                0x0800151e       0x42 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x0800151e                TwoWire::write(unsigned char)
  .text._ZN7TwoWire5writeEPKhj
-                0x08001540       0x42 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x08001540                TwoWire::write(unsigned char const*, unsigned int)
+                0x08001560       0x42 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x08001560                TwoWire::write(unsigned char const*, unsigned int)
  .text._ZN7TwoWire13resetRxBufferEv
-                0x08001582       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x08001582                TwoWire::resetRxBuffer()
+                0x080015a2       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x080015a2                TwoWire::resetRxBuffer()
  .text._ZN7TwoWire13resetTxBufferEv
-                0x08001592       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x08001592                TwoWire::resetTxBuffer()
+                0x080015b2       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x080015b2                TwoWire::resetTxBuffer()
  .text._ZN7TwoWire15endTransmissionEh
-                0x080015a2       0x46 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x080015a2                TwoWire::endTransmission(unsigned char)
+                0x080015c2       0x46 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x080015c2                TwoWire::endTransmission(unsigned char)
  .text._ZN7TwoWire15endTransmissionEv
-                0x080015e8        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x080015e8                TwoWire::endTransmission()
+                0x08001608        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x08001608                TwoWire::endTransmission()
  .text._ZN7TwoWire5flushEv
-                0x080015ee       0x18 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x080015ee                TwoWire::flush()
- *fill*         0x08001606        0x2 
+                0x0800160e       0x18 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x0800160e                TwoWire::flush()
+ *fill*         0x08001626        0x2 
  .text._ZN7TwoWire10recoverBusEv
-                0x08001608       0xd4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x08001608                TwoWire::recoverBus()
+                0x08001628       0xd4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x08001628                TwoWire::recoverBus()
  .text._ZN7TwoWire5beginEhbb
-                0x080016dc       0x9c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x080016dc                TwoWire::begin(unsigned char, bool, bool)
+                0x080016fc       0x9c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x080016fc                TwoWire::begin(unsigned char, bool, bool)
  .text._ZN7TwoWire5beginEb
-                0x08001778        0xa /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x08001778                TwoWire::begin(bool)
- *fill*         0x08001782        0x2 
+                0x08001798        0xa /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x08001798                TwoWire::begin(bool)
+ *fill*         0x080017a2        0x2 
  .text.startup._GLOBAL__sub_I__ZN7TwoWireC2Emm
-                0x08001784       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x080017a4       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
  .text.exit._GLOBAL__sub_D__ZN7TwoWireC2Emm
-                0x08001794        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x080017b4        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
  .text.i2c_init
-                0x080017a0      0x170 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
-                0x080017a0                i2c_init
+                0x080017c0      0x170 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
+                0x080017c0                i2c_init
  .text.i2c_deinit
-                0x08001910       0x7c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
-                0x08001910                i2c_deinit
+                0x08001930       0x7c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
+                0x08001930                i2c_deinit
  .text.i2c_slave_write_IT
-                0x0800198c       0x34 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
-                0x0800198c                i2c_slave_write_IT
+                0x080019ac       0x34 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
+                0x080019ac                i2c_slave_write_IT
  .text.i2c_IsDeviceReady
-                0x080019c0       0x3e /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
-                0x080019c0                i2c_IsDeviceReady
+                0x080019e0       0x3e /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
+                0x080019e0                i2c_IsDeviceReady
  .text.i2c_master_write
-                0x080019fe       0xa2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
-                0x080019fe                i2c_master_write
+                0x08001a1e       0xa2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
+                0x08001a1e                i2c_master_write
  .text.i2c_attachSlaveRxEvent
-                0x08001aa0        0xe /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
-                0x08001aa0                i2c_attachSlaveRxEvent
+                0x08001ac0        0xe /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
+                0x08001ac0                i2c_attachSlaveRxEvent
  .text.i2c_attachSlaveTxEvent
-                0x08001aae        0xe /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
-                0x08001aae                i2c_attachSlaveTxEvent
+                0x08001ace        0xe /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
+                0x08001ace                i2c_attachSlaveTxEvent
  .text.HAL_I2C_AddrCallback
-                0x08001abc       0x68 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
-                0x08001abc                HAL_I2C_AddrCallback
+                0x08001adc       0x68 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
+                0x08001adc                HAL_I2C_AddrCallback
  .text.HAL_I2C_ListenCpltCallback
-                0x08001b24       0x2a /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
-                0x08001b24                HAL_I2C_ListenCpltCallback
+                0x08001b44       0x2a /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
+                0x08001b44                HAL_I2C_ListenCpltCallback
  .text.HAL_I2C_SlaveRxCpltCallback
-                0x08001b4e       0x24 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
-                0x08001b4e                HAL_I2C_SlaveRxCpltCallback
+                0x08001b6e       0x24 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
+                0x08001b6e                HAL_I2C_SlaveRxCpltCallback
  .text.HAL_I2C_SlaveTxCpltCallback
-                0x08001b72        0x8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
-                0x08001b72                HAL_I2C_SlaveTxCpltCallback
+                0x08001b92        0x8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
+                0x08001b92                HAL_I2C_SlaveTxCpltCallback
  .text.HAL_I2C_ErrorCallback
-                0x08001b7a        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
-                0x08001b7a                HAL_I2C_ErrorCallback
- *fill*         0x08001b86        0x2 
+                0x08001b9a        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
+                0x08001b9a                HAL_I2C_ErrorCallback
+ *fill*         0x08001ba6        0x2 
  .text.I2C1_EV_IRQHandler
-                0x08001b88        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
-                0x08001b88                I2C1_EV_IRQHandler
+                0x08001ba8        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
+                0x08001ba8                I2C1_EV_IRQHandler
  .text.I2C1_ER_IRQHandler
-                0x08001b94        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
-                0x08001b94                I2C1_ER_IRQHandler
+                0x08001bb4        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
+                0x08001bb4                I2C1_ER_IRQHandler
  .text.I2C2_EV_IRQHandler
-                0x08001ba0        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
-                0x08001ba0                I2C2_EV_IRQHandler
+                0x08001bc0        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
+                0x08001bc0                I2C2_EV_IRQHandler
  .text.I2C2_ER_IRQHandler
-                0x08001bac        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
-                0x08001bac                I2C2_ER_IRQHandler
+                0x08001bcc        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/utility/twi.c.o
+                0x08001bcc                I2C2_ER_IRQHandler
  .text.HAL_MspInit
-                0x08001bb8        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal.c.o
-                0x08001bb8                HAL_MspInit
- *fill*         0x08001bba        0x2 
+                0x08001bd8        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal.c.o
+                0x08001bd8                HAL_MspInit
+ *fill*         0x08001bda        0x2 
  .text.HAL_InitTick
-                0x08001bbc       0x48 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal.c.o
-                0x08001bbc                HAL_InitTick
+                0x08001bdc       0x48 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal.c.o
+                0x08001bdc                HAL_InitTick
  .text.HAL_Init
-                0x08001c04       0x24 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal.c.o
-                0x08001c04                HAL_Init
+                0x08001c24       0x24 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal.c.o
+                0x08001c24                HAL_Init
  .text.HAL_IncTick
-                0x08001c28       0x18 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal.c.o
-                0x08001c28                HAL_IncTick
+                0x08001c48       0x18 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal.c.o
+                0x08001c48                HAL_IncTick
  .text.HAL_GetTick
-                0x08001c40        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal.c.o
-                0x08001c40                HAL_GetTick
+                0x08001c60        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal.c.o
+                0x08001c60                HAL_GetTick
  .text.HAL_NVIC_SetPriorityGrouping
-                0x08001c4c       0x24 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_cortex.c.o
-                0x08001c4c                HAL_NVIC_SetPriorityGrouping
+                0x08001c6c       0x24 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_cortex.c.o
+                0x08001c6c                HAL_NVIC_SetPriorityGrouping
  .text.HAL_NVIC_SetPriority
-                0x08001c70       0x60 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_cortex.c.o
-                0x08001c70                HAL_NVIC_SetPriority
+                0x08001c90       0x60 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_cortex.c.o
+                0x08001c90                HAL_NVIC_SetPriority
  .text.HAL_NVIC_EnableIRQ
-                0x08001cd0       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_cortex.c.o
-                0x08001cd0                HAL_NVIC_EnableIRQ
+                0x08001cf0       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_cortex.c.o
+                0x08001cf0                HAL_NVIC_EnableIRQ
  .text.HAL_NVIC_DisableIRQ
-                0x08001cec       0x24 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_cortex.c.o
-                0x08001cec                HAL_NVIC_DisableIRQ
+                0x08001d0c       0x24 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_cortex.c.o
+                0x08001d0c                HAL_NVIC_DisableIRQ
  .text.HAL_SYSTICK_Config
-                0x08001d10       0x28 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_cortex.c.o
-                0x08001d10                HAL_SYSTICK_Config
+                0x08001d30       0x28 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_cortex.c.o
+                0x08001d30                HAL_SYSTICK_Config
  .text.HAL_NVIC_ClearPendingIRQ
-                0x08001d38       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_cortex.c.o
-                0x08001d38                HAL_NVIC_ClearPendingIRQ
+                0x08001d58       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_cortex.c.o
+                0x08001d58                HAL_NVIC_ClearPendingIRQ
  .text.HAL_SYSTICK_Callback
-                0x08001d54        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_cortex.c.o
-                0x08001d54                HAL_SYSTICK_Callback
+                0x08001d74        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_cortex.c.o
+                0x08001d74                HAL_SYSTICK_Callback
  .text.HAL_SYSTICK_IRQHandler
-                0x08001d56        0x8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_cortex.c.o
-                0x08001d56                HAL_SYSTICK_IRQHandler
+                0x08001d76        0x8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_cortex.c.o
+                0x08001d76                HAL_SYSTICK_IRQHandler
  .text.HAL_CRC_MspInit
-                0x08001d5e        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_crc.c.o
-                0x08001d5e                HAL_CRC_MspInit
+                0x08001d7e        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_crc.c.o
+                0x08001d7e                HAL_CRC_MspInit
  .text.HAL_CRC_Init
-                0x08001d60       0x20 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_crc.c.o
-                0x08001d60                HAL_CRC_Init
+                0x08001d80       0x20 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_crc.c.o
+                0x08001d80                HAL_CRC_Init
  .text.HAL_DMA_Abort
-                0x08001d80       0x3e /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_dma.c.o
-                0x08001d80                HAL_DMA_Abort
- *fill*         0x08001dbe        0x2 
+                0x08001da0       0x3e /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_dma.c.o
+                0x08001da0                HAL_DMA_Abort
+ *fill*         0x08001dde        0x2 
  .text.HAL_DMA_Abort_IT
-                0x08001dc0       0x8c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_dma.c.o
-                0x08001dc0                HAL_DMA_Abort_IT
+                0x08001de0       0x8c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_dma.c.o
+                0x08001de0                HAL_DMA_Abort_IT
  .text.HAL_DMA_GetState
-                0x08001e4c        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_dma.c.o
-                0x08001e4c                HAL_DMA_GetState
- *fill*         0x08001e52        0x2 
+                0x08001e6c        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_dma.c.o
+                0x08001e6c                HAL_DMA_GetState
+ *fill*         0x08001e72        0x2 
  .text.HAL_GPIO_Init
-                0x08001e54      0x1a8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_gpio.c.o
-                0x08001e54                HAL_GPIO_Init
+                0x08001e74      0x1a8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_gpio.c.o
+                0x08001e74                HAL_GPIO_Init
  .text.HAL_GPIO_EXTI_IRQHandler
-                0x08001ffc       0x18 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_gpio.c.o
-                0x08001ffc                HAL_GPIO_EXTI_IRQHandler
+                0x0800201c       0x18 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_gpio.c.o
+                0x0800201c                HAL_GPIO_EXTI_IRQHandler
  .text.I2C_WaitOnFlagUntilTimeout
-                0x08002014       0x9c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x08002034       0x9c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
  .text.HAL_I2C_MspInit
-                0x080020b0        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
-                0x080020b0                HAL_I2C_MspInit
- *fill*         0x080020b2        0x2 
+                0x080020d0        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x080020d0                HAL_I2C_MspInit
+ *fill*         0x080020d2        0x2 
  .text.HAL_I2C_Init
-                0x080020b4      0x150 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
-                0x080020b4                HAL_I2C_Init
+                0x080020d4      0x150 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x080020d4                HAL_I2C_Init
  .text.HAL_I2C_MspDeInit
-                0x08002204        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
-                0x08002204                HAL_I2C_MspDeInit
+                0x08002224        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x08002224                HAL_I2C_MspDeInit
  .text.HAL_I2C_DeInit
-                0x08002206       0x32 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
-                0x08002206                HAL_I2C_DeInit
+                0x08002226       0x32 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x08002226                HAL_I2C_DeInit
  .text.HAL_I2C_IsDeviceReady
-                0x08002238      0x158 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
-                0x08002238                HAL_I2C_IsDeviceReady
+                0x08002258      0x158 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x08002258                HAL_I2C_IsDeviceReady
  .text.HAL_I2C_Master_Seq_Transmit_IT
-                0x08002390       0xd0 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
-                0x08002390                HAL_I2C_Master_Seq_Transmit_IT
+                0x080023b0       0xd0 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x080023b0                HAL_I2C_Master_Seq_Transmit_IT
  .text.HAL_I2C_Slave_Seq_Transmit_IT
-                0x08002460       0x76 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
-                0x08002460                HAL_I2C_Slave_Seq_Transmit_IT
+                0x08002480       0x76 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x08002480                HAL_I2C_Slave_Seq_Transmit_IT
  .text.HAL_I2C_Slave_Seq_Receive_IT
-                0x080024d6       0x76 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
-                0x080024d6                HAL_I2C_Slave_Seq_Receive_IT
+                0x080024f6       0x76 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x080024f6                HAL_I2C_Slave_Seq_Receive_IT
  .text.HAL_I2C_EnableListen_IT
-                0x0800254c       0x36 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
-                0x0800254c                HAL_I2C_EnableListen_IT
+                0x0800256c       0x36 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x0800256c                HAL_I2C_EnableListen_IT
  .text.HAL_I2C_MasterTxCpltCallback
-                0x08002582        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
-                0x08002582                HAL_I2C_MasterTxCpltCallback
+                0x080025a2        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x080025a2                HAL_I2C_MasterTxCpltCallback
  .text.HAL_I2C_MasterRxCpltCallback
-                0x08002584        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
-                0x08002584                HAL_I2C_MasterRxCpltCallback
+                0x080025a4        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x080025a4                HAL_I2C_MasterRxCpltCallback
  .text.HAL_I2C_MemTxCpltCallback
-                0x08002586        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
-                0x08002586                HAL_I2C_MemTxCpltCallback
+                0x080025a6        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x080025a6                HAL_I2C_MemTxCpltCallback
  .text.I2C_MemoryTransmit_TXE_BTF
-                0x08002588       0xb0 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x080025a8       0xb0 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
  .text.HAL_I2C_MemRxCpltCallback
-                0x08002638        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
-                0x08002638                HAL_I2C_MemRxCpltCallback
+                0x08002658        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x08002658                HAL_I2C_MemRxCpltCallback
  .text.HAL_I2C_AbortCpltCallback
-                0x0800263a        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
-                0x0800263a                HAL_I2C_AbortCpltCallback
+                0x0800265a        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x0800265a                HAL_I2C_AbortCpltCallback
  .text.I2C_DMAAbort
-                0x0800263c       0xc0 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x0800265c       0xc0 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
  .text.I2C_ITError
-                0x080026fc      0x150 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x0800271c      0x150 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
  .text.HAL_I2C_EV_IRQHandler
-                0x0800284c      0x8b4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
-                0x0800284c                HAL_I2C_EV_IRQHandler
+                0x0800286c      0x8b4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x0800286c                HAL_I2C_EV_IRQHandler
  .text.HAL_I2C_ER_IRQHandler
-                0x08003100      0x140 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
-                0x08003100                HAL_I2C_ER_IRQHandler
+                0x08003120      0x140 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x08003120                HAL_I2C_ER_IRQHandler
  .text.HAL_I2C_GetState
-                0x08003240        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
-                0x08003240                HAL_I2C_GetState
+                0x08003260        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x08003260                HAL_I2C_GetState
  .text.HAL_I2C_GetError
-                0x08003246        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
-                0x08003246                HAL_I2C_GetError
- *fill*         0x0800324a        0x2 
+                0x08003266        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_i2c.c.o
+                0x08003266                HAL_I2C_GetError
+ *fill*         0x0800326a        0x2 
  .text.HAL_RCC_OscConfig
-                0x0800324c      0x338 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_rcc.c.o
-                0x0800324c                HAL_RCC_OscConfig
+                0x0800326c      0x338 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_rcc.c.o
+                0x0800326c                HAL_RCC_OscConfig
  .text.HAL_RCC_GetSysClockFreq
-                0x08003584       0x4c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_rcc.c.o
-                0x08003584                HAL_RCC_GetSysClockFreq
+                0x080035a4       0x4c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_rcc.c.o
+                0x080035a4                HAL_RCC_GetSysClockFreq
  .text.HAL_RCC_ClockConfig
-                0x080035d0      0x138 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_rcc.c.o
-                0x080035d0                HAL_RCC_ClockConfig
+                0x080035f0      0x138 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_rcc.c.o
+                0x080035f0                HAL_RCC_ClockConfig
  .text.HAL_RCC_GetPCLK1Freq
-                0x08003708       0x20 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_rcc.c.o
-                0x08003708                HAL_RCC_GetPCLK1Freq
- .text.HAL_RCC_GetPCLK2Freq
                 0x08003728       0x20 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_rcc.c.o
-                0x08003728                HAL_RCC_GetPCLK2Freq
+                0x08003728                HAL_RCC_GetPCLK1Freq
+ .text.HAL_RCC_GetPCLK2Freq
+                0x08003748       0x20 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_rcc.c.o
+                0x08003748                HAL_RCC_GetPCLK2Freq
  .text.HAL_RCCEx_PeriphCLKConfig
-                0x08003748       0xf4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_rcc_ex.c.o
-                0x08003748                HAL_RCCEx_PeriphCLKConfig
+                0x08003768       0xf4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_rcc_ex.c.o
+                0x08003768                HAL_RCCEx_PeriphCLKConfig
  .text.HAL_SPI_MspInit
-                0x0800383c        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_spi.c.o
-                0x0800383c                HAL_SPI_MspInit
+                0x0800385c        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_spi.c.o
+                0x0800385c                HAL_SPI_MspInit
  .text.HAL_SPI_Init
-                0x0800383e       0xb0 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_spi.c.o
-                0x0800383e                HAL_SPI_Init
+                0x0800385e       0xb0 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_spi.c.o
+                0x0800385e                HAL_SPI_Init
  .text.HAL_TIM_PWM_PulseFinishedCallback
-                0x080038ee        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_tim.c.o
-                0x080038ee                HAL_TIM_PWM_PulseFinishedCallback
+                0x0800390e        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_tim.c.o
+                0x0800390e                HAL_TIM_PWM_PulseFinishedCallback
  .text.HAL_TIM_TriggerCallback
-                0x080038f0        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_tim.c.o
-                0x080038f0                HAL_TIM_TriggerCallback
+                0x08003910        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_tim.c.o
+                0x08003910                HAL_TIM_TriggerCallback
  .text.HAL_TIM_IRQHandler
-                0x080038f2      0x128 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_tim.c.o
-                0x080038f2                HAL_TIM_IRQHandler
- *fill*         0x08003a1a        0x2 
+                0x08003912      0x128 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_tim.c.o
+                0x08003912                HAL_TIM_IRQHandler
+ *fill*         0x08003a3a        0x2 
  .text.TIM_Base_SetConfig
-                0x08003a1c       0x64 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_tim.c.o
-                0x08003a1c                TIM_Base_SetConfig
+                0x08003a3c       0x64 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_tim.c.o
+                0x08003a3c                TIM_Base_SetConfig
  .text.HAL_TIM_Base_Init
-                0x08003a80       0x58 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_tim.c.o
-                0x08003a80                HAL_TIM_Base_Init
+                0x08003aa0       0x58 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_tim.c.o
+                0x08003aa0                HAL_TIM_Base_Init
  .text.HAL_TIMEx_CommutCallback
-                0x08003ad8        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_tim_ex.c.o
-                0x08003ad8                HAL_TIMEx_CommutCallback
+                0x08003af8        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_tim_ex.c.o
+                0x08003af8                HAL_TIMEx_CommutCallback
  .text.HAL_TIMEx_BreakCallback
-                0x08003ada        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_tim_ex.c.o
-                0x08003ada                HAL_TIMEx_BreakCallback
+                0x08003afa        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_tim_ex.c.o
+                0x08003afa                HAL_TIMEx_BreakCallback
  .text.UART_EndRxTransfer
-                0x08003adc       0x5c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
+                0x08003afc       0x5c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
  .text.UART_SetConfig
-                0x08003b38       0x74 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
+                0x08003b58       0x74 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
  .text.HAL_UART_MspInit
-                0x08003bac        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
-                0x08003bac                HAL_UART_MspInit
+                0x08003bcc        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
+                0x08003bcc                HAL_UART_MspInit
  .text.HAL_UART_Init
-                0x08003bae       0x5e /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
-                0x08003bae                HAL_UART_Init
+                0x08003bce       0x5e /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
+                0x08003bce                HAL_UART_Init
  .text.HAL_HalfDuplex_Init
-                0x08003c0c       0x66 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
-                0x08003c0c                HAL_HalfDuplex_Init
+                0x08003c2c       0x66 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
+                0x08003c2c                HAL_HalfDuplex_Init
  .text.HAL_UART_Transmit_IT
-                0x08003c72       0x32 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
-                0x08003c72                HAL_UART_Transmit_IT
+                0x08003c92       0x32 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
+                0x08003c92                HAL_UART_Transmit_IT
  .text.UART_DMAAbortOnError
-                0x08003ca4       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
+                0x08003cc4       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
  .text.HAL_UARTEx_RxEventCallback
-                0x08003cb4        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
-                0x08003cb4                HAL_UARTEx_RxEventCallback
+                0x08003cd4        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
+                0x08003cd4                HAL_UARTEx_RxEventCallback
  .text.UART_Receive_IT.isra.0
-                0x08003cb6       0xb6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
+                0x08003cd6       0xb6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
  .text.HAL_UART_IRQHandler
-                0x08003d6c      0x294 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
-                0x08003d6c                HAL_UART_IRQHandler
+                0x08003d8c      0x294 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
+                0x08003d8c                HAL_UART_IRQHandler
  .text.HAL_HalfDuplex_EnableTransmitter
-                0x08004000       0x30 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
-                0x08004000                HAL_HalfDuplex_EnableTransmitter
+                0x08004020       0x30 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
+                0x08004020                HAL_HalfDuplex_EnableTransmitter
  .text.HAL_HalfDuplex_EnableReceiver
-                0x08004030       0x30 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
-                0x08004030                HAL_HalfDuplex_EnableReceiver
+                0x08004050       0x30 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
+                0x08004050                HAL_HalfDuplex_EnableReceiver
  .text.HAL_UART_GetState
-                0x08004060        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
-                0x08004060                HAL_UART_GetState
+                0x08004080        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
+                0x08004080                HAL_UART_GetState
  .text.UART_Start_Receive_IT
-                0x0800406c       0x32 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
-                0x0800406c                UART_Start_Receive_IT
+                0x0800408c       0x32 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
+                0x0800408c                UART_Start_Receive_IT
  .text.HAL_UART_Receive_IT
-                0x0800409e       0x22 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
-                0x0800409e                HAL_UART_Receive_IT
+                0x080040be       0x22 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_uart.c.o
+                0x080040be                HAL_UART_Receive_IT
  .text._ZNSt8functionIFvvEEaSEDn.isra.0
-                0x080040c0       0x16 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
- *fill*         0x080040d6        0x2 
+                0x080040e0       0x16 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
+ *fill*         0x080040f6        0x2 
  .text._Z15get_timer_indexP11TIM_TypeDef
-                0x080040d8       0x34 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
-                0x080040d8                get_timer_index(TIM_TypeDef*)
+                0x080040f8       0x34 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
+                0x080040f8                get_timer_index(TIM_TypeDef*)
  .text._ZN13HardwareTimerD2Ev
-                0x0800410c       0x40 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
-                0x0800410c                HardwareTimer::~HardwareTimer()
-                0x0800410c                HardwareTimer::~HardwareTimer()
+                0x0800412c       0x40 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
+                0x0800412c                HardwareTimer::~HardwareTimer()
+                0x0800412c                HardwareTimer::~HardwareTimer()
  .text._ZN13HardwareTimer5setupEP11TIM_TypeDef
-                0x0800414c       0x84 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
-                0x0800414c                HardwareTimer::setup(TIM_TypeDef*)
+                0x0800416c       0x84 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
+                0x0800416c                HardwareTimer::setup(TIM_TypeDef*)
  .text.TIM1_UP_IRQHandler
-                0x080041d0       0x14 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
-                0x080041d0                TIM1_UP_IRQHandler
+                0x080041f0       0x14 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
+                0x080041f0                TIM1_UP_IRQHandler
  .text.TIM1_CC_IRQHandler
-                0x080041e4        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
-                0x080041e4                TIM1_CC_IRQHandler
+                0x08004204        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
+                0x08004204                TIM1_CC_IRQHandler
  .text.TIM2_IRQHandler
-                0x080041e8       0x14 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
-                0x080041e8                TIM2_IRQHandler
+                0x08004208       0x14 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
+                0x08004208                TIM2_IRQHandler
  .text.TIM3_IRQHandler
-                0x080041fc       0x14 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
-                0x080041fc                TIM3_IRQHandler
+                0x0800421c       0x14 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
+                0x0800421c                TIM3_IRQHandler
  .text.TIM4_IRQHandler
-                0x08004210       0x14 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
-                0x08004210                TIM4_IRQHandler
+                0x08004230       0x14 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
+                0x08004230                TIM4_IRQHandler
  .text._ZNSt8functionIFvvEEC2Ev
-                0x08004224        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
-                0x08004224                std::function<void ()>::function()
-                0x08004224                std::function<void ()>::function()
+                0x08004244        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
+                0x08004244                std::function<void ()>::function()
+                0x08004244                std::function<void ()>::function()
  .text._ZN13HardwareTimerC2EP11TIM_TypeDef
-                0x08004230       0x2a /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
-                0x08004230                HardwareTimer::HardwareTimer(TIM_TypeDef*)
-                0x08004230                HardwareTimer::HardwareTimer(TIM_TypeDef*)
+                0x08004250       0x2a /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
+                0x08004250                HardwareTimer::HardwareTimer(TIM_TypeDef*)
+                0x08004250                HardwareTimer::HardwareTimer(TIM_TypeDef*)
  .text._ZNKSt8functionIFvvEEclEv
-                0x0800425a       0x12 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
-                0x0800425a                std::function<void ()>::operator()() const
+                0x0800427a       0x12 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
+                0x0800427a                std::function<void ()>::operator()() const
  .text._ZN13HardwareTimer14updateCallbackEP17TIM_HandleTypeDef
-                0x0800426c       0x18 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
-                0x0800426c                HardwareTimer::updateCallback(TIM_HandleTypeDef*)
+                0x0800428c       0x18 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
+                0x0800428c                HardwareTimer::updateCallback(TIM_HandleTypeDef*)
  .text.HAL_TIM_PeriodElapsedCallback
-                0x08004284        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
-                0x08004284                HAL_TIM_PeriodElapsedCallback
+                0x080042a4        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
+                0x080042a4                HAL_TIM_PeriodElapsedCallback
  .text._ZN13HardwareTimer22captureCompareCallbackEP17TIM_HandleTypeDef
-                0x08004288       0x3e /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
-                0x08004288                HardwareTimer::captureCompareCallback(TIM_HandleTypeDef*)
+                0x080042a8       0x3e /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
+                0x080042a8                HardwareTimer::captureCompareCallback(TIM_HandleTypeDef*)
  .text.HAL_TIM_OC_DelayElapsedCallback
-                0x080042c6        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
-                0x080042c6                HAL_TIM_OC_DelayElapsedCallback
+                0x080042e6        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
+                0x080042e6                HAL_TIM_OC_DelayElapsedCallback
  .text.HAL_TIM_IC_CaptureCallback
-                0x080042ca        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
-                0x080042ca                HAL_TIM_IC_CaptureCallback
- .text._Znwj    0x080042ce        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/new.cpp.o
-                0x080042ce                operator new(unsigned int)
- .text._ZdlPvj  0x080042d2        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/new.cpp.o
-                0x080042d2                operator delete(void*, unsigned int)
- *fill*         0x080042d6        0x2 
+                0x080042ea        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HardwareTimer.cpp.o
+                0x080042ea                HAL_TIM_IC_CaptureCallback
+ .text._Znwj    0x080042ee        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/new.cpp.o
+                0x080042ee                operator new(unsigned int)
+ .text._ZdlPvj  0x080042f2        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/new.cpp.o
+                0x080042f2                operator delete(void*, unsigned int)
+ *fill*         0x080042f6        0x2 
  .text.set_GPIO_Port_Clock
-                0x080042d8       0xa8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/PortNames.c.o
-                0x080042d8                set_GPIO_Port_Clock
+                0x080042f8       0xa8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/PortNames.c.o
+                0x080042f8                set_GPIO_Port_Clock
  .text.pwm_stop
-                0x08004380       0x58 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/analog.cpp.o
-                0x08004380                pwm_stop
+                0x080043a0       0x58 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/analog.cpp.o
+                0x080043a0                pwm_stop
  .text.getCurrentMillis
-                0x080043d8        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/clock.c.o
-                0x080043d8                getCurrentMillis
+                0x080043f8        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/clock.c.o
+                0x080043f8                getCurrentMillis
  .text.noOsSystickHandler
-                0x080043dc        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/clock.c.o
-                0x080043dc                noOsSystickHandler
-                0x080043dc                osSystickHandler
+                0x080043fc        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/clock.c.o
+                0x080043fc                noOsSystickHandler
+                0x080043fc                osSystickHandler
  .text.SysTick_Handler
-                0x080043de       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/clock.c.o
-                0x080043de                SysTick_Handler
+                0x080043fe       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/clock.c.o
+                0x080043fe                SysTick_Handler
  .text.configHSECapacitorTuning
-                0x080043ee        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/clock.c.o
-                0x080043ee                configHSECapacitorTuning
+                0x0800440e        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/clock.c.o
+                0x0800440e                configHSECapacitorTuning
  .text.configIPClock
-                0x080043f0       0x44 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/clock.c.o
-                0x080043f0                configIPClock
+                0x08004410       0x44 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/clock.c.o
+                0x08004410                configIPClock
  .text.dwt_init
-                0x08004434       0x3c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/dwt.c.o
-                0x08004434                dwt_init
+                0x08004454       0x3c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/dwt.c.o
+                0x08004454                dwt_init
  .text.hw_config_init
-                0x08004470       0x24 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/hw_config.c.o
-                0x08004470                hw_config_init
+                0x08004490       0x24 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/hw_config.c.o
+                0x08004490                hw_config_init
  .text.startup._ZNSt8functionIFvvEEC2EDn.constprop.0.isra.0
-                0x08004494        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
+                0x080044b4        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
  .text._Z22stm32_interrupt_enable7PinNameSt8functionIFvvEEm
-                0x080044a0       0xe8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
-                0x080044a0                stm32_interrupt_enable(PinName, std::function<void ()>, unsigned long)
+                0x080044c0       0xe8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
+                0x080044c0                stm32_interrupt_enable(PinName, std::function<void ()>, unsigned long)
  .text.HAL_GPIO_EXTI_Callback
-                0x08004588       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
-                0x08004588                HAL_GPIO_EXTI_Callback
+                0x080045a8       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
+                0x080045a8                HAL_GPIO_EXTI_Callback
  .text.EXTI0_IRQHandler
-                0x080045b4        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
-                0x080045b4                EXTI0_IRQHandler
+                0x080045d4        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
+                0x080045d4                EXTI0_IRQHandler
  .text.EXTI1_IRQHandler
-                0x080045ba        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
-                0x080045ba                EXTI1_IRQHandler
+                0x080045da        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
+                0x080045da                EXTI1_IRQHandler
  .text.EXTI2_IRQHandler
-                0x080045c0        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
-                0x080045c0                EXTI2_IRQHandler
+                0x080045e0        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
+                0x080045e0                EXTI2_IRQHandler
  .text.EXTI3_IRQHandler
-                0x080045c6        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
-                0x080045c6                EXTI3_IRQHandler
+                0x080045e6        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
+                0x080045e6                EXTI3_IRQHandler
  .text.EXTI4_IRQHandler
-                0x080045cc        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
-                0x080045cc                EXTI4_IRQHandler
+                0x080045ec        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
+                0x080045ec                EXTI4_IRQHandler
  .text.EXTI9_5_IRQHandler
-                0x080045d2       0x28 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
-                0x080045d2                EXTI9_5_IRQHandler
+                0x080045f2       0x28 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
+                0x080045f2                EXTI9_5_IRQHandler
  .text.EXTI15_10_IRQHandler
-                0x080045fa       0x18 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
-                0x080045fa                EXTI15_10_IRQHandler
- *fill*         0x08004612        0x2 
+                0x0800461a       0x18 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
+                0x0800461a                EXTI15_10_IRQHandler
+ *fill*         0x08004632        0x2 
  .text.startup._GLOBAL__sub_I__Z22stm32_interrupt_enable7PinNameSt8functionIFvvEEm
-                0x08004614       0xd8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
+                0x08004634       0xd8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
  .text.exit._GLOBAL__sub_D__Z22stm32_interrupt_enable7PinNameSt8functionIFvvEEm
-                0x080046ec       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
+                0x0800470c       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
  .text.pin_SetF1AFPin
-                0x08004708      0x1f8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
+                0x08004728      0x1f8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
  .text.LL_GPIO_SetPinMode
-                0x08004900       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
+                0x08004920       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
  .text.LL_GPIO_SetPinOutputType
-                0x0800492c       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
+                0x0800494c       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
  .text.pin_in_pinmap
-                0x08004958       0x1e /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
-                0x08004958                pin_in_pinmap
- *fill*         0x08004976        0x2 
+                0x08004978       0x1e /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
+                0x08004978                pin_in_pinmap
+ *fill*         0x08004996        0x2 
  .text.pin_function
-                0x08004978      0x180 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
-                0x08004978                pin_function
+                0x08004998      0x180 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
+                0x08004998                pin_function
  .text.pinmap_pinout
-                0x08004af8       0x1a /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
-                0x08004af8                pinmap_pinout
+                0x08004b18       0x1a /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
+                0x08004b18                pinmap_pinout
  .text.pinmap_find_peripheral
-                0x08004b12       0x16 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
-                0x08004b12                pinmap_find_peripheral
+                0x08004b32       0x16 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
+                0x08004b32                pinmap_find_peripheral
  .text.pinmap_peripheral
-                0x08004b28        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
-                0x08004b28                pinmap_peripheral
+                0x08004b48        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
+                0x08004b48                pinmap_peripheral
  .text.pinmap_find_pin
-                0x08004b34       0x16 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
-                0x08004b34                pinmap_find_pin
+                0x08004b54       0x16 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
+                0x08004b54                pinmap_find_pin
  .text.pinmap_pin
-                0x08004b4a        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
-                0x08004b4a                pinmap_pin
+                0x08004b6a        0xc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
+                0x08004b6a                pinmap_pin
  .text.pinmap_merge_peripheral
-                0x08004b56       0x14 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
-                0x08004b56                pinmap_merge_peripheral
- *fill*         0x08004b6a        0x2 
+                0x08004b76       0x14 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
+                0x08004b76                pinmap_merge_peripheral
+ *fill*         0x08004b8a        0x2 
  .text.SystemInit
-                0x08004b6c       0x4c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/system_stm32yyxx.c.o
-                0x08004b6c                SystemInit
+                0x08004b8c       0x4c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/system_stm32yyxx.c.o
+                0x08004b8c                SystemInit
  .text.get_timer_obj
-                0x08004bb8        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/timer.c.o
-                0x08004bb8                get_timer_obj
+                0x08004bd8        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/timer.c.o
+                0x08004bd8                get_timer_obj
  .text.enableTimerClock
-                0x08004bbc       0x88 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/timer.c.o
-                0x08004bbc                enableTimerClock
+                0x08004bdc       0x88 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/timer.c.o
+                0x08004bdc                enableTimerClock
  .text.disableTimerClock
-                0x08004c44       0x5c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/timer.c.o
-                0x08004c44                disableTimerClock
+                0x08004c64       0x5c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/timer.c.o
+                0x08004c64                disableTimerClock
  .text.getTimerUpIrq
-                0x08004ca0       0x40 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/timer.c.o
-                0x08004ca0                getTimerUpIrq
+                0x08004cc0       0x40 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/timer.c.o
+                0x08004cc0                getTimerUpIrq
  .text.getTimerCCIrq
-                0x08004ce0       0x40 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/timer.c.o
-                0x08004ce0                getTimerCCIrq
+                0x08004d00       0x40 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/timer.c.o
+                0x08004d00                getTimerCCIrq
  .text.HAL_TIM_Base_MspInit
-                0x08004d20       0x4e /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/timer.c.o
-                0x08004d20                HAL_TIM_Base_MspInit
- *fill*         0x08004d6e        0x2 
+                0x08004d40       0x4e /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/timer.c.o
+                0x08004d40                HAL_TIM_Base_MspInit
+ *fill*         0x08004d8e        0x2 
  .text.uart_init
-                0x08004d70      0x1cc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
-                0x08004d70                uart_init
+                0x08004d90      0x1cc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
+                0x08004d90                uart_init
  .text.serial_rx_active
-                0x08004f3c       0x24 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
-                0x08004f3c                serial_rx_active
+                0x08004f5c       0x24 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
+                0x08004f5c                serial_rx_active
  .text.serial_tx_active
-                0x08004f60       0x24 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
-                0x08004f60                serial_tx_active
+                0x08004f80       0x24 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
+                0x08004f80                serial_tx_active
  .text.uart_getc
-                0x08004f84       0x38 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
-                0x08004f84                uart_getc
+                0x08004fa4       0x38 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
+                0x08004fa4                uart_getc
  .text.uart_attach_rx_callback
-                0x08004fbc       0x40 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
-                0x08004fbc                uart_attach_rx_callback
+                0x08004fdc       0x40 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
+                0x08004fdc                uart_attach_rx_callback
  .text.uart_attach_tx_callback
-                0x08004ffc       0x40 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
-                0x08004ffc                uart_attach_tx_callback
+                0x0800501c       0x40 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
+                0x0800501c                uart_attach_tx_callback
  .text.uart_enable_tx
-                0x0800503c       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
-                0x0800503c                uart_enable_tx
+                0x0800505c       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
+                0x0800505c                uart_enable_tx
  .text.uart_enable_rx
-                0x08005058       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
-                0x08005058                uart_enable_rx
+                0x08005078       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
+                0x08005078                uart_enable_rx
  .text.HAL_UART_RxCpltCallback
-                0x08005074        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
-                0x08005074                HAL_UART_RxCpltCallback
+                0x08005094        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
+                0x08005094                HAL_UART_RxCpltCallback
  .text.HAL_UART_TxCpltCallback
-                0x0800507a        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
-                0x0800507a                HAL_UART_TxCpltCallback
+                0x0800509a        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
+                0x0800509a                HAL_UART_TxCpltCallback
  .text.HAL_UART_ErrorCallback
-                0x08005080       0x7c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
-                0x08005080                HAL_UART_ErrorCallback
+                0x080050a0       0x7c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
+                0x080050a0                HAL_UART_ErrorCallback
  .text.USART1_IRQHandler
-                0x080050fc       0x18 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
-                0x080050fc                USART1_IRQHandler
+                0x0800511c       0x18 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
+                0x0800511c                USART1_IRQHandler
  .text.USART2_IRQHandler
-                0x08005114       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
-                0x08005114                USART2_IRQHandler
+                0x08005134       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
+                0x08005134                USART2_IRQHandler
  .text.USART3_IRQHandler
-                0x08005130       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
-                0x08005130                USART3_IRQHandler
- .text._sbrk    0x0800514c       0x3c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/syscalls.c.o
-                0x0800514c                _sbrk
- .text._exit    0x08005188        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/syscalls.c.o
-                0x08005188                _exit
- *fill*         0x0800518a        0x2 
- .text._kill    0x0800518c       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/syscalls.c.o
-                0x0800518c                _kill
- .text._getpid  0x0800519c        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/syscalls.c.o
-                0x0800519c                _getpid
+                0x08005150       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/uart.c.o
+                0x08005150                USART3_IRQHandler
+ .text._sbrk    0x0800516c       0x3c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/syscalls.c.o
+                0x0800516c                _sbrk
+ .text._exit    0x080051a8        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/syscalls.c.o
+                0x080051a8                _exit
+ *fill*         0x080051aa        0x2 
+ .text._kill    0x080051ac       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/syscalls.c.o
+                0x080051ac                _kill
+ .text._getpid  0x080051bc        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/syscalls.c.o
+                0x080051bc                _getpid
  .text.SystemClock_Config
-                0x080051a0       0x7c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/variant_PILL_F103Cx.cpp.o
-                0x080051a0                SystemClock_Config
+                0x080051c0       0x7c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/variant_PILL_F103Cx.cpp.o
+                0x080051c0                SystemClock_Config
  .text._ZN14HardwareSerial9availableEv
-                0x0800521c       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
-                0x0800521c                HardwareSerial::available()
+                0x0800523c       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
+                0x0800523c                HardwareSerial::available()
  .text._ZN14HardwareSerial4peekEv
-                0x0800522c       0x1a /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
-                0x0800522c                HardwareSerial::peek()
+                0x0800524c       0x1a /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
+                0x0800524c                HardwareSerial::peek()
  .text._ZN14HardwareSerial17availableForWriteEv
-                0x08005246       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
-                0x08005246                HardwareSerial::availableForWrite()
+                0x08005266       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
+                0x08005266                HardwareSerial::availableForWrite()
  .text._ZN14HardwareSerial5writeEh
-                0x08005262       0x18 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
-                0x08005262                HardwareSerial::write(unsigned char)
+                0x08005282       0x18 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
+                0x08005282                HardwareSerial::write(unsigned char)
  .text._ZN14HardwareSerial16_rx_complete_irqEP8serial_s
-                0x0800527a       0x36 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
-                0x0800527a                HardwareSerial::_rx_complete_irq(serial_s*)
+                0x0800529a       0x36 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
+                0x0800529a                HardwareSerial::_rx_complete_irq(serial_s*)
  .text._ZN14HardwareSerial16_tx_complete_irqEP8serial_s
-                0x080052b0       0x60 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
-                0x080052b0                HardwareSerial::_tx_complete_irq(serial_s*)
+                0x080052d0       0x60 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
+                0x080052d0                HardwareSerial::_tx_complete_irq(serial_s*)
  .text._ZN14HardwareSerial5writeEPKhj
-                0x08005310       0xe4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
-                0x08005310                HardwareSerial::write(unsigned char const*, unsigned int)
+                0x08005330       0xe4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
+                0x08005330                HardwareSerial::write(unsigned char const*, unsigned int)
  .text._ZN14HardwareSerial4initE7PinNameS0_S0_S0_
-                0x080053f4       0x32 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
-                0x080053f4                HardwareSerial::init(PinName, PinName, PinName, PinName)
- *fill*         0x08005426        0x2 
+                0x08005414       0x32 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
+                0x08005414                HardwareSerial::init(PinName, PinName, PinName, PinName)
+ *fill*         0x08005446        0x2 
  .text._ZN14HardwareSerialC2EPv16HalfDuplexMode_t
-                0x08005428       0x94 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
-                0x08005428                HardwareSerial::HardwareSerial(void*, HalfDuplexMode_t)
-                0x08005428                HardwareSerial::HardwareSerial(void*, HalfDuplexMode_t)
+                0x08005448       0x94 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
+                0x08005448                HardwareSerial::HardwareSerial(void*, HalfDuplexMode_t)
+                0x08005448                HardwareSerial::HardwareSerial(void*, HalfDuplexMode_t)
  .text._ZN14HardwareSerial5flushEm
-                0x080054bc       0x36 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
-                0x080054bc                HardwareSerial::flush(unsigned long)
+                0x080054dc       0x36 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
+                0x080054dc                HardwareSerial::flush(unsigned long)
  .text._ZN14HardwareSerial5flushEv
-                0x080054f2        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
-                0x080054f2                HardwareSerial::flush()
+                0x08005512        0x6 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
+                0x08005512                HardwareSerial::flush()
  .text._ZN14HardwareSerial18enableHalfDuplexRxEv
-                0x080054f8       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
-                0x080054f8                HardwareSerial::enableHalfDuplexRx()
+                0x08005518       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
+                0x08005518                HardwareSerial::enableHalfDuplexRx()
  .text._ZN14HardwareSerial5beginEmh
-                0x08005524       0x9c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
-                0x08005524                HardwareSerial::begin(unsigned long, unsigned char)
+                0x08005544       0x9c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
+                0x08005544                HardwareSerial::begin(unsigned long, unsigned char)
  .text._ZN14HardwareSerial4readEv
-                0x080055c0       0x2e /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
-                0x080055c0                HardwareSerial::read()
- *fill*         0x080055ee        0x2 
+                0x080055e0       0x2e /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
+                0x080055e0                HardwareSerial::read()
+ *fill*         0x0800560e        0x2 
  .text.startup._GLOBAL__sub_I_Serial1
-                0x080055f0       0x14 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
+                0x08005610       0x14 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
  .text._ZN5Print5writeEPKc
-                0x08005604       0x20 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(Print.cpp.o)
-                0x08005604                Print::write(char const*)
+                0x08005624       0x20 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(Print.cpp.o)
+                0x08005624                Print::write(char const*)
  .text._ZN5Print5printEPKc
-                0x08005624        0x8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(Print.cpp.o)
-                0x08005624                Print::print(char const*)
+                0x08005644        0x8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(Print.cpp.o)
+                0x08005644                Print::print(char const*)
  .text._ZN6Stream9timedReadEv
-                0x0800562c       0x2a /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(Stream.cpp.o)
-                0x0800562c                Stream::timedRead()
+                0x0800564c       0x2a /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(Stream.cpp.o)
+                0x0800564c                Stream::timedRead()
  .text._ZN6Stream9readBytesEPcj
-                0x08005656       0x22 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(Stream.cpp.o)
-                0x08005656                Stream::readBytes(char*, unsigned int)
+                0x08005676       0x22 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(Stream.cpp.o)
+                0x08005676                Stream::readBytes(char*, unsigned int)
  .text._ZN6Stream14readBytesUntilEcPcj
-                0x08005678       0x30 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(Stream.cpp.o)
-                0x08005678                Stream::readBytesUntil(char, char*, unsigned int)
+                0x08005698       0x30 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(Stream.cpp.o)
+                0x08005698                Stream::readBytesUntil(char, char*, unsigned int)
  .text._Z15attachInterruptmSt8functionIFvvEEm
-                0x080056a8       0xec /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(WInterrupts.cpp.o)
-                0x080056a8                attachInterrupt(unsigned long, std::function<void ()>, unsigned long)
+                0x080056c8       0xec /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(WInterrupts.cpp.o)
+                0x080056c8                attachInterrupt(unsigned long, std::function<void ()>, unsigned long)
  .text.startup._Z7premainv
-                0x08005794       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(main.cpp.o)
-                0x08005794                premain()
+                0x080057b4       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(main.cpp.o)
+                0x080057b4                premain()
  .text.startup.main
-                0x080057a4       0x14 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(main.cpp.o)
-                0x080057a4                main
+                0x080057c4       0x14 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(main.cpp.o)
+                0x080057c4                main
  .text.pinNametoDigitalPin
-                0x080057b8       0x34 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(pins_arduino.c.o)
-                0x080057b8                pinNametoDigitalPin
+                0x080057d8       0x34 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(pins_arduino.c.o)
+                0x080057d8                pinNametoDigitalPin
  .text.Reset_Handler
-                0x080057ec       0x48 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(startup_stm32yyxx.S.o)
-                0x080057ec                Reset_Handler
+                0x0800580c       0x48 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(startup_stm32yyxx.S.o)
+                0x0800580c                Reset_Handler
  .text.Default_Handler
-                0x08005834        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(startup_stm32yyxx.S.o)
-                0x08005834                RTC_Alarm_IRQHandler
-                0x08005834                DebugMon_Handler
-                0x08005834                HardFault_Handler
-                0x08005834                PVD_IRQHandler
-                0x08005834                PendSV_Handler
-                0x08005834                NMI_Handler
-                0x08005834                UsageFault_Handler
-                0x08005834                ADC1_2_IRQHandler
-                0x08005834                SPI1_IRQHandler
-                0x08005834                TAMPER_IRQHandler
-                0x08005834                DMA1_Channel4_IRQHandler
-                0x08005834                RTC_IRQHandler
-                0x08005834                DMA1_Channel7_IRQHandler
-                0x08005834                CAN1_RX1_IRQHandler
-                0x08005834                DMA1_Channel6_IRQHandler
-                0x08005834                RCC_IRQHandler
-                0x08005834                TIM1_TRG_COM_IRQHandler
-                0x08005834                DMA1_Channel1_IRQHandler
-                0x08005834                Default_Handler
-                0x08005834                SPI2_IRQHandler
-                0x08005834                MemManage_Handler
-                0x08005834                SVC_Handler
-                0x08005834                DMA1_Channel5_IRQHandler
-                0x08005834                USB_LP_CAN1_RX0_IRQHandler
-                0x08005834                USB_HP_CAN1_TX_IRQHandler
-                0x08005834                DMA1_Channel3_IRQHandler
-                0x08005834                WWDG_IRQHandler
-                0x08005834                TIM1_BRK_IRQHandler
-                0x08005834                DMA1_Channel2_IRQHandler
-                0x08005834                CAN1_SCE_IRQHandler
-                0x08005834                FLASH_IRQHandler
-                0x08005834                BusFault_Handler
-                0x08005834                USBWakeUp_IRQHandler
- *fill*         0x08005836        0x2 
- .text.pinMode  0x08005838       0xbc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(wiring_digital.c.o)
-                0x08005838                pinMode
+                0x08005854        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(startup_stm32yyxx.S.o)
+                0x08005854                RTC_Alarm_IRQHandler
+                0x08005854                DebugMon_Handler
+                0x08005854                HardFault_Handler
+                0x08005854                PVD_IRQHandler
+                0x08005854                PendSV_Handler
+                0x08005854                NMI_Handler
+                0x08005854                UsageFault_Handler
+                0x08005854                ADC1_2_IRQHandler
+                0x08005854                SPI1_IRQHandler
+                0x08005854                TAMPER_IRQHandler
+                0x08005854                DMA1_Channel4_IRQHandler
+                0x08005854                RTC_IRQHandler
+                0x08005854                DMA1_Channel7_IRQHandler
+                0x08005854                CAN1_RX1_IRQHandler
+                0x08005854                DMA1_Channel6_IRQHandler
+                0x08005854                RCC_IRQHandler
+                0x08005854                TIM1_TRG_COM_IRQHandler
+                0x08005854                DMA1_Channel1_IRQHandler
+                0x08005854                Default_Handler
+                0x08005854                SPI2_IRQHandler
+                0x08005854                MemManage_Handler
+                0x08005854                SVC_Handler
+                0x08005854                DMA1_Channel5_IRQHandler
+                0x08005854                USB_LP_CAN1_RX0_IRQHandler
+                0x08005854                USB_HP_CAN1_TX_IRQHandler
+                0x08005854                DMA1_Channel3_IRQHandler
+                0x08005854                WWDG_IRQHandler
+                0x08005854                TIM1_BRK_IRQHandler
+                0x08005854                DMA1_Channel2_IRQHandler
+                0x08005854                CAN1_SCE_IRQHandler
+                0x08005854                FLASH_IRQHandler
+                0x08005854                BusFault_Handler
+                0x08005854                USBWakeUp_IRQHandler
+ *fill*         0x08005856        0x2 
+ .text.pinMode  0x08005858       0xbc /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(wiring_digital.c.o)
+                0x08005858                pinMode
  .text.digitalWrite
-                0x080058f4       0x74 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(wiring_digital.c.o)
-                0x080058f4                digitalWrite
- .text.millis   0x08005968        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(wiring_time.c.o)
-                0x08005968                millis
- .text.delay    0x0800596c       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(wiring_time.c.o)
-                0x0800596c                delay
+                0x08005914       0x74 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(wiring_digital.c.o)
+                0x08005914                digitalWrite
+ .text.millis   0x08005988        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(wiring_time.c.o)
+                0x08005988                millis
+ .text.delay    0x0800598c       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(wiring_time.c.o)
+                0x0800598c                delay
  .text._Z14serialEventRunv
-                0x08005988       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(WSerial.cpp.o)
-                0x08005988                serialEventRun()
- .text.init     0x080059a4        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(board.c.o)
-                0x080059a4                init
- .text.__empty  0x080059a8        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(hooks.c.o)
-                0x080059a8                yield
- *fill*         0x080059aa        0x2 
- .text.malloc   0x080059ac       0x10 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-malloc.o)
-                0x080059ac                malloc
- .text.free     0x080059bc       0x10 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-malloc.o)
-                0x080059bc                free
+                0x080059a8       0x1c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(WSerial.cpp.o)
+                0x080059a8                serialEventRun()
+ .text.init     0x080059c4        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(board.c.o)
+                0x080059c4                init
+ .text.__empty  0x080059c8        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(hooks.c.o)
+                0x080059c8                yield
+ *fill*         0x080059ca        0x2 
+ .text.malloc   0x080059cc       0x10 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-malloc.o)
+                0x080059cc                malloc
+ .text.free     0x080059dc       0x10 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-malloc.o)
+                0x080059dc                free
  .text.sbrk_aligned
-                0x080059cc       0x44 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-mallocr.o)
+                0x080059ec       0x44 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-mallocr.o)
  .text._malloc_r
-                0x08005a10      0x100 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-mallocr.o)
-                0x08005a10                _malloc_r
+                0x08005a30      0x100 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-mallocr.o)
+                0x08005a30                _malloc_r
  .text.__malloc_lock
-                0x08005b10        0xc /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-mlock.o)
-                0x08005b10                __malloc_lock
+                0x08005b30        0xc /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-mlock.o)
+                0x08005b30                __malloc_lock
  .text.__malloc_unlock
-                0x08005b1c        0xc /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-mlock.o)
-                0x08005b1c                __malloc_unlock
- .text.realloc  0x08005b28       0x10 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-realloc.o)
-                0x08005b28                realloc
+                0x08005b3c        0xc /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-mlock.o)
+                0x08005b3c                __malloc_unlock
+ .text.realloc  0x08005b48       0x10 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-realloc.o)
+                0x08005b48                realloc
  .text._realloc_r
-                0x08005b38       0x5c /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-reallocr.o)
-                0x08005b38                _realloc_r
+                0x08005b58       0x5c /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-reallocr.o)
+                0x08005b58                _realloc_r
  .text.snprintf
-                0x08005b94       0x6c /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-snprintf.o)
-                0x08005b94                snprintf
-                0x08005b94                sniprintf
- .text.memmove  0x08005c00       0x32 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-memmove.o)
-                0x08005c00                memmove
- .text.memset   0x08005c32       0x10 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-memset.o)
-                0x08005c32                memset
- *fill*         0x08005c42        0x2 
- .text._sbrk_r  0x08005c44       0x20 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-sbrkr.o)
-                0x08005c44                _sbrk_r
+                0x08005bb4       0x6c /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-snprintf.o)
+                0x08005bb4                snprintf
+                0x08005bb4                sniprintf
+ .text.memmove  0x08005c20       0x32 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-memmove.o)
+                0x08005c20                memmove
+ .text.memset   0x08005c52       0x10 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-memset.o)
+                0x08005c52                memset
+ *fill*         0x08005c62        0x2 
+ .text._sbrk_r  0x08005c64       0x20 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-sbrkr.o)
+                0x08005c64                _sbrk_r
  .text.__libc_init_array
-                0x08005c64       0x48 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-init.o)
-                0x08005c64                __libc_init_array
+                0x08005c84       0x48 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-init.o)
+                0x08005c84                __libc_init_array
  .text.__retarget_lock_acquire_recursive
-                0x08005cac        0x2 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-lock.o)
-                0x08005cac                __retarget_lock_acquire_recursive
+                0x08005ccc        0x2 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-lock.o)
+                0x08005ccc                __retarget_lock_acquire_recursive
  .text.__retarget_lock_release_recursive
-                0x08005cae        0x2 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-lock.o)
-                0x08005cae                __retarget_lock_release_recursive
- .text.memcpy   0x08005cb0       0x1c /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-memcpy-stub.o)
-                0x08005cb0                memcpy
- .text._free_r  0x08005ccc       0x90 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-freer.o)
-                0x08005ccc                _free_r
+                0x08005cce        0x2 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-lock.o)
+                0x08005cce                __retarget_lock_release_recursive
+ .text.memcpy   0x08005cd0       0x1c /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-memcpy-stub.o)
+                0x08005cd0                memcpy
+ .text._free_r  0x08005cec       0x90 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-freer.o)
+                0x08005cec                _free_r
  .text._malloc_usable_size_r
-                0x08005d5c       0x10 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-msizer.o)
-                0x08005d5c                _malloc_usable_size_r
+                0x08005d7c       0x10 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-msizer.o)
+                0x08005d7c                _malloc_usable_size_r
  .text.__ssputs_r
-                0x08005d6c       0xc0 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-nano-svfprintf.o)
-                0x08005d6c                __ssputs_r
+                0x08005d8c       0xc0 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-nano-svfprintf.o)
+                0x08005d8c                __ssputs_r
  .text._svfprintf_r
-                0x08005e2c      0x1f8 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-nano-svfprintf.o)
-                0x08005e2c                _svfprintf_r
-                0x08005e2c                _svfiprintf_r
+                0x08005e4c      0x1f8 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-nano-svfprintf.o)
+                0x08005e4c                _svfprintf_r
+                0x08005e4c                _svfiprintf_r
  .text._printf_common
-                0x08006024       0xe4 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-nano-vfprintf_i.o)
-                0x08006024                _printf_common
+                0x08006044       0xe4 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-nano-vfprintf_i.o)
+                0x08006044                _printf_common
  .text._printf_i
-                0x08006108      0x240 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-nano-vfprintf_i.o)
-                0x08006108                _printf_i
- .text.memchr   0x08006348       0x1c /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-memchr-stub.o)
-                0x08006348                memchr
- .text.abort    0x08006364        0xe /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-abort.o)
-                0x08006364                abort
+                0x08006128      0x240 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-nano-vfprintf_i.o)
+                0x08006128                _printf_i
+ .text.memchr   0x08006368       0x1c /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-memchr-stub.o)
+                0x08006368                memchr
+ .text.abort    0x08006384        0xe /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-abort.o)
+                0x08006384                abort
  .text._raise_r
-                0x08006372       0x50 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-signal.o)
-                0x08006372                _raise_r
- *fill*         0x080063c2        0x2 
- .text.raise    0x080063c4       0x10 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-signal.o)
-                0x080063c4                raise
- .text._kill_r  0x080063d4       0x24 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-signalr.o)
-                0x080063d4                _kill_r
+                0x08006392       0x50 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-signal.o)
+                0x08006392                _raise_r
+ *fill*         0x080063e2        0x2 
+ .text.raise    0x080063e4       0x10 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-signal.o)
+                0x080063e4                raise
+ .text._kill_r  0x080063f4       0x24 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-signalr.o)
+                0x080063f4                _kill_r
  .text._getpid_r
-                0x080063f8        0x4 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-signalr.o)
-                0x080063f8                _getpid_r
- .text.sinf     0x080063fc       0x6c /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-sf_sin.o)
-                0x080063fc                sinf
+                0x08006418        0x4 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-signalr.o)
+                0x08006418                _getpid_r
+ .text.sinf     0x0800641c       0x6c /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-sf_sin.o)
+                0x0800641c                sinf
  .text.__kernel_cosf
-                0x08006468      0x190 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-kf_cos.o)
-                0x08006468                __kernel_cosf
+                0x08006488      0x190 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-kf_cos.o)
+                0x08006488                __kernel_cosf
  .text.__kernel_sinf
-                0x080065f8       0xec /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-kf_sin.o)
-                0x080065f8                __kernel_sinf
+                0x08006618       0xec /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-kf_sin.o)
+                0x08006618                __kernel_sinf
  .text.__ieee754_rem_pio2f
-                0x080066e4      0x2dc /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-ef_rem_pio2.o)
-                0x080066e4                __ieee754_rem_pio2f
- .text.fabsf    0x080069c0        0x8 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-sf_fabs.o)
-                0x080069c0                fabsf
+                0x08006704      0x2dc /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-ef_rem_pio2.o)
+                0x08006704                __ieee754_rem_pio2f
+ .text.fabsf    0x080069e0        0x8 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-sf_fabs.o)
+                0x080069e0                fabsf
  .text.__kernel_rem_pio2f
-                0x080069c8      0x774 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-kf_rem_pio2.o)
-                0x080069c8                __kernel_rem_pio2f
- .text.scalbnf  0x0800713c       0xb0 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-sf_scalbn.o)
-                0x0800713c                scalbnf
- .text.floorf   0x080071ec       0x8c /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-sf_floor.o)
-                0x080071ec                floorf
+                0x080069e8      0x774 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-kf_rem_pio2.o)
+                0x080069e8                __kernel_rem_pio2f
+ .text.scalbnf  0x0800715c       0xb0 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-sf_scalbn.o)
+                0x0800715c                scalbnf
+ .text.floorf   0x0800720c       0x8c /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-sf_floor.o)
+                0x0800720c                floorf
  .text.unlikely._ZSt25__throw_bad_function_callv
-                0x08007278        0x6 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libstdc++_nano.a(functional.o)
-                0x08007278                std::__throw_bad_function_call()
+                0x08007298        0x6 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libstdc++_nano.a(functional.o)
+                0x08007298                std::__throw_bad_function_call()
  *(.glue_7)
- .glue_7        0x0800727e        0x0 linker stubs
+ .glue_7        0x0800729e        0x0 linker stubs
  *(.glue_7t)
- .glue_7t       0x0800727e        0x0 linker stubs
+ .glue_7t       0x0800729e        0x0 linker stubs
  *(.eh_frame)
- *fill*         0x0800727e        0x2 
- .eh_frame      0x08007280        0x0 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
+ *fill*         0x0800729e        0x2 
+ .eh_frame      0x080072a0        0x0 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
  *(.init)
- .init          0x08007280        0x4 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crti.o
-                0x08007280                _init
- .init          0x08007284        0x8 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtn.o
+ .init          0x080072a0        0x4 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crti.o
+                0x080072a0                _init
+ .init          0x080072a4        0x8 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtn.o
  *(.fini)
- .fini          0x0800728c        0x4 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crti.o
-                0x0800728c                _fini
- .fini          0x08007290        0x8 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtn.o
-                0x08007298                        . = ALIGN (0x4)
-                0x08007298                        _etext = .
+ .fini          0x080072ac        0x4 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crti.o
+                0x080072ac                _fini
+ .fini          0x080072b0        0x8 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtn.o
+                0x080072b8                        . = ALIGN (0x4)
+                0x080072b8                        _etext = .
 
-.vfp11_veneer   0x08007298        0x0
- .vfp11_veneer  0x08007298        0x0 linker stubs
+.vfp11_veneer   0x080072b8        0x0
+ .vfp11_veneer  0x080072b8        0x0 linker stubs
 
-.v4_bx          0x08007298        0x0
- .v4_bx         0x08007298        0x0 linker stubs
+.v4_bx          0x080072b8        0x0
+ .v4_bx         0x080072b8        0x0 linker stubs
 
-.iplt           0x08007298        0x0
- .iplt          0x08007298        0x0 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
+.iplt           0x080072b8        0x0
+ .iplt          0x080072b8        0x0 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
 
-.rodata         0x08007298      0xba0
-                0x08007298                        . = ALIGN (0x4)
+.rodata         0x080072b8      0xbb0
+                0x080072b8                        . = ALIGN (0x4)
  *(.rodata)
  *(.rodata*)
  .rodata.setup.str1.1
-                0x08007298      0x10b /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
-                                 0x9d (size before relaxing)
+                0x080072b8      0x119 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
+                                 0xab (size before relaxing)
  .rodata.loop.str1.1
-                0x080073a3       0x41 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
+                0x080073d1       0x41 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
  .rodata._ZL7SEG_PAT
-                0x080073a3        0xa /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
+                0x080073d1        0xa /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
  .rodata._ZL7FONT5x7
-                0x080073ad      0x127 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
+                0x080073db      0x127 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/sketch/arduino_hw_showcase.ino.cpp.o
+ *fill*         0x08007502        0x2 
  .rodata._ZTV7TwoWire
-                0x080074d4       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
-                0x080074d4                vtable for TwoWire
+                0x08007504       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+                0x08007504                vtable for TwoWire
  .rodata.aPredivFactorTable.0
-                0x08007500        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_rcc.c.o
+                0x08007530        0x2 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_rcc.c.o
  .rodata.aPLLMULFactorTable.1
-                0x08007502       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_rcc.c.o
- *fill*         0x08007512        0x2 
+                0x08007532       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/HAL/stm32yyxx_hal_rcc.c.o
+ *fill*         0x08007542        0x2 
  .rodata.pin_map_ll
-                0x08007514       0x40 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
-                0x08007514                pin_map_ll
+                0x08007544       0x40 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/pinmap.c.o
+                0x08007544                pin_map_ll
  .rodata.APBPrescTable
-                0x08007554        0x8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/system_stm32yyxx.c.o
-                0x08007554                APBPrescTable
+                0x08007584        0x8 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/system_stm32yyxx.c.o
+                0x08007584                APBPrescTable
  .rodata.AHBPrescTable
-                0x0800755c       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/system_stm32yyxx.c.o
-                0x0800755c                AHBPrescTable
+                0x0800758c       0x10 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/system_stm32yyxx.c.o
+                0x0800758c                AHBPrescTable
  .rodata.PinMap_SPI_SSEL
-                0x0800756c       0x30 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/PeripheralPins.c.o
-                0x0800756c                PinMap_SPI_SSEL
- .rodata.PinMap_SPI_SCLK
                 0x0800759c       0x30 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/PeripheralPins.c.o
-                0x0800759c                PinMap_SPI_SCLK
- .rodata.PinMap_SPI_MISO
+                0x0800759c                PinMap_SPI_SSEL
+ .rodata.PinMap_SPI_SCLK
                 0x080075cc       0x30 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/PeripheralPins.c.o
-                0x080075cc                PinMap_SPI_MISO
- .rodata.PinMap_SPI_MOSI
+                0x080075cc                PinMap_SPI_SCLK
+ .rodata.PinMap_SPI_MISO
                 0x080075fc       0x30 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/PeripheralPins.c.o
-                0x080075fc                PinMap_SPI_MOSI
+                0x080075fc                PinMap_SPI_MISO
+ .rodata.PinMap_SPI_MOSI
+                0x0800762c       0x30 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/PeripheralPins.c.o
+                0x0800762c                PinMap_SPI_MOSI
  .rodata.PinMap_UART_CTS
-                0x0800762c       0x3c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/PeripheralPins.c.o
-                0x0800762c                PinMap_UART_CTS
+                0x0800765c       0x3c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/PeripheralPins.c.o
+                0x0800765c                PinMap_UART_CTS
  .rodata.PinMap_UART_RTS
-                0x08007668       0x3c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/PeripheralPins.c.o
-                0x08007668                PinMap_UART_RTS
+                0x08007698       0x3c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/PeripheralPins.c.o
+                0x08007698                PinMap_UART_RTS
  .rodata.PinMap_UART_RX
-                0x080076a4       0x3c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/PeripheralPins.c.o
-                0x080076a4                PinMap_UART_RX
+                0x080076d4       0x3c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/PeripheralPins.c.o
+                0x080076d4                PinMap_UART_RX
  .rodata.PinMap_UART_TX
-                0x080076e0       0x3c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/PeripheralPins.c.o
-                0x080076e0                PinMap_UART_TX
+                0x08007710       0x3c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/PeripheralPins.c.o
+                0x08007710                PinMap_UART_TX
  .rodata.PinMap_TIM
-                0x0800771c      0x204 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/PeripheralPins.c.o
-                0x0800771c                PinMap_TIM
+                0x0800774c      0x204 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/PeripheralPins.c.o
+                0x0800774c                PinMap_TIM
  .rodata.PinMap_I2C_SCL
-                0x08007920       0x30 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/PeripheralPins.c.o
-                0x08007920                PinMap_I2C_SCL
- .rodata.PinMap_I2C_SDA
                 0x08007950       0x30 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/PeripheralPins.c.o
-                0x08007950                PinMap_I2C_SDA
+                0x08007950                PinMap_I2C_SCL
+ .rodata.PinMap_I2C_SDA
+                0x08007980       0x30 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/PeripheralPins.c.o
+                0x08007980                PinMap_I2C_SDA
  .rodata.analogInputPin
-                0x08007980       0x28 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/variant_PILL_F103Cx.cpp.o
-                0x08007980                analogInputPin
+                0x080079b0       0x28 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/variant_PILL_F103Cx.cpp.o
+                0x080079b0                analogInputPin
  .rodata.digitalPin
-                0x080079a8       0x8c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/variant_PILL_F103Cx.cpp.o
-                0x080079a8                digitalPin
+                0x080079d8       0x8c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/variant_PILL_F103Cx.cpp.o
+                0x080079d8                digitalPin
  .rodata.CSWTCH.73
-                0x08007a34        0x5 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
- *fill*         0x08007a39        0x3 
+                0x08007a64        0x5 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
+ *fill*         0x08007a69        0x3 
  .rodata._ZTV14HardwareSerial
-                0x08007a3c       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
-                0x08007a3c                vtable for HardwareSerial
+                0x08007a6c       0x2c /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
+                0x08007a6c                vtable for HardwareSerial
  .rodata._svfprintf_r.str1.1
-                0x08007a68       0x11 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-nano-svfprintf.o)
+                0x08007a98       0x11 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-nano-svfprintf.o)
  .rodata._printf_i.str1.1
-                0x08007a68       0x22 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-nano-vfprintf_i.o)
+                0x08007a98       0x22 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-nano-vfprintf_i.o)
  .rodata.npio2_hw
-                0x08007a68       0x80 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-ef_rem_pio2.o)
+                0x08007a98       0x80 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-ef_rem_pio2.o)
  .rodata.two_over_pi
-                0x08007ae8      0x318 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-ef_rem_pio2.o)
- .rodata.PIo2   0x08007e00       0x2c /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-kf_rem_pio2.o)
+                0x08007b18      0x318 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-ef_rem_pio2.o)
+ .rodata.PIo2   0x08007e30       0x2c /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-kf_rem_pio2.o)
  .rodata.init_jk
-                0x08007e2c        0xc /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-kf_rem_pio2.o)
-                0x08007e38                        . = ALIGN (0x4)
+                0x08007e5c        0xc /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libm.a(libm_a-kf_rem_pio2.o)
+                0x08007e68                        . = ALIGN (0x4)
 
-.ARM.extab      0x08007e38        0x0
-                0x08007e38                        . = ALIGN (0x4)
+.ARM.extab      0x08007e68        0x0
+                0x08007e68                        . = ALIGN (0x4)
  *(.ARM.extab* .gnu.linkonce.armextab.*)
-                0x08007e38                        . = ALIGN (0x4)
+                0x08007e68                        . = ALIGN (0x4)
 
-.ARM            0x08007e38        0x8
-                0x08007e38                        . = ALIGN (0x4)
-                0x08007e38                        __exidx_start = .
+.ARM            0x08007e68        0x8
+                0x08007e68                        . = ALIGN (0x4)
+                0x08007e68                        __exidx_start = .
  *(.ARM.exidx*)
- .ARM.exidx     0x08007e38        0x8 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-strlen.o)
-                0x08007e40                        __exidx_end = .
-                0x08007e40                        . = ALIGN (0x4)
+ .ARM.exidx     0x08007e68        0x8 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7-m/nofp/libc_nano.a(libc_a-strlen.o)
+                0x08007e70                        __exidx_end = .
+                0x08007e70                        . = ALIGN (0x4)
 
-.preinit_array  0x08007e40        0x0
-                0x08007e40                        . = ALIGN (0x4)
-                0x08007e40                        PROVIDE (__preinit_array_start = .)
+.preinit_array  0x08007e70        0x0
+                0x08007e70                        . = ALIGN (0x4)
+                0x08007e70                        PROVIDE (__preinit_array_start = .)
  *(.preinit_array*)
-                0x08007e40                        PROVIDE (__preinit_array_end = .)
-                0x08007e40                        . = ALIGN (0x4)
+                0x08007e70                        PROVIDE (__preinit_array_end = .)
+                0x08007e70                        . = ALIGN (0x4)
 
-.init_array     0x08007e40       0x18
-                0x08007e40                        . = ALIGN (0x4)
-                0x08007e40                        PROVIDE (__init_array_start = .)
+.init_array     0x08007e70       0x18
+                0x08007e70                        . = ALIGN (0x4)
+                0x08007e70                        PROVIDE (__init_array_start = .)
  *(SORT_BY_NAME(.init_array.*))
  .init_array.00101
-                0x08007e40        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(main.cpp.o)
+                0x08007e70        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(main.cpp.o)
  *(.init_array*)
- .init_array    0x08007e44        0x4 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
- .init_array    0x08007e48        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SPI/SPI.cpp.o
- .init_array    0x08007e4c        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
- .init_array    0x08007e50        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
- .init_array    0x08007e54        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
-                0x08007e58                        PROVIDE (__init_array_end = .)
-                0x08007e58                        . = ALIGN (0x4)
+ .init_array    0x08007e74        0x4 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
+ .init_array    0x08007e78        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SPI/SPI.cpp.o
+ .init_array    0x08007e7c        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+ .init_array    0x08007e80        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
+ .init_array    0x08007e84        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/core/core.a(HardwareSerial.cpp.o)
+                0x08007e88                        PROVIDE (__init_array_end = .)
+                0x08007e88                        . = ALIGN (0x4)
 
-.fini_array     0x08007e58        0xc
-                0x08007e58                        . = ALIGN (0x4)
-                0x08007e58                        PROVIDE (__fini_array_start = .)
+.fini_array     0x08007e88        0xc
+                0x08007e88                        . = ALIGN (0x4)
+                0x08007e88                        PROVIDE (__fini_array_start = .)
  *(SORT_BY_NAME(.fini_array.*))
  *(.fini_array*)
- .fini_array    0x08007e58        0x4 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
- .fini_array    0x08007e5c        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
- .fini_array    0x08007e60        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
-                0x08007e64                        PROVIDE (__fini_array_end = .)
-                0x08007e64                        . = ALIGN (0x4)
-                0x08007e64                        _sidata = LOADADDR (.data)
+ .fini_array    0x08007e88        0x4 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
+ .fini_array    0x08007e8c        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/Wire/Wire.cpp.o
+ .fini_array    0x08007e90        0x4 /home/danish1075/Documents/stm32 emu blue pill/tests/arduino_hw_showcase/build/libraries/SrcWrapper/stm32/interrupt.cpp.o
+                0x08007e94                        PROVIDE (__fini_array_end = .)
+                0x08007e94                        . = ALIGN (0x4)
+                0x08007e94                        _sidata = LOADADDR (.data)
 
-.rel.dyn        0x08007e64        0x0
- .rel.iplt      0x08007e64        0x0 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
+.rel.dyn        0x08007e94        0x0
+ .rel.iplt      0x08007e94        0x0 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
 
-.data           0x20000000       0x7c load address 0x08007e64
+.data           0x20000000       0x7c load address 0x08007e94
                 0x20000000                        . = ALIGN (0x4)
                 0x20000000                        _sdata = .
  *(.data)
@@ -5401,11 +5402,11 @@ LOAD /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-non
                 0x2000007c                        . = ALIGN (0x4)
                 0x2000007c                        _edata = .
 
-.igot.plt       0x2000007c        0x0 load address 0x08007ee0
+.igot.plt       0x2000007c        0x0 load address 0x08007f10
  .igot.plt      0x2000007c        0x0 /home/danish1075/.arduino15/packages/STMicroelectronics/tools/xpack-arm-none-eabi-gcc/14.2.1-1.1/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7-m/nofp/crtbegin.o
                 0x2000007c                        . = ALIGN (0x4)
 
-.bss            0x2000007c     0x295c load address 0x08007ee0
+.bss            0x2000007c     0x295c load address 0x08007f10
                 0x2000007c                        _sbss = .
                 0x2000007c                        __bss_start__ = _sbss
  *(.bss)

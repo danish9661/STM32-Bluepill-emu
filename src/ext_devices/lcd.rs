@@ -14,7 +14,6 @@ pub struct Lcd {
     pub current_x: u16, pub current_y: u16,
     pub width: u16, pub height: u16,
     pub drawing: bool,
-    cmd: Option<(u8, Vec<u8>)>,
 }
 
 pub const LCD_WIDTH: u16 = 128;
@@ -28,7 +27,6 @@ impl Lcd {
             current_x: 0, current_y: 0,
             width: LCD_WIDTH, height: LCD_HEIGHT,
             drawing: false,
-            cmd: None,
         }
     }
 }
@@ -42,37 +40,35 @@ impl ExtDevice<(), u8> for Lcd {
     fn read(&mut self, _sys: &System, _addr: ()) -> u8 { 0 }
 
     fn write(&mut self, _sys: &System, _addr: (), v: u8) {
+        // Framing bytes always win, even mid-frame (resync): 0xFB restarts
+        // at pixel (0,0), 0xFC ends the session. Neither is ever stored.
+        // (Pixel data here is 0xFF/0x00/0x40, so no legit byte collides.)
+        // Two real bugs died here: 0xFB queued as a one-arg command ate
+        // pixel 0 (whole frame shifted one left, 'L' rendered as 'C'), and
+        // a post-wrap 0xFC landing in fb[0] plus stray segment bytes.
+        if v == 0xFB {
+            self.current_x = 0; self.current_y = 0;
+            self.drawing = true;
+            log::debug!("{} start drawing", self.name);
+            return;
+        }
+        if v == 0xFC {
+            self.drawing = false;
+            return;
+        }
         if self.drawing {
             let idx = (self.current_y as usize) * (LCD_WIDTH as usize) + (self.current_x as usize);
             if idx < self.fb.len() {
                 self.fb[idx] = v;
-            }
-            self.current_x += 1;
-            if self.current_x >= LCD_WIDTH {
-                self.current_x = 0;
-                self.current_y += 1;
-                if self.current_y >= LCD_HEIGHT {
-                    self.current_y = 0;
+                self.current_x += 1;
+                if self.current_x >= LCD_WIDTH {
+                    self.current_x = 0;
+                    // Saturate at the last row (never wrap to row 0).
+                    if self.current_y + 1 < LCD_HEIGHT {
+                        self.current_y += 1;
+                    }
                 }
             }
-            return;
-        }
-
-        if let Some((cmd, mut args)) = self.cmd.take() {
-            args.push(v);
-            if cmd == 0xFB {
-                self.current_x = 0; self.current_y = 0;
-                self.drawing = true;
-                log::debug!("{} start drawing", self.name);
-            } else if cmd == 0xFC {
-                self.drawing = false;
-            } else {
-                self.cmd = Some((cmd, args));
-            }
-        } else if v == 0xFB {
-            self.cmd = Some((v, vec![]));
-        } else if v == 0xFC {
-            self.drawing = false;
         }
     }
 
@@ -81,6 +77,5 @@ impl ExtDevice<(), u8> for Lcd {
         self.current_x = 0;
         self.current_y = 0;
         self.drawing = false;
-        self.cmd = None;
     }
 }

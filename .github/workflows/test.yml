@@ -160,6 +160,12 @@ jobs:
         run: node tests/test_gdbstub.mjs
       - name: Per-board demo firmware (4 targets x chips)
         run: node tests/test_board_demo.mjs
+      - name: Per-board UART echo (native Serial per target)
+        run: node tests/test_board_echo.mjs
+      - name: Per-board showcase (7 peripherals per target)
+        run: node tests/test_board_showcase.mjs
+      - name: Per-board RTC clock (per target)
+        run: node tests/test_board_rtc.mjs
       - name: Site pages (docs + demo smoke, headed Chromium)
         run: npx playwright test tests/test_browser_site.mjs --reporter=list --timeout=300000
       - name: Docs sync freshness (site/docs-src mirrors repo markdown)

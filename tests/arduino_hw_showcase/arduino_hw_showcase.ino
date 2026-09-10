@@ -96,6 +96,18 @@ static const uint8_t SEG_PAT[] = {
 
 static uint8_t oled_fb[OLED_W * OLED_H / 8];   /* page-major */
 static uint8_t lcd_fb[128 * 64];
+
+static const char *boardName() {
+#if defined(ARDUINO_NUCLEO_F103RB)
+    return "Nucleo-F103RB";
+#elif defined(ARDUINO_MAPLEMINI_F103CB)
+    return "Maple Mini";
+#elif defined(ARDUINO_GENERIC_F103RCTX)
+    return "Generic F103RC";
+#else
+    return "Blue Pill";
+#endif
+}
 static volatile uint32_t btnPresses = 0;
 static bool buzzerOn = false;
 static uint8_t rgb[3] = {0, 0, 0};
@@ -126,16 +138,16 @@ static void oled_show() {
 static void oled_draw_char(int16_t x, int16_t y, char c) {
     if (c < ' ' || c > 'Z') c = ' ';
     uint8_t idx = c - ' ';
-    for (uint8_t row = 0; row < FONT_H; row++) {
-        uint8_t bits = FONT5x7[idx][row];
-        int16_t py = y + row;
-        if (py < 0 || py >= OLED_H) continue;
-        uint8_t page = py >> 3;
-        uint8_t bit = 1 << (py & 7);
-        for (uint8_t col = 0; col < FONT_W; col++) {
-            int16_t px = x + col;
-            if (px < 0 || px >= OLED_W) continue;
-            if (bits & (1 << (FONT_W - 1 - col))) oled_fb[page * OLED_W + px] |= bit;
+    /* Column-major font: FONT5x7[idx][col] holds 8 vertical pixels,
+       bit 0 = top row (Adafruit layout, matches SSD1306 pages). */
+    for (uint8_t col = 0; col < FONT_W; col++) {
+        uint8_t bits = FONT5x7[idx][col];
+        int16_t px = x + col;
+        if (px < 0 || px >= OLED_W) continue;
+        for (uint8_t row = 0; row < FONT_H; row++) {
+            int16_t py = y + row;
+            if (py < 0 || py >= OLED_H) continue;
+            if (bits & (1 << row)) oled_fb[(py >> 3) * OLED_W + px] |= 1 << (py & 7);
         }
     }
 }
@@ -169,12 +181,15 @@ static void lcd_end() {
 static void lcd_draw_char(uint8_t x, uint8_t y, char c) {
     if (c < ' ' || c > 'Z') c = ' ';
     uint8_t idx = c - ' ';
-    for (uint8_t row = 0; row < FONT_H; row++) {
-        uint8_t bits = FONT5x7[idx][row];
-        for (uint8_t col = 0; col < FONT_W; col++) {
-            uint8_t px = x + col, py = y + row;
-            if (px < 128 && py < 64) {
-                lcd_fb[py * 128 + px] = (bits & (1 << (FONT_W - 1 - col))) ? 0xFF : (lcd_fb[py * 128 + px] & 0x40);
+    /* Same column-major font as the OLED path: bit 0 = top row. */
+    for (uint8_t col = 0; col < FONT_W; col++) {
+        uint8_t bits = FONT5x7[idx][col];
+        uint8_t px = x + col;
+        if (px >= 128) continue;
+        for (uint8_t row = 0; row < FONT_H; row++) {
+            uint8_t py = y + row;
+            if (py < 64) {
+                lcd_fb[py * 128 + px] = (bits & (1 << row)) ? 0xFF : (lcd_fb[py * 128 + px] & 0x40);
             }
         }
     }
@@ -195,8 +210,10 @@ static void btnISR() {
 }
 
 void setup() {
-    Serial1.begin(115200);
-    Serial1.print("\r\n=== Peripheral showcase: OLED + LCD + 7-seg + RGB + buzzer + button ===\r\n");
+    Serial.begin(115200);
+    Serial.print("\r\n=== Peripheral showcase (");
+    Serial.print(boardName());
+    Serial.print("): OLED + LCD + 7-seg + RGB + buzzer + button ===\r\n");
 
     pinMode(LCD_CS, OUTPUT);
     pinMode(SEG_CS, OUTPUT);
@@ -204,8 +221,8 @@ void setup() {
     digitalWrite(LCD_CS, HIGH);
     digitalWrite(SEG_CS, HIGH);
     digitalWrite(BUZZ, LOW);
-    pinMode(PC13, OUTPUT);
-    digitalWrite(PC13, HIGH);
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, HIGH);
 
     SPI.begin();
     Wire.begin();
@@ -227,7 +244,7 @@ void setup() {
 
     oled_display_text();
 
-    Serial1.print("OLED=ok LCD=ok SEG=ok RGB=ok BUZZ=ok BTN=armed\r\n");
+    Serial.print("OLED=ok LCD=ok SEG=ok RGB=ok BUZZ=ok BTN=armed\r\n");
 }
 
 uint32_t lastSec = 0;
@@ -288,17 +305,17 @@ void loop() {
 
         /* Buzzer: 200ms beep each second + PC13 blink */
         digitalWrite(BUZZ, HIGH);
-        digitalWrite(PC13, LOW);
+        digitalWrite(LED_BUILTIN, LOW);
         buzzerOn = true;
         delay(200);
         digitalWrite(BUZZ, LOW);
-        digitalWrite(PC13, HIGH);
+        digitalWrite(LED_BUILTIN, HIGH);
         buzzerOn = false;
 
         char out[40];
         snprintf(out, sizeof(out), "t=%lus btn=%lu rg=%02X%02X%02X buzz=1\r\n",
                  (unsigned long)sec, (unsigned long)btnPresses, rgb[0], rgb[1], rgb[2]);
-        Serial1.print(out);
+        Serial.print(out);
     }
     delay(10);
 }
