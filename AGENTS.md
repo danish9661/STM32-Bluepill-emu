@@ -453,6 +453,21 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
   0 real divergences.
 - **Verified**: full gate re-run at commit.
 
+### 39. Docs as website: markdown viewer + sync + freshness guard [this sprint]
+- **Viewer** (`site/doc.html?f=*.md`, dependency-free): tables, code fences,
+  nested image-links (README badges), cross-doc links rewritten to viewer
+  routes, TOC + heading anchors, error state for bad names. `site/docs.html`
+  is now a manifest-driven hub (zero drift by construction). Hand-written
+  `docs-boards/debugging/api.html` deleted (superseded).
+- **Sync** (`site/sync-docs.mjs`): mirrors the 16 user-facing markdown files
+  into `site/docs-src/` + `site/docs.json` (Pages deploys only `site/`, so the
+  viewer can't reach `../docs/` live). CI fails on drift
+  (`node site/sync-docs.mjs && git diff --exit-code`), same discipline as
+  the wasm byte-exact guard. Edit the `.md` source, run the sync, reload.
+- **Verified**: 8/8 headed (viewer routes + error state + screenshots
+  reviewed: hub, boards, API, tables, badges, no duplicate H1;
+  CPU.md → PATH_B.md click-through with correct title).
+
 
 
 ## Next Phase — Long-term Optimizations
