@@ -52,27 +52,25 @@ footer a { color: #38bdf8; }
     <h3><a href="index.html">Live demo</a></h3>
     <p>Run real firmware in your browser: pick a preset (blink, UART echo, CAN chat, USB CDC, RTOS, per-board builds…), press Run, watch the terminal, GPIO grid and pin activity. Load your own <code>.bin</code> / <code>.hex</code> / <code>.elf</code> plus an optional <code>.map</code> for symbol names.</p>
 </div>
-<h2>Topics</h2>
-<div class="card">
-    <h3><a href="docs-boards.html">Supported boards &amp; chips</a></h3>
-    <p>Blue Pill, Maple Mini, Nucleo-F103RB, Generic F103RC, GD32F103, STM32F105 — flash sizes, DBGMCU ID codes, Arduino pin aliases, and the 5-step bring-up checklist.</p>
-</div>
-<div class="card">
-    <h3><a href="docs-debugging.html">Debugging with GDB</a></h3>
-    <p>Attach <code>arm-none-eabi-gdb</code> over TCP (<code>target remote :1234</code>): breakpoints, step, registers, memory — plus what the stub deliberately doesn't do.</p>
-</div>
-<div class="card">
-    <h3><a href="docs-api.html">JavaScript API</a></h3>
-    <p><code>STM32F1</code> wrapper, <code>createEmulator</code> options, virtual-peripheral events, host-injection calls (UART/GPIO/CAN/USB/I2C/SPI), custom JS peripherals.</p>
-</div>
+<h2>Reference (rendered live from the repo sources)</h2>
+<div id="doc-cards"><p>Loading…</p></div>
 <h2>Tools</h2>
 <div class="card">
     <h3><a href="ws-viewer.html">WebSocket viewer</a></h3>
     <p>Stream a headless Node emulation into a browser: UART terminal, GPIO grid, event log. Pair with <code>pkg/ws-server.mjs</code>.</p>
 </div>
 <h2>Full reference</h2>
-<p>These pages are the short path. The complete reference lives with the source: <a href="https://github.com/danish9661/STM32-Bluepill-emu/blob/master/docs/USAGE.md">USAGE.md</a>, <a href="https://github.com/danish9661/STM32-Bluepill-emu/blob/master/docs/PERIPHERALS.md">PERIPHERALS.md</a>, <a href="https://github.com/danish9661/STM32-Bluepill-emu/blob/master/docs/BOARDS.md">BOARDS.md</a>, <a href="https://github.com/danish9661/STM32-Bluepill-emu/blob/master/docs/GDB.md">GDB.md</a>, <a href="https://github.com/danish9661/STM32-Bluepill-emu/blob/master/docs/STM32F1_API.md">STM32F1_API.md</a>.</p>
+<p>These pages render the same markdown sources shipped in the repo — what you read here is what is committed. Start from the <a href="doc.html?f=README.md">readme</a>, <a href="doc.html?f=USAGE.md">usage guide</a> or <a href="https://github.com/danish9661/STM32-Bluepill-emu">the source</a>.</p>
 </main>
+<script type="module">
+try {
+    const docs = await (await fetch('docs.json')).json();
+    document.getElementById('doc-cards').innerHTML = docs.map((d) =>
+        `<div class="card"><h3><a href="doc.html?f=${d.file}">${d.title}</a></h3><p>${d.blurb}</p></div>`).join('');
+} catch (e) {
+    document.getElementById('doc-cards').innerHTML = '<p>Could not load the docs index.</p>';
+}
+</script>
 <footer>
     STM32 Bluepill Emulator &middot; <a href="index.html">Live Demo</a> &middot; <a href="about.html">About</a> &middot;
     <a href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">Source</a>

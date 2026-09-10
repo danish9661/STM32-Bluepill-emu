@@ -6,10 +6,10 @@ import { test, expect } from '@playwright/test';
 const PAGES = [
     ['/', '#loadPresetBtn', 'demo preset loader'],
     ['/about.html', 'main', 'about content'],
-    ['/docs.html', 'main', 'docs hub'],
-    ['/docs-boards.html', 'table', 'board matrix'],
-    ['/docs-debugging.html', 'main', 'debugging guide'],
-    ['/docs-api.html', 'main', 'API reference'],
+    ['/docs.html', '#doc-cards .card', 'docs hub (manifest-driven)'],
+    ['/doc.html?f=BOARDS.md', 'table', 'rendered board matrix'],
+    ['/doc.html?f=GDB.md', 'pre', 'rendered code blocks'],
+    ['/doc.html?f=NOPE.md', '.err', 'missing doc error state'],
     ['/ws-viewer.html', 'main, body', 'ws viewer'],
 ];
 
@@ -21,6 +21,8 @@ test.describe('Site pages', () => {
                 // ws-viewer auto-dials its server; without one running the
                 // browser logs a connection error (the page itself retries).
                 if (path === '/ws-viewer.html' && msg.text().includes('ws://')) return;
+                // The missing-doc probe 404s by design (error UI asserted).
+                if (msg.text().includes('404 (File not found)')) return;
                 if (msg.type() === 'error') errors.push(msg.text());
             });
             page.on('pageerror', (err) => errors.push(String(err)));

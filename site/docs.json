@@ -1,0 +1,82 @@
+[
+ {
+  "file": "README.md",
+  "title": "Readme",
+  "blurb": "Project overview, quick start, supported peripherals"
+ },
+ {
+  "file": "USAGE.md",
+  "title": "Usage guide",
+  "blurb": "createEmulator options, ext_devices, chips, plugins"
+ },
+ {
+  "file": "PERIPHERALS.md",
+  "title": "Peripheral coverage",
+  "blurb": "What each peripheral models, flags, IRQs, gaps"
+ },
+ {
+  "file": "BOARDS.md",
+  "title": "Boards & chips",
+  "blurb": "Variants, ID codes, pin aliases, bring-up"
+ },
+ {
+  "file": "GDB.md",
+  "title": "Debugging with GDB",
+  "blurb": "RSP stub walkthrough, fidelity notes"
+ },
+ {
+  "file": "STM32F1_API.md",
+  "title": "JavaScript API",
+  "blurb": "STM32F1 wrapper, events, injection"
+ },
+ {
+  "file": "COVERAGE.md",
+  "title": "Coverage audit",
+  "blurb": "SVD census, depth gaps, test counts"
+ },
+ {
+  "file": "CPU.md",
+  "title": "CPU core",
+  "blurb": "Decoder, memory protection, exceptions, banks"
+ },
+ {
+  "file": "ARCHITECTURE.md",
+  "title": "Architecture",
+  "blurb": "Emulation loop, batching, performance"
+ },
+ {
+  "file": "WEBSOCKET_BRIDGE.md",
+  "title": "WebSocket bridge",
+  "blurb": "Headless server + browser viewer"
+ },
+ {
+  "file": "AUDIT.md",
+  "title": "Audit (historical)",
+  "blurb": "Memory, security and overhead notes"
+ },
+ {
+  "file": "NEXT_PHASE.md",
+  "title": "Next phase (historical)",
+  "blurb": "Deferred optimization ideas"
+ },
+ {
+  "file": "PATH_A.md",
+  "title": "Path A experiment",
+  "blurb": "Single-module linking spike"
+ },
+ {
+  "file": "PATH_B.md",
+  "title": "Path B: native CPU",
+  "blurb": "Pure-Rust core cutover notes"
+ },
+ {
+  "file": "summary.md",
+  "title": "Summary (historical)",
+  "blurb": "Frozen project summary"
+ },
+ {
+  "file": "CHANGELOG.md",
+  "title": "Changelog",
+  "blurb": "Release history"
+ }
+]

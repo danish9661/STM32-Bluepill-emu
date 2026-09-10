@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="STM32 Bluepill emulator documentation, rendered live from the repo sources.">
+<title>Docs — STM32 Bluepill Emulator</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.65; }
+header { background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%); border-bottom: 1px solid #1e3a5f; padding: 12px 24px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; position: sticky; top: 0; z-index: 100; }
+header h1 { font-size: 17px; font-weight: 700; background: linear-gradient(90deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+header .sub { font-size: 12px; color: #64748b; }
+header .spacer { flex: 1; }
+header a.nav { font-size: 11.5px; color: #94a3b8; text-decoration: none; border: 1px solid #334155; padding: 4px 12px; border-radius: 999px; }
+header a.nav:hover, header a.nav.active { background: #1e40af; color: #fff; border-color: #3b82f6; }
+main { max-width: 880px; margin: 0 auto; padding: 28px 24px 60px; }
+main h1 { font-size: 24px; font-weight: 800; letter-spacing: -0.3px; margin-bottom: 4px; }
+main h2 { font-size: 11px; color: #64748b; margin: 32px 0 14px; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600; }
+.doc h2 { font-size: 19px; color: #e2e8f0; text-transform: none; letter-spacing: 0; margin: 28px 0 10px; }
+.doc h3 { font-size: 15px; color: #e2e8f0; margin: 22px 0 8px; }
+.doc h4 { font-size: 13.5px; color: #94a3b8; margin: 16px 0 6px; }
+.doc-src { font-size: 11.5px; color: #475569; margin-bottom: 18px; }
+.doc-src a { color: #475569; }
+p, li { font-size: 14px; color: #cbd5e1; }
+ul, ol { padding-left: 22px; } li { margin: 5px 0; }
+li > ul, li > ol { margin-top: 4px; }
+a { color: #38bdf8; text-decoration: none; } a:hover { color: #7dd3fc; text-decoration: underline; }
+code { background: #0f172a; border: 1px solid #1e293b; border-radius: 4px; padding: 1px 6px; font-size: 12px; color: #7dd3fc; font-family: Consolas, monospace; }
+pre { background: #0b1120; border: 1px solid #1e293b; border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 12px 0; font-size: 12.5px; line-height: 1.6; color: #cbd5e1; font-family: Consolas, monospace; }
+pre code { background: none; border: none; padding: 0; }
+blockquote { border-left: 3px solid #1e40af; padding: 6px 14px; margin: 12px 0; color: #94a3b8; background: rgba(30,64,175,0.08); border-radius: 0 8px 8px 0; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; display: block; overflow-x: auto; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #1e293b; }
+th { color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+td { color: #cbd5e1; font-family: Consolas, monospace; font-size: 12.5px; }
+hr { border: none; border-top: 1px solid #1e293b; margin: 24px 0; }
+.toc { background: #0b1120; border: 1px solid #1e293b; border-radius: 10px; padding: 12px 18px; margin: 14px 0; }
+.toc b { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
+.toc ul { columns: 2; }
+.toc li { font-size: 12.5px; }
+img { max-width: 100%; }
+.err { color: #f87171; }
+footer { text-align: center; padding: 26px; color: #475569; font-size: 12px; border-top: 1px solid #1e293b; }
+footer a { color: #38bdf8; }
+</style>
+</head>
+<body>
+<header>
+    <h1>&#x25C8; STM32 Bluepill Emulator</h1>
+    <span class="sub" id="crumb">Docs</span>
+    <span class="spacer"></span>
+    <a class="nav" href="index.html">Demo</a>
+    <a class="nav active" href="docs.html">Docs</a>
+    <a class="nav" href="about.html">About</a>
+    <a class="nav" href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">GitHub</a>
+</header>
+<main>
+<h1 id="doc-title">Docs</h1>
+<div class="doc-src" id="doc-src"></div>
+<div class="doc" id="doc-body"><p>Loading…</p></div>
+</main>
+<footer>
+    STM32 Bluepill Emulator &middot; <a href="docs.html">Docs</a> &middot; <a href="index.html">Live Demo</a> &middot;
+    <a href="https://github.com/danish9661/STM32-Bluepill-emu" target="_blank" rel="noopener">Source</a>
+</footer>
+<script type="module">
+const params = new URLSearchParams(location.search);
+const file = params.get('f') || 'README.md';
+const body = document.getElementById('doc-body');
+
+function esc(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function inline(s) {
+    s = esc(s);
+    s = s.replace(/\[!\[([^\]]*)\]\(([^)\s]+)\)\]\(([^)\s]+)\)/g, '<a href="$3"><img alt="$1" src="$2"></a>');
+    s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '<img alt="$1" src="$2">');
+    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t, u) => {
+        if (/^(?:[a-z]+:)?\/\//i.test(u) || u.startsWith('#') || u.startsWith('mailto:')) return `<a href="${u}">${t}</a>`;
+        const m = u.match(/^(?:\.\.\/|\.\/|docs\/)?([A-Za-z0-9_.-]+)\.md(#[^)]*)?$/);
+        if (m) return `<a href="doc.html?f=${m[1]}.md${m[2] || ''}">${t}</a>`;
+        return `<a href="${u}">${t}</a>`;
+    });
+    s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^*\w])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+    s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+    return s;
+}
+function slug(s) {
+    return s.toLowerCase().replace(/`([^`]+)`/g, '$1').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+function render(md) {
+    const lines = md.replace(/\r\n?/g, '\n').split('\n');
+    let html = '', i = 0, para = [];
+    const tocs = [];
+    const flushPara = () => { if (para.length) { html += `<p>${inline(para.join(' '))}</p>`; para = []; } };
+    const isTableDelim = (l) => /^\|?[\s:|-]+\|[\s:|-]*\|?$/.test(l) && l.includes('-');
+    while (i < lines.length) {
+        const line = lines[i];
+        if (line.startsWith('```')) {
+            flushPara();
+            const lang = line.slice(3).trim();
+            i++;
+            const buf = [];
+            while (i < lines.length && !lines[i].startsWith('```')) { buf.push(lines[i]); i++; }
+            i++;
+            html += `<pre><code${lang ? ` class="lang-${esc(lang)}"` : ''}>${esc(buf.join('\n'))}</code></pre>`;
+            continue;
+        }
+        const hm = line.match(/^(#{1,6})\s+(.*)$/);
+        if (hm) {
+            flushPara();
+            const lvl = hm[1].length, id = slug(hm[2]);
+            if (lvl === 2) tocs.push([id, hm[2]]);
+            html += `<h${lvl} id="${id}">${inline(hm[2])}</h${lvl}>`;
+            i++;
+            continue;
+        }
+        if (/^---+$/.test(line.trim())) { flushPara(); html += '<hr>'; i++; continue; }
+        if (line.startsWith('>')) {
+            flushPara();
+            const buf = [];
+            while (i < lines.length && lines[i].startsWith('>')) { buf.push(lines[i].replace(/^>\s?/, '')); i++; }
+            html += `<blockquote>${buf.map((l) => inline(l)).join('<br>')}</blockquote>`;
+            continue;
+        }
+        if (/^\|.*\|$/.test(line.trim()) && i + 1 < lines.length && isTableDelim(lines[i + 1])) {
+            flushPara();
+            const cells = (l) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+            const head = cells(line), aligns = cells(lines[i + 1]).map((c) =>
+                c.startsWith(':') && c.endsWith(':') ? 'center' : c.endsWith(':') ? 'right' : 'left');
+            html += '<table><thead><tr>' + head.map((c, k) =>
+                `<th${aligns[k] !== 'left' ? ` style="text-align:${aligns[k]}"` : ''}>${inline(c)}</th>`).join('') + '</tr></thead><tbody>';
+            i += 2;
+            while (i < lines.length && /^\|.*\|$/.test(lines[i].trim())) {
+                html += '<tr>' + cells(lines[i]).map((c, k) =>
+                    `<td${aligns[k] !== 'left' ? ` style="text-align:${aligns[k]}"` : ''}>${inline(c)}</td>`).join('') + '</tr>';
+                i++;
+            }
+            html += '</tbody></table>';
+            continue;
+        }
+        const ulm = line.match(/^(\s*)[-*]\s+(.*)$/);
+        const olm = line.match(/^(\s*)\d+[.)]\s+(.*)$/);
+        if (ulm || olm) {
+            flushPara();
+            const tag = ulm ? 'ul' : 'ol';
+            html += `<${tag}>`;
+            while (i < lines.length) {
+                const m2 = ulm ? lines[i].match(/^(\s*)[-*]\s+(.*)$/) : lines[i].match(/^(\s*)\d+[.)]\s+(.*)$/);
+                if (!m2) break;
+                html += `<li>${inline(m2[2])}</li>`;
+                i++;
+            }
+            html += `</${tag}>`;
+            continue;
+        }
+        if (!line.trim()) { flushPara(); i++; continue; }
+        para.push(line.trim());
+        i++;
+    }
+    flushPara();
+    return { html, tocs };
+}
+
+try {
+    if (!/^[A-Za-z0-9_.-]+\.md$/.test(file)) throw new Error('bad doc name');
+    const res = await fetch('docs-src/' + file);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const md = await res.text();
+    const { html, tocs } = render(md);
+    const m1 = md.match(/^#\s+(.*)$/m);
+    const title = m1 ? m1[1].replace(/`/g, '') : file;
+    // The markdown H1 becomes the page title — drop it from the body.
+    const bodyHtml = html.replace(/^<h1 id="[^"]+">.*?<\/h1>/, '');
+    document.title = title + ' — STM32 Bluepill Emulator Docs';
+    document.getElementById('doc-title').textContent = title;
+    document.getElementById('crumb').textContent = 'Docs · ' + title;
+    document.getElementById('doc-src').innerHTML =
+        `Rendered live from <a href="https://github.com/danish9661/STM32-Bluepill-emu/blob/master/${file.startsWith('README') || file.startsWith('CHANGELOG') ? '' : 'docs/'}${file}">${file}</a>`;
+    body.innerHTML = (tocs.length >= 3
+        ? `<div class="toc"><b>On this page</b><ul>${tocs.map(([id, t]) => `<li><a href="#${id}">${inline(t)}</a></li>`).join('')}</ul></div>`
+        : '') + bodyHtml;
+    if (location.hash) {
+        const el = document.querySelector(location.hash);
+        if (el) el.scrollIntoView();
+    }
+} catch (e) {
+    body.innerHTML = `<p class="err">Could not load <code>${esc(file)}</code>: ${esc(e.message)}. See the <a href="docs.html">docs index</a>.</p>`;
+}
+</script>
+</body>
+</html>
