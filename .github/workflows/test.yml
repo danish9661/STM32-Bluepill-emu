@@ -157,6 +157,8 @@ jobs:
         run: node tests/test_sd_logger.mjs
       - name: USB CDC serial demo (EP0 control + EP1 bulk echo)
         run: node tests/test_usb_cdc.mjs
+      - name: USB real-stack serial (STM32duino enumerate + echo)
+        run: node tests/test_usb_serial.mjs
       - name: CoreMark CPU-semantics check (known-answer CRCs)
         run: node tests/test_coremark.mjs
       - name: Chip variants (DBGMCU IDCODE per chip + GD32 boot)

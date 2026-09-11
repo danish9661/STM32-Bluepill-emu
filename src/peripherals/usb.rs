@@ -65,6 +65,9 @@ const CNTR_SUSPM: u32 = 1 << 11;
 const CNTR_WKUPM: u32 = 1 << 12;
 /// Low-priority USB vector (all CTR/RESET events; no isochronous traffic).
 pub const USB_LP_IRQ: i32 = 20;
+/// High-priority USB vector (shared with CAN1 TX): CTR on isochronous
+/// endpoints, which silicon routes to the HP line.
+pub const USB_HP_IRQ: i32 = 19;
 /// USB wakeup vector (WKUP event only).
 pub const USB_WKUP_IRQ: i32 = 42;
 /// Instructions per USB frame (1ms @ 72MHz): the SOF engine's tick.
@@ -72,6 +75,13 @@ const SOF_PERIOD: u64 = 72_000;
 
 fn stat_tx(r: u32) -> u32 { (r >> 4) & 3 }
 fn stat_rx(r: u32) -> u32 { (r >> 12) & 3 }
+fn ep_type(r: u32) -> u32 { (r >> 9) & 3 }
+/// Isochronous endpoint type (EP_TYPE = 10).
+const TYPE_ISO: u32 = 0x2;
+/// CNTR power-down bit: the USB macro is dead (no RX/TX, no IRQs, SOF frozen).
+const CNTR_PDWN: u16 = 1 << 1;
+/// CNTR force-suspend bit (firmware-owned suspend).
+const CNTR_FSUSP: u16 = 1 << 3;
 
 pub struct Usb {
     ep: [u16; 8],
@@ -84,8 +94,11 @@ pub struct Usb {
     frame: u16,
     sof_acc: u64,
     last_tick: u64,
-    /// Suspend state: set by FSUSP, cleared on resume.
+    /// Suspend state: set by FSUSP or detach, cleared on resume/reset.
     suspended: bool,
+    /// Detached from the host (pull-up off): no tokens arrive, IN never
+    /// completes, SOF frozen. Cleared by the next bus reset (reattach).
+    detached: bool,
     /// Device-initiated resume pulse (CNTR.RESUME): clears after one frame.
     resume_at: u64,
 }
@@ -104,6 +117,7 @@ impl Usb {
                 sof_acc: 0,
                 last_tick: crate::system::instruction_count(),
                 suspended: false,
+                detached: false,
                 resume_at: 0,
             }))
         } else {
@@ -168,9 +182,25 @@ impl Usb {
     }
 
     /// Pend the low-priority USB IRQ when its CNTR mask bit is set.
+    /// Dead while PDWN holds (the macro is off).
     fn irq(&mut self, sys: &System, mask_bit: u32) {
+        if self.cntr & CNTR_PDWN != 0 {
+            return;
+        }
         if self.cntr as u32 & mask_bit != 0 {
             sys.p.nvic.borrow_mut().set_intr_pending(USB_LP_IRQ);
+        }
+    }
+
+    /// CTR completion IRQ: isochronous endpoints go to the high-priority
+    /// vector (shared with CAN1 TX), everything else to low-priority.
+    fn ctr_irq(&mut self, sys: &System, n: usize) {
+        if self.cntr & CNTR_PDWN != 0 {
+            return;
+        }
+        if self.cntr as u32 & CNTR_CTRM != 0 {
+            let irq = if self.is_iso(n) { USB_HP_IRQ } else { USB_LP_IRQ };
+            sys.p.nvic.borrow_mut().set_intr_pending(irq);
         }
     }
 
@@ -211,6 +241,11 @@ impl Usb {
             }
             return;
         }
+        // PDWN freezes the frame engine (keep the tick fresh so power-up
+        // doesn't see a false delta burst).
+        if self.cntr & CNTR_PDWN != 0 {
+            return;
+        }
         self.sof_acc += delta;
         while self.sof_acc >= SOF_PERIOD {
             self.sof_acc -= SOF_PERIOD;
@@ -234,11 +269,16 @@ impl Usb {
         r & EP_KIND != 0 && r & EP_TYPE_MASK == 0
     }
 
+    /// Isochronous endpoint? (EP_TYPE = 10: no STALL, CTR pends HP.)
+    fn is_iso(&self, n: usize) -> bool {
+        ep_type(self.ep[n] as u32) == TYPE_ISO
+    }
+
     /// Bus traffic while suspended wakes the device (WKUP) unless firmware
     /// holds FSUSP (forced suspend: firmware owns the state, only the
     /// RESUME pulse or clearing FSUSP wakes).
     fn traffic(&mut self, sys: &System) {
-        if self.suspended && self.cntr & (1 << 1) != 0 {
+        if self.suspended && self.cntr & CNTR_FSUSP != 0 {
             // FSUSP held: stay suspended (firmware owns the state).
             return;
         }
@@ -270,15 +310,27 @@ impl Usb {
     }
 
     /// USB reset state (FRES asserted, or FRES 1->0 release which additionally
-    /// raises the RESET event, kicking firmware enumeration).
+    /// raises the RESET event, kicking firmware enumeration). A bus reset
+    /// implies reattach: detach/suspend clear (reset signaling wakes).
     fn usb_reset(&mut self, sys: &System, with_event: bool) {
         self.ep = [0; 8];
         self.daddr = 0;
         self.istr = 0;
+        self.detached = false;
+        self.suspended = false;
         if with_event {
             self.istr |= 1 << 10; // RESET
             self.irq(sys, CNTR_RESETM);
         }
+    }
+
+    /// Host disconnect (pull-up off): no tokens arrive, IN never completes,
+    /// SOF freezes. Cleared by the next bus reset (reattach).
+    pub fn detach(&mut self, sys: &System) {
+        self.detached = true;
+        self.suspended = true;
+        self.istr |= ISTR_SUSP as u16;
+        self.irq(sys, CNTR_SUSPM);
     }
 
     /// Device->host IN completion for endpoint n (called on a 0/1/2->VALID
@@ -305,7 +357,7 @@ impl Usb {
         self.ep[n] = (self.ep[n] & !(STAT_TX_MASK as u16)) | ((STAT_NAK << 4) as u16);
         self.ep[n] ^= DTOG_TX as u16;
         // ISTR CTR/DIR/EP_ID derive from the endpoint flags on read.
-        self.irq(sys, CNTR_CTRM);
+        self.ctr_irq(sys, n);
         self.traffic(sys);
     }
 
@@ -315,9 +367,30 @@ impl Usb {
     /// Single-buffered endpoints receive via DESC1; double-buffered bulk
     /// endpoints ping-pong between DESC0 (DTOG_RX = 0) and DESC1 (DTOG_RX = 1)
     /// and stay VALID across the first fill (firmware drains at its own pace).
-    fn deliver_rx(&mut self, sys: &System, ep: usize, data: &[u8], is_setup: bool) -> bool {
+    fn deliver_rx(
+        &mut self,
+        sys: &System,
+        ep: usize,
+        data: &[u8],
+        is_setup: bool,
+        addr: Option<u8>,
+    ) -> bool {
         if ep >= 8 || (is_setup && ep != 0) {
             return false;
+        }
+        // Powered-down macro or detached bus: the PHY sees nothing.
+        if self.cntr & CNTR_PDWN != 0 || self.detached {
+            return false;
+        }
+        // Hardware address filter (host must address the device; the
+        // scripted-host default of None accepts, like a correctly
+        // addressed bus).
+        if let Some(a) = addr {
+            let ef = self.daddr & 0x80 != 0;
+            let dev = self.daddr & 0x7F;
+            if (!ef && a != 0) || (ef && a != dev) {
+                return false;
+            }
         }
         // Like silicon, a SETUP transaction is ACKed even while STAT_RX is
         // NAK (the stack only re-arms RX for OUT data/status stages, never
@@ -355,14 +428,22 @@ impl Usb {
         r ^= DTOG_RX; // DATA0/DATA1 sequencing
         self.ep[ep] = r as u16;
         // ISTR CTR/DIR/EP_ID derive from the endpoint flags on read.
-        self.irq(sys, CNTR_CTRM);
+        self.ctr_irq(sys, ep);
         self.traffic(sys);
         true
     }
 
-    /// Host-side injection entry point (SETUP only on EP0).
-    pub fn inject(&mut self, sys: &System, ep: usize, data: &[u8], is_setup: bool) -> bool {
-        self.deliver_rx(sys, ep, data, is_setup)
+    /// Host-side injection entry point (SETUP only on EP0). `addr` selects
+    /// hardware address filtering (None = correctly-addressed host).
+    pub fn inject(
+        &mut self,
+        sys: &System,
+        ep: usize,
+        data: &[u8],
+        is_setup: bool,
+        addr: Option<u8>,
+    ) -> bool {
+        self.deliver_rx(sys, ep, data, is_setup, addr)
     }
 
     fn write_ep(&mut self, sys: &System, n: usize, v: u16) {
@@ -380,15 +461,29 @@ impl Usb {
         if v & CTR_TX == 0 {
             r &= !CTR_TX;
         }
-        // STAT fields: writing 1 toggles each bit.
-        r ^= v & (STAT_TX_MASK | STAT_RX_MASK);
+        // STAT fields: writing 1 toggles each bit. Isochronous endpoints
+        // cannot stall: drop toggle bits that would land in STALL.
+        let mut tm = v & (STAT_TX_MASK | STAT_RX_MASK);
+        if self.is_iso(n) {
+            let after = cur ^ tm;
+            if stat_tx(after) == 1 {
+                tm &= !STAT_TX_MASK;
+            }
+            if stat_rx(after) == 1 {
+                tm &= !STAT_RX_MASK;
+            }
+        }
+        r ^= tm;
         // Direct fields: endpoint address, kind, type.
         r = (r & !(EA_MASK | EP_KIND | EP_TYPE_MASK)) | (v & (EA_MASK | EP_KIND | EP_TYPE_MASK));
         // DTOG bits are read-only (toggled by hardware paths above).
         self.ep[n] = r as u16;
-        // IN completion on a ->VALID STAT_TX transition with CTR_TX clear.
+        // IN completion on a ->VALID STAT_TX transition with CTR_TX clear
+        // (and a host on the bus to ACK it).
         if stat_tx(r) == STAT_VALID && stat_tx(cur) != STAT_VALID && (r & CTR_TX) == 0 {
-            self.complete_in(sys, n);
+            if self.cntr & CNTR_PDWN == 0 && !self.detached {
+                self.complete_in(sys, n);
+            }
         }
     }
 
@@ -397,9 +492,13 @@ impl Usb {
             0x00..=0x1C if offset % 4 == 0 => self.ep[(offset / 4) as usize] as u32,
             0x40 => self.cntr as u32,
             0x44 => self.istr_read(),
-            // FNR: frame number + RXDP (attached). LSOF/LCK read 0: the
-            // host never misses in emulation (no ESOF generation).
-            0x48 => (self.frame as u32) | (1 << 15),
+            // FNR: frame number + RXDP (D+ line: 1 while attached).
+            // LSOF/LCK read 0: the host never misses in emulation (no ESOF
+            // generation while attached; detached freezes SOF outright).
+            0x48 => {
+                (self.frame as u32)
+                    | (if self.detached { 0 } else { 1 << 15 })
+            }
             0x4C => self.daddr as u32,
             0x50 => self.btable as u32,
             _ => 0,
@@ -414,11 +513,10 @@ impl Usb {
             }
             0x40 => {
                 let fresh = value as u16 & 0xFF1F;
-                let was_fres = self.cntr & 1 != 0;
-                let was_fsusp = self.cntr & (1 << 1) != 0;
+                let was_fsusp = self.cntr & CNTR_FSUSP != 0;
                 self.cntr = fresh;
                 // A latched RESET with newly-enabled RESETM pends like
-                // silicon's level-sensitive line: covers FRES release that
+                // silicon's level-sensitive line: covers a bus reset that
                 // landed before the firmware armed its masks (the event
                 // would otherwise be lost forever).
                 if self.istr & (1 << 10) != 0 {
@@ -429,20 +527,21 @@ impl Usb {
                     self.ep = [0; 8];
                     self.istr = 0;
                     self.daddr = 0;
-                } else if was_fres {
-                    // FRES release: attach event; firmware enumeration starts.
-                    self.usb_reset(sys, true);
                 }
+                // NOTE: FRES release is NOT a bus reset (ISTR RESET means SE0
+                // on the wire, sent only by the host via usb_reset): the
+                // endpoints stay closed until a real reset arrives. A latched
+                // RESET re-pends below once the firmware arms its masks.
                 // FSUSP set: force suspend now (SUSP + IRQ via SUSPM).
                 // Re-asserted on every rising edge, even if a cleared
                 // SUSP flag hides an already-suspended state.
-                if fresh & (1 << 1) != 0 && !was_fsusp {
+                if fresh & CNTR_FSUSP != 0 && !was_fsusp {
                     self.suspended = true;
                     self.istr |= ISTR_SUSP as u16;
                     self.irq(sys, CNTR_SUSPM);
                 }
                 // FSUSP cleared while suspended: wake (WKUP + IRQ42).
-                if fresh & (1 << 1) == 0 && was_fsusp && self.suspended {
+                if fresh & CNTR_FSUSP == 0 && was_fsusp && self.suspended {
                     self.suspended = false;
                     self.istr &= !(ISTR_SUSP as u16);
                     self.istr |= ISTR_WKUP as u16;
@@ -511,12 +610,27 @@ impl Peripheral for Usb {
         self.write_reg(sys, offset & !3, value & 0xFFFF);
     }
 
-    fn usb_inject(&mut self, sys: &System, ep: usize, data: &[u8], is_setup: bool) -> bool {
-        self.inject(sys, ep, data, is_setup)
+    fn usb_inject(
+        &mut self,
+        sys: &System,
+        ep: usize,
+        data: &[u8],
+        is_setup: bool,
+        addr: Option<u8>,
+    ) -> bool {
+        self.inject(sys, ep, data, is_setup, addr)
     }
 
     fn usb_bus_reset(&mut self, sys: &System) -> bool {
+        if self.cntr & CNTR_PDWN != 0 {
+            return false; // powered-down macro sees no bus.
+        }
         self.usb_reset(sys, true);
+        true
+    }
+
+    fn usb_detach(&mut self, sys: &System) -> bool {
+        self.detach(sys);
         true
     }
 }

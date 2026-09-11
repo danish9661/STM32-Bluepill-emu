@@ -113,6 +113,12 @@ async function handleMessage(e) {
       usbAck = a;
       break;
     }
+    case 'usbReset': {
+      let a = false;
+      try { a = !!emu.usbBusReset(); } catch {}
+      usbAck = a;
+      break;
+    }
     case 'i2cStart': {
       let a = false;
       try { a = !!emu.i2cInjectStart(msg.channel, msg.addr, !!msg.isRead); } catch {}

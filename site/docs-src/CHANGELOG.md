@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.0.1] — 2026-09-11 — real-stack USB enumeration
+
+### Fixed
+- USB BTABLE stride was 8 APB bytes/endpoint, silicon is 16 (DESC0
+  ADDR/CNT @ +0/+4, DESC1 @ +8/+12; `PMA_ACCESS = 2` spread data) —
+  host-to-device packets landed where no firmware ever looks
+- PMA window is 1024 B, model had 512 — buffers at PMA word ≥ 128
+  (e.g. Arduino CDC-IN @ word 288) were silently dropped
+- SETUP is always ACKed on F1, even while NAK (the ST stack never re-arms
+  RX after status-IN); enumeration died right after SET_ADDRESS
+- SOF frames are bus activity: transfer-idle auto-suspend wedged
+  enumeration (`dev_state` stuck SUSPENDED → SET_CONFIG CtlError);
+  suspend is now FSUSP-forced only
+- FRES release is not a bus reset (ISTR RESET means SE0 on the wire):
+  the page enumerator now sends a real bus reset first (also fixes a
+  pre-boot SETUP race that wedged enumeration permanently)
+- CNTR FSUSP is bit 3, not bit 1 (bit 1 is PDWN) — model and tests
+  shared the off-by-one, which masked PDWN gating entirely
+
+### Added
+- Real-stack USB proof: `tests/arduino_usb_serial/` (STM32duino USBSerial
+  CDC-ACM) fully enumerates against a scripted host — descriptors,
+  address, config, line coding/state, banner + bulk echo byte-exact
+  (`tests/test_usb_serial.mjs`, 11/11, wired into CI)
+- `usb_serial` demo-page preset (real Arduino stack, EP1-OUT/EP2-IN/EP3-CMD)
+  with host-side enumeration retries, bus-reset flow, and stream-tail echo
+  matching (the sketch echoes byte-by-byte); `usb_cdc` enumerator shared
+- USB depth, no open gaps: isochronous no-STALL + HP-vector (19) CTR
+  routing, DADDR hardware address filtering (optional `addr` on injects),
+  PDWN macro gating, detach API (`usbDetach()`; reset reattaches),
+  FNR RXDP follows attach state
+
 ## [3.0.0] — 2026-09-10 — multi-board demos, bench UI, protocol gaps
 
 ### Added

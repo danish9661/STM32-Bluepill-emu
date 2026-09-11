@@ -42,7 +42,9 @@ const injectOut = async (ep, bytes) => {
 const settle = (n = 3) => { for (let i = 0; i < n; i++) mcu.step(1000000); };
 const hex = (a) => a.map(b => b.toString(16).padStart(2, '0')).join(' ');
 
-mcu.step(5000000); // boot: FRES release -> RESET -> EP arming
+mcu.step(5000000); // boot to attach (FRES release alone is not a reset)
+emu.usbBusReset(); // host SE0: RESET event -> firmware arms EPs
+settle();
 
 // 1. GET_DESCRIPTOR DEVICE (18 bytes, single packet)
 ok(await injectSetup([0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x12, 0x00]), 'device desc SETUP accepted');

@@ -486,23 +486,37 @@ pub fn usb_bus_reset() -> bool {
 }
 
 /// Inject a USB SETUP packet (8 bytes) into EP0's RX buffer (host -> device).
-/// Returns false when NAKed (endpoint not armed VALID) or the address is bad.
+/// `addr` selects hardware address filtering (None = correctly-addressed
+/// host). Returns false when NAKed/filtered or the address is bad.
 #[wasm_bindgen]
-pub fn usb_inject_setup(data: &[u8]) -> bool {    if data.len() != 8 {
+pub fn usb_inject_setup(data: &[u8], addr: Option<u8>) -> bool {
+    if data.len() != 8 {
         return false;
     }
     match try_sys() {
-        Some(sys) => sys.p.usb_inject(sys, 0, data, true),
+        Some(sys) => sys.p.usb_inject(sys, 0, data, true, addr),
         None => false,
     }
 }
 
 /// Inject a USB OUT packet into an endpoint's RX buffer (host -> device).
-/// Returns false when NAKed (endpoint not armed VALID) or the address is bad.
+/// `addr` selects hardware address filtering (None = correctly-addressed
+/// host). Returns false when NAKed/filtered or the address is bad.
 #[wasm_bindgen]
-pub fn usb_inject_out(ep: u8, data: &[u8]) -> bool {
+pub fn usb_inject_out(ep: u8, data: &[u8], addr: Option<u8>) -> bool {
     match try_sys() {
-        Some(sys) => sys.p.usb_inject(sys, ep as usize, data, false),
+        Some(sys) => sys.p.usb_inject(sys, ep as usize, data, false, addr),
+        None => false,
+    }
+}
+
+/// Host disconnect (pull-up off): tokens stop, IN never completes, SOF
+/// freezes; the next bus reset reattaches. Returns false with no USB
+/// peripheral mapped.
+#[wasm_bindgen]
+pub fn usb_detach() -> bool {
+    match try_sys() {
+        Some(sys) => sys.p.usb_detach(sys),
         None => false,
     }
 }

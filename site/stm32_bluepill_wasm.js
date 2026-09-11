@@ -1029,29 +1029,44 @@ export function usb_bus_reset() {
 }
 
 /**
- * Inject a USB OUT packet into an endpoint's RX buffer (host -> device).
- * Returns false when NAKed (endpoint not armed VALID) or the address is bad.
- * @param {number} ep
- * @param {Uint8Array} data
+ * Host disconnect (pull-up off): tokens stop, IN never completes, SOF
+ * freezes; the next bus reset reattaches. Returns false with no USB
+ * peripheral mapped.
  * @returns {boolean}
  */
-export function usb_inject_out(ep, data) {
+export function usb_detach() {
+    const ret = wasm.usb_detach();
+    return ret !== 0;
+}
+
+/**
+ * Inject a USB OUT packet into an endpoint's RX buffer (host -> device).
+ * `addr` selects hardware address filtering (None = correctly-addressed
+ * host). Returns false when NAKed/filtered or the address is bad.
+ * @param {number} ep
+ * @param {Uint8Array} data
+ * @param {number | null} [addr]
+ * @returns {boolean}
+ */
+export function usb_inject_out(ep, data, addr) {
     const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.usb_inject_out(ep, ptr0, len0);
+    const ret = wasm.usb_inject_out(ep, ptr0, len0, isLikeNone(addr) ? 0xFFFFFF : addr);
     return ret !== 0;
 }
 
 /**
  * Inject a USB SETUP packet (8 bytes) into EP0's RX buffer (host -> device).
- * Returns false when NAKed (endpoint not armed VALID) or the address is bad.
+ * `addr` selects hardware address filtering (None = correctly-addressed
+ * host). Returns false when NAKed/filtered or the address is bad.
  * @param {Uint8Array} data
+ * @param {number | null} [addr]
  * @returns {boolean}
  */
-export function usb_inject_setup(data) {
+export function usb_inject_setup(data, addr) {
     const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.usb_inject_setup(ptr0, len0);
+    const ret = wasm.usb_inject_setup(ptr0, len0, isLikeNone(addr) ? 0xFFFFFF : addr);
     return ret !== 0;
 }
 function __wbg_get_imports() {

@@ -529,6 +529,7 @@ footer .foot-tag {
                     </optgroup>
                     <optgroup label="USB &amp; systems">
                     <option value="usb_cdc">USB CDC Serial (enumerate + echo)</option>
+                    <option value="usb_serial">USB Serial, real Arduino stack (enumerate + echo)</option>
                     <option value="mini_rtos">Mini-RTOS (PendSV preemptive tasks)</option>
                     </optgroup>
                     <optgroup label="Boards">
@@ -852,6 +853,8 @@ let usbInbox = [];         // collected [ep, bytes[]]
 let usbEnum = null;        // active enumeration {step, frames, cfg}
 let usbEnumerated = false;
 let usbEchoWait = null;    // pending echo {text, frames}
+let usbEchoStream = '';     // accumulated echo-endpoint bytes for tail matching
+let usbEchoEp = 1;          // bulk-IN endpoint the echo arrives on (EP1 for usb_cdc, EP2 for usb_serial)
 const USB_S_DEV = [0x80,0x06,0x00,0x01,0x00,0x00,0x12,0x00];
 const USB_S_ADDR = [0x00,0x05,0x05,0x00,0x00,0x00,0x00,0x00];
 const USB_S_CFG = [0x80,0x06,0x00,0x02,0x00,0x00,68,0x00];
@@ -865,6 +868,10 @@ function usbTake(ep) {
 function usbSendSetup(bytes) {
   if (useWorker && worker) { worker.postMessage({ type: 'usbSetup', bytes }); return null; }
   try { return emu ? !!emu.usbInjectSetup(bytes) : false; } catch { return false; }
+}
+function usbSendReset() {
+  if (useWorker && worker) { worker.postMessage({ type: 'usbReset' }); return null; }
+  try { return emu ? !!emu.usbBusReset() : false; } catch { return false; }
 }
 function usbSendOut(ep, bytes) {
   if (useWorker && worker) { worker.postMessage({ type: 'usbOut', ep, bytes }); return null; }
@@ -897,16 +904,17 @@ function usbEnumAdvance() {
     st.frames++;
     let d;
     switch (st.step) {
-      case 0: d = usbTake(0); if (d && d.length === 18) { log('USB: device descriptor (18B, CDC-ACM).', 't-ok'); usbSendOut(0, []); st.step = 1; st.frames = 0; } break;
+      case -1: if (st.frames > 10) { usbSendSetup(USB_S_DEV); st.step = 0; st.frames = 0; } break;
+      case 0: d = usbTake(0); if (d && d.length === 18) { log('USB: device descriptor (18B, CDC-ACM).', 't-ok'); usbSendOut(0, []); st.step = 1; st.frames = 0; } else if (st.frames % 60 === 0) { usbSendSetup(USB_S_DEV); } else if (st.frames > 600) { usbSendReset(); st.step = -1; st.frames = 0; } break;
       case 1: if (st.frames > 3) { usbSendSetup(USB_S_ADDR); st.step = 2; st.frames = 0; } break;
       case 2: d = usbTake(0); if (d && d.length === 0) { log('USB: address 5 assigned.', 't-ok'); usbSendSetup(USB_S_CFG); st.step = 3; st.frames = 0; st.cfg = []; } break;
-      case 3: d = usbTake(0); if (d) { st.cfg = st.cfg.concat(d); if (st.cfg.length >= 68) { log(`USB: config descriptor (${st.cfg.length}B, 2 packets).`, 't-ok'); usbSendOut(0, []); st.step = 4; st.frames = 0; } } break;
+      case 3: d = usbTake(0); if (d) { st.cfg = st.cfg.concat(d); const need = st.cfg.length >= 4 ? (st.cfg[2] | (st.cfg[3] << 8)) : 68; if (st.cfg.length >= need) { log(`USB: config descriptor (${st.cfg.length}B, 2 packets).`, 't-ok'); usbSendOut(0, []); st.step = 4; st.frames = 0; } } break;
       case 4: if (st.frames > 3) { usbSendSetup(USB_S_SETCFG); st.step = 5; st.frames = 0; } break;
       case 5: d = usbTake(0); if (d) { log('USB: configured.', 't-ok'); usbSendSetup(USB_S_LINE); st.step = 6; st.frames = 0; } break;
       case 6: if (st.frames > 3) { usbSendOut(0, [0x00,0xC2,0x01,0x00,0x00,0x00,0x08]); st.step = 7; st.frames = 0; } break;
       case 7: d = usbTake(0); if (d) { log('USB: line coding 115200 8N1.', 't-ok'); usbSendSetup(USB_S_STATE); st.step = 8; st.frames = 0; } break;
       case 8: d = usbTake(0); if (d) {
-        log('USB: enumerated — CDC serial live; EP1 echoes.', 't-ok');
+        log(`USB: enumerated — CDC serial live; EP${usbEchoEp} echoes.`, 't-ok');
         $('usbStatus').textContent = 'enumerated (addr 5, CDC-ACM)';
         $('usbEchoInput').disabled = false; $('usbEchoBtn').disabled = false;
         usbEnumerated = true; usbEnum = null;
@@ -916,9 +924,20 @@ function usbEnumAdvance() {
   }
   if (usbEchoWait) {
     const w = usbEchoWait; w.frames++;
-    const e = usbTake(1);
-    if (e) { log(`USB EP1 echo: "${String.fromCharCode(...e)}"`, 't-out'); usbEchoWait = null; }
+    // Drain every pending packet on the echo endpoint: firmware may split
+    // the echo (the Arduino sketch writes byte-by-byte), so match against
+    // the accumulated stream tail instead of single packets. Unsolicited
+    // device output (e.g. the USBSerial banner) logs as rx.
+    let p;
+    while ((p = usbTake(usbEchoEp)) !== null) {
+      const s = String.fromCharCode(...p);
+      usbEchoStream += s;
+      if (usbEchoStream.length > 256) usbEchoStream = usbEchoStream.slice(-256);
+      log(`USB EP${usbEchoEp} rx: "${s}"`, 't-out');
+    }
+    if (usbEchoStream.endsWith(w.text)) { log(`USB EP${usbEchoEp} echo: "${w.text}"`, 't-out'); usbEchoWait = null; }
     else if (w.frames > 600) { log('USB: echo timeout.', 't-err'); usbEchoWait = null; }
+    else if (w.frames % 120 === 0) { usbSendOut(1, Array.from(w.text).map(c => c.charCodeAt(0) & 0xFF).slice(0, 64)); }
   }
 }
 
@@ -1724,8 +1743,16 @@ $('loadPresetBtn').addEventListener('click', async () => {
             const buf = await fetch('arduino_usb_cdc.elf').then(r => r.arrayBuffer());
             await initEmulator(new Uint8Array(buf), 'arduino_usb_cdc.elf (USB CDC serial)', {}, false, { usbListen: true });
             usbListenMain = true;
+            usbEchoEp = 1;
             $('usbCard').hidden = false;
             log('Press Run — then Enumerate USB device: the page plays host (descriptors, address, line coding) and EP1 echoes.', 't-in');
+        } else if (preset === 'usb_serial') {
+            const buf = await fetch('arduino_usb_serial.elf').then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(buf), 'arduino_usb_serial.elf (USBSerial, real STM32duino stack)', {}, false, { usbListen: true });
+            usbListenMain = true;
+            usbEchoEp = 2;
+            $('usbCard').hidden = false;
+            log('Press Run — then Enumerate USB device: the page plays host against Arduino\u2019s real USB stack (EP1-OUT/EP2-IN/EP3-CMD) and EP2 echoes.', 't-in');
         } else if (preset === 'pwm_wave') {
             const buf = await fetch('arduino_pwm_wave.elf').then(r => r.arrayBuffer());
             await initEmulator(new Uint8Array(buf), 'arduino_pwm_wave.elf (TIM DMA-burst PWM wave)');
@@ -1790,12 +1817,15 @@ $('loadPresetBtn').addEventListener('click', async () => {
 const btnWidget = $('btn-widget');
 $('usbEnumBtn').addEventListener('click', () => {
     if (!running) { log('Press Run first — the device must be polling.', 't-err'); return; }
-    usbInbox = []; usbEnumerated = false; usbEchoWait = null;
+    usbInbox = []; usbEnumerated = false; usbEchoWait = null; usbEchoStream = '';
     $('usbStatus').textContent = 'enumerating…';
     $('usbEchoInput').disabled = true; $('usbEchoBtn').disabled = true;
-    usbSendSetup(USB_S_DEV);
-    usbEnum = { step: 0, frames: 0, cfg: [] };
-    log('USB: host enumeration started (device descriptor request).', 't-in');
+    // Real hosts reset the bus on attach before enumerating (FRES release
+    // alone is not a reset); the firmware may still be booting, so -1
+    // settles briefly before the first SETUP.
+    usbSendReset();
+    usbEnum = { step: -1, frames: 0, cfg: [] };
+    log('USB: host bus reset sent; enumeration starts on reset settle.', 't-in');
 });
 const usbEchoSend = () => {
     const v = $('usbEchoInput').value;
@@ -1803,6 +1833,7 @@ const usbEchoSend = () => {
     const bytes = Array.from(v).map(c => c.charCodeAt(0) & 0xFF).slice(0, 64);
     usbSendOut(1, bytes);
     usbEchoWait = { text: v, frames: 0 };
+    usbEchoStream = '';
     $('usbEchoInput').value = '';
 };
 $('usbEchoBtn').addEventListener('click', usbEchoSend);

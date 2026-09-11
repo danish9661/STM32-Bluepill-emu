@@ -497,6 +497,37 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
   (`periphRead` on SRAM returns bus zeros — burned an hour on phantom
   `dev_state=0`), check `drainEvents` discriminants before blaming the model.
 
+### 41. USB gaps closed + FRES truth + serial page preset [this sprint]
+- **CNTR FSUSP is bit 3, PDWN is bit 1** (`src/peripherals/usb.rs`): the
+  old tests keyed FSUSP on bit 1 (silicon PDWN) — worked only because no
+  PDWN gate existed. Fixed the bit in model + tests; PDWN now genuinely
+  gates (no RX/TX/IRQs/SOF, FRES release under PDWN raises nothing).
+- **Isochronous depth**: STALL writes dropped on ISO endpoints, CTR pends
+  HP vector 19 (LP 20 keeps the rest; both funnel to one HAL handler).
+- **DADDR filter**: optional `addr` on `usb_inject_setup/out` (absent =
+  correctly-addressed host); wrong-address packets drop like silicon.
+- **Detach**: new `usb_detach()` export (+`usbDetach()` JS, `.d.ts`) —
+  tokens stop, IN never completes (VALID sticks), SOF freezes, FNR RXDP
+  clears; `usb_bus_reset()` reattaches (also wakes suspend).
+- **FRES release is NOT a bus reset** (ISTR RESET = SE0 on the wire):
+  removed the pseudo-reset — pre-boot SETUPs raced it and wedged
+  enumeration permanently (proven headless: inject-from-frame-0 never
+  recovered). Page enumerator now sends a real bus reset first (new
+  worker `usbReset` case + step -1 settle + step-0 reset fallback),
+  retries SETUPs host-style, parses config `wTotalLength` (Arduino: 67B).
+- **Page `usb_serial` preset** (`site/index.html`): real STM32duino
+  firmware, EP2-IN echo mapping (`usbEchoEp`), stream-tail echo match
+  (the sketch echoes byte-by-byte — exact per-packet match could never
+  hit), banner-vs-echo disambiguation. Browser: usb_cdc + usb_serial
+  green; `tests/test_browser_demos.mjs` covers the new preset.
+- **Release**: CHANGELOG 3.0.1; `test_usb_serial.mjs` wired into CI.
+- **Verified**: `test_all.mjs` 623/623, usb_cdc 22/22, usb_serial 11/11,
+  stm32f1_api 9/9, wasm rebuilt pinned + `site/` synced.
+- Remaining USB non-gaps (documented): F105 needs a whole second USB IP
+  (Synopsys OTG_FS — different peripheral, like ETH: unmapped by design),
+  ESOF never fires under an always-attached host, SOF-gating of ISO is
+  firmware-managed (shared bulk mechanics suffice — proven by enumeration).
+
 
 
 ## Next Phase — Long-term Optimizations

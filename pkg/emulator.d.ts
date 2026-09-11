@@ -195,10 +195,12 @@ export interface BluepillEmulator {
 
   /** Inject CAN message; returns true if accepted. */
   canInjectMessage(addr: number, tir: number, tdtr: number, tdlr: number, tdhr: number): boolean;
-  /** Inject a USB SETUP packet (8 bytes) into EP0. Returns false when NAKed. */
-  usbInjectSetup(bytes: Uint8Array): boolean;
-  /** Inject a USB OUT packet into an endpoint. Returns false when NAKed. */
-  usbInjectOut(ep: number, bytes: Uint8Array): boolean;
+  /** Inject a USB SETUP packet (8 bytes) into EP0. addr selects hardware address filtering (omit = correctly addressed). Returns false when NAKed/filtered. */
+  usbInjectSetup(bytes: Uint8Array, addr?: number): boolean;
+  /** Inject a USB OUT packet into an endpoint. addr selects hardware address filtering (omit = correctly addressed). Returns false when NAKed/filtered. */
+  usbInjectOut(ep: number, bytes: Uint8Array, addr?: number): boolean;
+  /** Host disconnect (pull-up off): tokens stop, IN stalls, SOF freezes; next bus reset reattaches. */
+  usbDetach(): boolean;
 
   // ── Bus observers ─────────────────────────────────────────────────────────
 

@@ -8,7 +8,7 @@ const { init, init_svd, periph_read, periph_write, tick, step_batch, has_pending
         is_watchdog_reset_requested, can_inject_message, gpio_set_slew, raise_fault,
         add_fsmc_bank, gpio_set_analog, adc_set_rc_tau, register_js_peripheral,
         add_sd_card, reset_ext_devices, rcc_sysclk_hz, rcc_fail_hse, add_i2c_eeprom,
-        drain_events, usb_inject_setup, usb_inject_out, pwm_duty,
+        drain_events, usb_inject_setup, usb_inject_out, usb_bus_reset, usb_detach, pwm_duty,
         i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop, i2c_inject_alert,
         add_lcd, lcd_fb, adc_set_internal, pwr_mode,
         gpio_take_pin_events } = periph;
@@ -2466,10 +2466,15 @@ const C_RESETM = 1 << 10, C_CTRM = 1 << 15;
 assert_eq(periph_read(USB + U_EP0, 4), 0, 'USB EP0R reset 0');
 assert_eq(periph_read(USB + U_CNTR, 4), 3, 'USB CNTR reset FRES|PDWN');
 
-// FRES release -> RESET event + IRQ20 (RESETM), endpoints/DADDR cleared
-periph_write(0xE000E100, 4, 1 << 20); // ISER0: USB LP IRQ
+// FRES release is NOT a bus reset (ISTR RESET means SE0 on the wire, sent
+// only by the host): attach raises no event and pends nothing.
+periph_write(0xE000E100, 4, (1 << 20) | (1 << 19)); // ISER0: USB LP + HP IRQs
 periph_write(USB + U_CNTR, 4, C_RESETM);
-assert_eq(periph_read(USB + U_ISTR, 4) & I_RESET, I_RESET, 'USB RESET flag on FRES release');
+assert_eq(periph_read(USB + U_ISTR, 4) & I_RESET, 0, 'USB no RESET on FRES release');
+assert(!has_pending_interrupt(), 'USB no IRQ on FRES release');
+// Explicit host bus reset raises RESET + IRQ20 (RESETM)
+assert_eq(usb_bus_reset(), true, 'USB bus reset accepted');
+assert_eq(periph_read(USB + U_ISTR, 4) & I_RESET, I_RESET, 'USB RESET flag on bus reset');
 assert(has_pending_interrupt() && get_next_pending_interrupt() === 20,
     'USB RESET pends IRQ 20');
 clear_current_interrupt();
@@ -2578,9 +2583,14 @@ assert_eq(usb_inject_out(1, [5, 6]), true, 'USB OUT accepted after re-arm');
 assert_eq(periph_read(USB + U_EP1, 4) & 0x4000, 0, 'USB EP1 DTOG_RX toggled twice = 0');
 clear_current_interrupt();
 periph_write(USB + U_ISTR, 4, 0);
+// Drain stale pendings: NVIC pending is level (a second OUT inject re-sets
+// an already-set bit), so bulk CTRs would otherwise leak into the ISO
+// vector asserts below via the fairness rotation.
+let _du = 0;
+while (get_next_pending_interrupt() !== -255 && _du++ < 100) { clear_current_interrupt(); }
 
-// Isochronous endpoints move data exactly like bulk (no SOF-gating in the
-// model; TYPE is stored, mechanics shared). EP2 as ISO OUT then ISO IN.
+// Isochronous endpoints: bulk-shared data mechanics, but no STALL and CTR
+// pends the high-priority vector (IRQ 19). EP2 as ISO OUT then ISO IN.
 // (Toggle writes are relative: compute the mask from live STAT_RX.)
 periph_write(U_PMA + 40, 2, 0x50);  // ADDR2_RX (word -> APB 160, 4-stride)
 periph_write(U_PMA + 44, 2, 0x8800); // COUNT2_RX 64B blocks
@@ -2589,9 +2599,20 @@ const ep2cur = periph_read(USB + U_EP2, 4);
 periph_write(USB + U_EP2, 4, 0x0402 | ((((ep2cur >> 12) & 3) ^ 3) << 12)); // EA2 + TYPE_ISO + RX->VALID
 }
 assert_eq(periph_read(USB + U_EP2, 4) & 0x0600, 0x0400, 'USB EP2 TYPE_ISO stored');
+// STALL is a no-op on isochronous endpoints (no handshake to stall);
+// TX-side attempt leaves DISABLED in place and RX stays armed.
+periph_write(USB + U_EP2, 4, 0x0402 | 0x0010); // TX DISABLED->STALL attempt
+assert_eq(periph_read(USB + U_EP2, 4) & 0x30, 0x00, 'USB ISO STAT_TX ignores STALL');
+assert_eq(periph_read(USB + U_EP2, 4) & 0x3000, 0x3000, 'USB ISO RX stays armed');
 assert_eq(usb_inject_out(2, [0xAA, 0xBB]), true, 'USB ISO OUT accepted when armed');
 assert_eq(periph_read(U_PMA + 160, 1), 0xAA, 'USB ISO OUT lands in RX buffer');
 assert_eq(periph_read(USB + U_EP2, 4) & 0x8000, 0x8000, 'USB EP2 CTR_RX after ISO OUT');
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 19,
+    'USB ISO OUT CTR pends HP IRQ 19');
+clear_current_interrupt();
+// RX-side STALL attempt (now NAK) is dropped too.
+periph_write(USB + U_EP2, 4, 0x0402 | 0x3000); // RX NAK->STALL attempt
+assert_eq(periph_read(USB + U_EP2, 4) & 0x3000, 0x2000, 'USB ISO STAT_RX ignores STALL');
 periph_write(U_PMA + 32, 2, 0x58);  // ADDR2_TX (word -> APB 176, 4-stride)
 periph_write(U_PMA + 176, 1, 0x5A);
 periph_write(U_PMA + 36, 2, 1);      // COUNT2_TX = 1
@@ -2607,6 +2628,8 @@ for (let i = 0; i < iev.length;) {
     } else break;
 }
 assert_eq(isoIn !== null && isoIn[0] === 2 && isoIn[1] === 1 && isoIn[2] === '90', true, 'USB ISO IN completion drains UsbIn');
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 19,
+    'USB ISO IN CTR pends HP IRQ 19');
 clear_current_interrupt();
 periph_write(USB + U_ISTR, 4, 0);
 
@@ -2614,6 +2637,18 @@ periph_write(USB + U_ISTR, 4, 0);
 periph_write(USB + U_DADDR, 4, 0x8A);
 assert_eq(periph_read(USB + U_DADDR, 4), 0x8A, 'USB DADDR ADD+EF');
 assert_eq(periph_read(USB + 0x48, 4) & 0x8000, 0x8000, 'USB FNR RXDP attached');
+
+// DADDR hardware address filter (device is addr 10, EF set)
+periph_write(USB + U_EP0, 4, 0x3200); // retire stale CTRs
+assert_eq(usb_inject_setup(setup, 11), false, 'USB SETUP to wrong address filtered');
+assert_eq(usb_inject_setup(setup, 10), true, 'USB SETUP to own address accepted');
+periph_write(USB + U_EP0, 4, 0x3200);
+assert_eq(usb_inject_setup(setup), true, 'USB SETUP without addr accepted (legacy host)');
+periph_write(USB + U_EP0, 4, 0x3200);
+periph_write(USB + U_DADDR, 4, 0); // unaddressed: only addr 0 answers
+assert_eq(usb_inject_setup(setup, 5), false, 'USB SETUP filtered while unaddressed');
+assert_eq(usb_inject_setup(setup, 0), true, 'USB SETUP to addr 0 accepted while unaddressed');
+periph_write(USB + U_EP0, 4, 0x3200);
 
 // SOF engine: 1ms frames (72000 instr) bump FNR + SOF flag (ISTR.9)
 periph_write(USB + U_ISTR, 4, 0);
@@ -2639,7 +2674,7 @@ periph_write(0xE000E100 + 0x04, 4, 1 << 10); // ISER1: USB wakeup IRQ 42 enable
 periph_write(USB + U_CNTR, 4, (1 << 11) | (1 << 12)); // SUSPM + WKUPM
 _d = 0;
 while (get_next_pending_interrupt() !== -255 && _d++ < 100) { clear_current_interrupt(); }
-periph_write(USB + U_CNTR, 4, (1 << 11) | (1 << 12) | (1 << 1)); // +FSUSP
+periph_write(USB + U_CNTR, 4, (1 << 11) | (1 << 12) | (1 << 3)); // +FSUSP
 assert_eq(periph_read(USB + U_ISTR, 4) & (1 << 11), 1 << 11, 'USB ISTR SUSP on FSUSP');
 assert(has_pending_interrupt() && get_next_pending_interrupt() === 20,
     'USB SUSP pends IRQ 20 with SUSPM');
@@ -2665,13 +2700,69 @@ assert_eq(usb_inject_out(1, [0xAA]), true, 'USB OUT accepted while awake');
 assert_eq(periph_read(USB + U_ISTR, 4) & ((1 << 11) | (1 << 12)), 0, 'USB no SUSP/WKUP on plain traffic');
 periph_write(USB + U_ISTR, 4, 0);
 // Remote wakeup: RESUME pulse (CNTR.4) self-clears after a frame + WKUP
-periph_write(USB + U_CNTR, 4, (1 << 11) | (1 << 12) | (1 << 1)); // FSUSP again
-periph_write(USB + U_CNTR, 4, (1 << 11) | (1 << 12) | (1 << 1) | (1 << 4)); // +RESUME
+periph_write(USB + U_CNTR, 4, (1 << 11) | (1 << 12) | (1 << 3)); // FSUSP again
+periph_write(USB + U_CNTR, 4, (1 << 11) | (1 << 12) | (1 << 3) | (1 << 4)); // +RESUME
 step_batch(72000);
 assert_eq(periph_read(USB + U_CNTR, 4) & (1 << 4), 0, 'USB RESUME self-clears after a frame');
 assert_eq(periph_read(USB + U_ISTR, 4) & (1 << 12), 1 << 12, 'USB WKUP after RESUME pulse');
 periph_write(USB + U_ISTR, 4, 0);
 periph_write(USB + U_CNTR, 4, 0);
+
+// PDWN gates the macro: injects drop, resets ignored, SOF frozen.
+// Retire stale EP CTRs first (ISTR.CTR is derived live from EP flags).
+periph_write(USB + U_EP0, 4, 0x3200);
+periph_write(USB + U_EP1, 4, 0x0001);
+periph_write(USB + U_EP2, 4, 0x0402);
+periph_write(USB + U_ISTR, 4, 0);
+let _dp = 0;
+while (get_next_pending_interrupt() !== -255 && _dp++ < 100) { clear_current_interrupt(); }
+periph_write(USB + U_CNTR, 4, (1 << 1)); // PDWN only
+assert_eq(usb_inject_out(1, [1]), false, 'USB OUT dropped while PDWN');
+assert_eq(usb_bus_reset(), false, 'USB bus reset ignored while PDWN');
+const fnrP = periph_read(USB + 0x48, 4);
+step_batch(72000);
+assert_eq(periph_read(USB + 0x48, 4), fnrP, 'USB FNR frozen while PDWN');
+assert_eq(periph_read(USB + U_ISTR, 4), 0, 'USB no IRQ flags while PDWN');
+periph_write(USB + U_CNTR, 4, 1 | (1 << 1)); // FRES + PDWN
+periph_write(USB + U_CNTR, 4, (1 << 1));     // release FRES under PDWN
+assert_eq(periph_read(USB + U_ISTR, 4) & I_RESET, 0, 'USB no RESET on FRES release while PDWN');
+periph_write(USB + U_CNTR, 4, 0); // power back up (FRES release raises RESET)
+periph_write(USB + U_ISTR, 4, 0);
+_d = 0;
+while (get_next_pending_interrupt() !== -255 && _d++ < 100) { clear_current_interrupt(); }
+
+// Detach: tokens stop, IN never completes, SOF freezes; bus reset reattaches
+reset();
+periph_write(0xE000E100, 4, (1 << 20) | (1 << 19)); // ISER0: USB LP + HP IRQs
+periph_write(USB + U_CNTR, 4, C_RESETM | C_CTRM | (1 << 11)); // RESETM+CTRM+SUSPM
+periph_write(USB + U_ISTR, 4, 0);
+assert_eq(usb_detach(), true, 'USB detach accepted');
+assert_eq(periph_read(USB + U_ISTR, 4) & (1 << 11), 1 << 11, 'USB ISTR SUSP on detach');
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 20,
+    'USB detach SUSP pends IRQ 20');
+clear_current_interrupt();
+assert_eq(usb_inject_out(1, [1]), false, 'USB OUT dropped while detached');
+const fnrF = periph_read(USB + 0x48, 4);
+step_batch(72000);
+assert_eq(periph_read(USB + 0x48, 4), fnrF, 'USB FNR frozen while detached');
+assert_eq(usb_bus_reset(), true, 'USB bus reset reattaches');
+const fnrD = periph_read(USB + 0x48, 4);
+step_batch(72000);
+assert_eq(periph_read(USB + 0x48, 4) & 0x7FF, ((fnrD & 0x7FF) + 1) & 0x7FF, 'USB SOF resumes after reattach');
+assert_eq(periph_read(USB + 0x48, 4) & 0x8000, 0x8000, 'USB FNR RXDP set after reattach');
+assert_eq(periph_read(USB + U_ISTR, 4) & I_RESET, I_RESET, 'USB RESET flag on reattach reset');
+// IN never completes while detached: VALID sticks, no CTR, no event
+assert_eq(usb_detach(), true, 'USB detach again accepted');
+periph_write(USB + U_EP0, 4, 0x3200); // EP0 control
+periph_write(U_PMA + 0, 2, 0x30);   // ADDR0_TX
+periph_write(U_PMA + 4, 2, 1);      // COUNT0_TX = 1
+periph_write(U_PMA + 96, 1, 0x5A);
+periph_write(USB + U_EP0, 4, 0x0030); // DISABLED -> VALID
+assert_eq(periph_read(USB + U_EP0, 4) & 0x30, 0x30, 'USB STAT_TX stays VALID while detached');
+assert_eq(periph_read(USB + U_EP0, 4) & 0x80, 0, 'USB no CTR_TX while detached');
+assert_eq(drain_events().length, 0, 'USB no UsbIn while detached');
+assert_eq(usb_bus_reset(), true, 'USB second bus reset reattaches');
+assert_eq(periph_read(USB + U_ISTR, 4) & I_RESET, I_RESET, 'USB RESET flag on second reattach');
 
 // Double-buffered bulk EP3 OUT: DTOG_RX ping-pongs between DESC0
 // (DTOG=0) and DESC1 (DTOG=1); STAT stays VALID across fills.

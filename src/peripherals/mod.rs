@@ -64,13 +64,27 @@ pub trait Peripheral {
     /// Tamper-pin (PC13) level edge for the backup domain. Default: unhandled.
     fn bkp_tamper(&mut self, _sys: &System, _rising: bool) -> bool { false }
     /// Host-side USB OUT/SETUP delivery into endpoint `ep` (`is_setup` only
-    /// legal on EP0). Returns false when NAKed. Default: unhandled.
-    fn usb_inject(&mut self, _sys: &System, _ep: usize, _data: &[u8], _is_setup: bool) -> bool { false }
+    /// legal on EP0). `addr` selects hardware address filtering (None =
+    /// correctly-addressed host). Returns false when NAKed/filtered.
+    /// Default: unhandled.
+    fn usb_inject(
+        &mut self,
+        _sys: &System,
+        _ep: usize,
+        _data: &[u8],
+        _is_setup: bool,
+        _addr: Option<u8>,
+    ) -> bool {
+        false
+    }
     /// Host-driven USB bus reset (SE0): device address clears, endpoints
     /// reset, RESET event + IRQ (what a real plug-in/enumeration sends;
-    /// FRES release alone lands before firmware arms its masks).
+    /// FRES release alone is NOT a reset — only this is).
     /// Default: unhandled.
     fn usb_bus_reset(&mut self, _sys: &System) -> bool { false }
+    /// Host disconnect (pull-up off): tokens stop, IN never completes, SOF
+    /// freezes; the next bus reset reattaches. Default: unhandled.
+    fn usb_detach(&mut self, _sys: &System) -> bool { false }
     /// Host-side I2C slave transactions (this peripheral addressed as slave).
     /// Defaults: unhandled (NACK / no data).
     fn i2c_slave_start(&mut self, _sys: &System, _addr: u16, _is_read: bool) -> bool { false }
@@ -720,9 +734,18 @@ impl Peripherals {
     }
 
     /// Host-side USB delivery into an endpoint's RX buffer (OUT/SETUP).
-    pub fn usb_inject(&self, sys: &System, ep: usize, data: &[u8], is_setup: bool) -> bool {
+    pub fn usb_inject(
+        &self,
+        sys: &System,
+        ep: usize,
+        data: &[u8],
+        is_setup: bool,
+        addr: Option<u8>,
+    ) -> bool {
         if let Some(slot) = self.bus.borrow().get(0x4000_5C00) {
-            slot.peripheral.borrow_mut().usb_inject(sys, ep, data, is_setup)
+            slot.peripheral
+                .borrow_mut()
+                .usb_inject(sys, ep, data, is_setup, addr)
         } else {
             false
         }
@@ -732,6 +755,15 @@ impl Peripherals {
     pub fn usb_bus_reset(&self, sys: &System) -> bool {
         if let Some(slot) = self.bus.borrow().get(0x4000_5C00) {
             slot.peripheral.borrow_mut().usb_bus_reset(sys)
+        } else {
+            false
+        }
+    }
+
+    /// Host disconnect (pull-up off) on the FS-device peripheral.
+    pub fn usb_detach(&self, sys: &System) -> bool {
+        if let Some(slot) = self.bus.borrow().get(0x4000_5C00) {
+            slot.peripheral.borrow_mut().usb_detach(sys)
         } else {
             false
         }
