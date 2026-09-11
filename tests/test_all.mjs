@@ -1904,9 +1904,9 @@ periph_write(FSMC_BCR1, 4, 0x1);                // MBKEN only
 periph_write(NE1, 4, 0xDEADBEEF);
 assert_eq(periph_read(NE1, 4), 0x4433AB11, 'FSMC NE1 write ignored without WREN');
 
-// NAND ECC (ECCR2 @ 0xB4): XOR-fold accumulator over data bytes while
-// PCR.ECCEN is set; cleared on ECCEN 0->1. Self-consistent (not silicon
-// Hamming-compatible) so firmware store-then-verify flows pass.
+// NAND ECC (ECCR2 @ 0xB4): row+column Hamming over data bytes while
+// PCR.ECCEN is set; cleared on ECCEN 0->1. Single-bit flips locate via
+// syndrome (see below); bit-exact silicon parity unverified, no oracle.
 const NAND2 = 0x70000000;
 const PCR2 = 0xA0000060, ECCR2 = 0xA00000B4;
 assert_eq(periph_read(ECCR2, 4), 0, 'FSMC ECCR2 reset 0');

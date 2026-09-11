@@ -29,6 +29,13 @@ test.describe('Board selector', () => {
         expect(vis).not.toContain('board_pill');
         expect(vis).not.toContain('board_maple');
     });
+    test('RC shows high-density desk, F103C8 does not', async ({ page }) => {
+        await page.goto('http://localhost:8765/');
+        await page.selectOption('#chipSelect', 'stm32f103rc');
+        expect(await visPresets(page)).toContain('hd_fsmc');
+        await page.selectOption('#chipSelect', 'stm32f103c8');
+        expect(await visPresets(page)).not.toContain('hd_fsmc');
+    });
     test('rig SVG changes per board', async ({ page }) => {
         await page.goto('http://localhost:8765/');
         await page.selectOption('#chipSelect', 'nucleo_f103rb');

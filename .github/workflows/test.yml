@@ -171,6 +171,8 @@ jobs:
         run: node tests/test_board_showcase.mjs
       - name: Per-board RTC clock (per target)
         run: node tests/test_board_rtc.mjs
+      - name: High-density desk (FSMC + DAC on F103RC)
+        run: node tests/test_hd_fsmc.mjs
       - name: Site pages (docs + demo smoke, headed Chromium)
         run: npx playwright test tests/test_browser_site.mjs --reporter=list --timeout=300000
       - name: Docs sync freshness (site/docs-src mirrors repo markdown)

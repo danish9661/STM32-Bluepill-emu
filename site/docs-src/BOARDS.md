@@ -28,7 +28,10 @@ matching page preset that sets chip + ELF together
 covers UART echo (`arduino_board_echo`, native Serial per board),
 the 7-peripheral showcase (`arduino_hw_showcase` + board banner/LED) and
 the RTC clock (`arduino_rtc_clock` + board banner) — `test_board_echo.mjs`
-8/8, `test_board_showcase.mjs` 12/12, `test_board_rtc.mjs` 20/20.
+8/8, `test_board_showcase.mjs` 12/12, `test_board_rtc.mjs` 20/20. High-density-only
+peripherals get their own desk on the RC (`arduino_hd_fsmc`: FSMC NOR +
+dual-DAC loopback, `test_hd_fsmc.mjs` 5/5); dual-CAN lives on the F105
+(`arduino_can_dual`, `test_can_dual.mjs` 5/5).
 
 The demo page filters the preset menu to the selected chip (board-only
 demos hide on other chips; picking one auto-switches the chip), and the

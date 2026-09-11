@@ -548,6 +548,7 @@ footer .foot-tag {
                     <option value="board_maple_rtc">Board RTC: Maple Mini (clock)</option>
                     <option value="board_nucleo_rtc">Board RTC: Nucleo-F103RB (clock)</option>
                     <option value="board_rc_rtc">Board RTC: Generic F103RC (clock)</option>
+                    <option value="hd_fsmc">HD Desk: FSMC + DAC (F103RC only)</option>
                     </optgroup>
                 </select>
                 <select id="chipSelect" title="Chip / board (rp2040js-style: pick the peripheral map)">
@@ -1540,6 +1541,7 @@ const PRESET_CHIPS = {
     board_rc_echo: ['stm32f103rc'],
     board_rc_showcase: ['stm32f103rc'],
     board_rc_rtc: ['stm32f103rc'],
+    hd_fsmc: ['stm32f103rc'],
     can_dual: ['stm32f105'],
 };
 const ALL_DEMO_CHIPS = ['stm32f103c8', 'stm32f105', 'gd32f103c8', 'maple_mini', 'nucleo_f103rb', 'stm32f103rc'];
@@ -1770,6 +1772,14 @@ $('loadPresetBtn').addEventListener('click', async () => {
                 sd_card: [{ peripheral: 'SDIO', data: new Uint8Array(2048 * 512) }],
             });
             log('Press Run — every RTC second the ADC temp is logged to the next SD block and verified.', 't-in');
+        } else if (preset === 'hd_fsmc') {
+            // 64KB blank NOR image behind FSMC BANK1 (writes land here, in RAM only)
+            $('chipSelect').value = 'stm32f103rc';
+            const buf = await fetch('arduino_hd_fsmc.elf').then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(buf), 'arduino_hd_fsmc.elf (FSMC + DAC on F103RC)', {
+                fsmc_bank: [{ name: 'FSMC.BANK1', data: new Uint8Array(65536) }],
+            });
+            log('Press Run — FSMC NOR verify plus dual-DAC loopback readings, on the high-density chip.', 't-in');
         }
     } catch (e) {
         log(`Failed to load preset: ${e.message || e}`, 't-err');
