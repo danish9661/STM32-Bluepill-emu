@@ -664,6 +664,39 @@ pub fn pwr_mode() -> u32 {
     }
 }
 
+/// Current-draw estimate in µA (pure formula, unit-tested). DS5319-typical
+/// orders, NOT calibrated: RUN scales ~linearly with SYSCLK on a 4 mA base,
+/// SLEEP keeps 70% (peripherals clocked, CPU gated), STOP depends on the
+/// regulator (LPDS), STANDBY is RTC-domain leakage. Treat ±2× as honest.
+pub fn pwr_estimate_ua(mode: u32, sysclk_hz: u32, lpds: bool) -> u32 {
+    let run = 4_000 + (32_000u64 * sysclk_hz.min(72_000_000) as u64 / 72_000_000) as u32;
+    match mode {
+        3 => 4,
+        2 => {
+            if lpds {
+                15
+            } else {
+                40
+            }
+        }
+        1 => run * 70 / 100,
+        _ => run,
+    }
+}
+
+/// Live current-draw estimate in µA (see `pwr_estimate_ua` for the caveats).
+#[wasm_bindgen]
+pub fn pwr_estimate() -> u32 {
+    match try_sys() {
+        Some(sys) => {
+            let sleeping = system::CPU_SLEEPING.load(std::sync::atomic::Ordering::Relaxed);
+            let mode = pwr_mode_of(sleeping, sys.p.in_deep_sleep(), sys.p.pwr_standby());
+            pwr_estimate_ua(mode, sys.p.rcc_clocks().0, sys.p.pwr_low_power_reg())
+        }
+        None => 0,
+    }
+}
+
 /// Collect UART output since last call.
 #[wasm_bindgen]
 pub fn get_uart_output() -> String {
@@ -894,5 +927,20 @@ mod lib_tests {
         assert_eq!(pwr_mode_of(true, false, true), 1); // PDDS irrelevant awake-shallow
         assert_eq!(pwr_mode_of(true, true, false), 2); // STOP
         assert_eq!(pwr_mode_of(true, true, true), 3); // STANDBY
+    }
+
+    #[test]
+    fn power_estimate_ordering() {
+        use super::pwr_estimate_ua;
+        let run = pwr_estimate_ua(0, 72_000_000, false);
+        let sleep = pwr_estimate_ua(1, 72_000_000, false);
+        let stop = pwr_estimate_ua(2, 72_000_000, false);
+        let stop_lp = pwr_estimate_ua(2, 72_000_000, true);
+        let standby = pwr_estimate_ua(3, 72_000_000, false);
+        assert!(standby < stop_lp && stop_lp < stop && stop < sleep && sleep < run);
+        assert_eq!(run, 36_000);
+        // RUN scales ~linearly with SYSCLK.
+        assert!(pwr_estimate_ua(0, 8_000_000, false) < run);
+        assert_eq!(pwr_estimate_ua(0, 8_000_000, false), 4_000 + 32_000 * 8 / 72);
     }
 }

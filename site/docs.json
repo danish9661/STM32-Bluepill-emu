@@ -20,6 +20,36 @@
   "blurb": "Variants, ID codes, pin aliases, bring-up"
  },
  {
+  "file": "blue-pill.md",
+  "title": "Board: Blue Pill",
+  "blurb": "F103C8 reference target notes"
+ },
+ {
+  "file": "gd32f103c8.md",
+  "title": "Board: GD32F103C8",
+  "blurb": "Clone-contract notes"
+ },
+ {
+  "file": "maple-mini.md",
+  "title": "Board: Maple Mini",
+  "blurb": "F103CB D33 LED, DFU note"
+ },
+ {
+  "file": "nucleo-f103rb.md",
+  "title": "Board: Nucleo-F103RB",
+  "blurb": "USART2 Serial, Arduino headers"
+ },
+ {
+  "file": "f103rc.md",
+  "title": "Board: F103RC",
+  "blurb": "High-density set (DAC/FSMC/ADC3)"
+ },
+ {
+  "file": "f105.md",
+  "title": "Board: STM32F105",
+  "blurb": "CAN2 + OTG notes, SVD map"
+ },
+ {
   "file": "GDB.md",
   "title": "Debugging with GDB",
   "blurb": "RSP stub walkthrough, fidelity notes"

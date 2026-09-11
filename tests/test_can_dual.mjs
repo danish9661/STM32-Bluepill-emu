@@ -13,7 +13,11 @@ let passed = 0, failed = 0;
 const ok = (cond, name) => { if (cond) { passed++; } else { failed++; console.log(`FAIL: ${name}`); } };
 
 const svd = readFileSync('svd/STM32F105xx.svd', 'utf8');
-const emu = await createEmulator({ firmware: readFileSync(ELF), chip: { name: 'STM32F105', svd } });
+// F105RC-class sizes: the SVD path defaults to 64K/20K, but firmware
+// linked for 48K RAM (SP=0x2000C000) needs the RAM window to cover it —
+// otherwise stack pushes land unmapped (writes dropped, pops read 0)
+// and startup dies in _init with a bogus LR (IBUSERR).
+const emu = await createEmulator({ firmware: readFileSync(ELF), chip: { name: 'STM32F105', svd, flash: 0x40000, ram: 0x10000 } });
 let done = 0;
 while (done < MAX) {
     const r = await emu.run(Math.min(CHUNK, MAX - done));

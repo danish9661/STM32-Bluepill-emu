@@ -103,6 +103,12 @@ present — the audit claim was wrong, caught by the compiler).
   PVD and BKP tamper already modeled (§21); no stop-mode clock switch
   beyond SWS.
 - NVIC: STIR (0xE000EF00, WO, INTID 9 bits) now routes to pending.
+- USB OTG (F105 `0x5000xxxx` global/host/device blocks): unmapped
+  (lenient zero, like all unmapped peripheral windows). A host stack
+  needs a peer device to talk to (multi-sprint: channels + SOF
+  scheduling + enumeration against something), and a device front-end
+  over the FS engine has no consumer firmware — both stay open gaps
+  with this record instead of untestable theater.
 
 None of these affect the 39/39 firmware suite or any shipped demo; they matter
 only to firmware that specifically exercises them (which then sees lenient

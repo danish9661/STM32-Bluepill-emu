@@ -22,6 +22,7 @@ impl Pwr {
 
 impl Peripheral for Pwr {
     fn pwr_standby_selected(&self) -> bool { self.cr & (1 << 1) != 0 }
+    fn pwr_regulator_low_power(&self) -> bool { self.cr & (1 << 0) != 0 }
     fn read(&mut self, _sys: &System, offset: u32) -> u32 {
         match offset {
             0x00 => self.cr,

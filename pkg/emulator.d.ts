@@ -235,6 +235,8 @@ export interface BluepillEmulator {
   adcSetInternal(channel: number, value: number): void;
   /** Live power state: 0=RUN, 1=SLEEP, 2=STOP, 3=STANDBY. */
   pwrMode(): number;
+  /** Live current-draw estimate in µA (DS5319-typical, uncalibrated). */
+  pwrEstimate(): number;
 
   // ── OLED / LCD framebuffers ───────────────────────────────────────────────
 

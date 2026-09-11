@@ -235,7 +235,7 @@ export async function createEmulator(opts = {}) {
     gpio_set_input, gpio_read_input,
     can_inject_message, adc_set_sim_value, gpio_set_analog, adc_set_rc_tau,
     touchscreen_set_touch, pwm_duty, raise_fault,
-     i2c_oled_fb, lcd_fb, gpio_take_pin_events,     drain_events, spi_inject_miso, i2c_inject_rx, i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop, i2c_inject_alert, bootloader_enable, bootloader_go_addr, pwr_mode, adc_set_internal, usb_inject_setup, usb_inject_out,
+     i2c_oled_fb, lcd_fb, gpio_take_pin_events,     drain_events, spi_inject_miso, i2c_inject_rx, i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop, i2c_inject_alert, bootloader_enable, bootloader_go_addr, pwr_mode, pwr_estimate, adc_set_internal, usb_inject_setup, usb_inject_out,
     rustcpu_init, rustcpu_load, rustcpu_run, rustcpu_fault, rustcpu_fault_clear, rustcpu_dispatch,
     rustcpu_regs, rustcpu_set_pc, rustcpu_set_reg, rustcpu_mem_read, rustcpu_mem_write, rustcpu_mem_write_raw, rustcpu_dma_pump, rustcpu_i2c_hook_fired,
     rustcpu_write_tap, rustcpu_take_writes, set_dbg_idcode } = periph;
@@ -324,6 +324,12 @@ export async function createEmulator(opts = {}) {
             return (fwBytes[o] | (fwBytes[o + 1] << 8) | (fwBytes[o + 2] << 16) | (fwBytes[o + 3] << 24)) >>> 0;
         };
         rustcpu_init(vecAt(0), vecAt(4), flash_size, ram_size);
+        // An SP above the RAM window (e.g. a 48K-linked binary on a 20K
+        // map) silently drops stack pushes and dies in startup with a
+        // bogus LR — warn loudly instead of debugging blind.
+        if (vecAt(0) > 0x20000000 + ram_size) {
+            console.warn(`emulator: initial SP 0x${vecAt(0).toString(16)} is above RAM top 0x${(0x20000000 + ram_size).toString(16)} — pass a bigger ram_size (SVD-object chips default to 20K)`);
+        }
     }
 
     if (elfRegions) {
@@ -628,6 +634,8 @@ export async function createEmulator(opts = {}) {
         adcSetInternal(channel, value) { adc_set_internal(channel, value); },
         /** Live power state: 0=RUN, 1=SLEEP, 2=STOP, 3=STANDBY. */
         pwrMode() { return pwr_mode(); },
+        /** Live current-draw estimate in µA (DS5319-typical, uncalibrated). */
+        pwrEstimate() { return pwr_estimate(); },
         gpioSetAnalog(port, pin, level) { gpio_set_analog(port, pin, level); },
         adcSetRcTau(cycles) { adc_set_rc_tau(cycles); },
         setTouch(peripheral, x, y, pressure) { touchscreen_set_touch(peripheral, x, y, pressure); },

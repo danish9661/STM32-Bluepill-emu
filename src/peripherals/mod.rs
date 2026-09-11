@@ -80,6 +80,8 @@ pub trait Peripheral {
     fn can_match_for(&self, _tir: u32, _for_can2: bool) -> Option<usize> { None }
     /// PWR deep-standby selection (CR PDDS bit) for power-state queries.
     fn pwr_standby_selected(&self) -> bool { false }
+    /// PWR low-power regulator selection (CR LPDS bit) for STOP current.
+    fn pwr_regulator_low_power(&self) -> bool { false }
     /// Configured (sysclk, hclk, pclk1, pclk2) in Hz, if this is RCC.
     fn rcc_clocks(&self) -> Option<(u32, u32, u32, u32)> { None }
     /// Returns AFIO MAPR remap bits for this peripheral, if applicable.
@@ -676,6 +678,14 @@ impl Peripherals {
     pub fn pwr_standby(&self) -> bool {
         if let Some(slot) = self.bus.borrow().get(0x4000_7000) {
             return slot.peripheral.borrow().pwr_standby_selected();
+        }
+        false
+    }
+
+    /// PWR regulator mode (CR LPDS) for the STOP current estimate.
+    pub fn pwr_low_power_reg(&self) -> bool {
+        if let Some(slot) = self.bus.borrow().get(0x4000_7000) {
+            return slot.peripheral.borrow().pwr_regulator_low_power();
         }
         false
     }

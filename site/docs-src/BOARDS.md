@@ -17,6 +17,18 @@ see `docs/USAGE.md`). Timing stays instruction-budget based on every chip.
 | GD32F103RB | `gd32f103rb` | 128K/20K | `0x2BA01477` | |
 | STM32F105 (connectivity) | `{ name, svd }` | 256K/64K | `0x10016418` | separate SVD map: CAN2@0x40006800 |
 
+## Per-board notes (audited)
+
+Silicon peripheral set vs emulator coverage, wiring, demos and quirks —
+one page per board:
+
+- [Blue Pill](boards/blue-pill.md) — reference target, 25 presets
+- [GD32F103C8](boards/gd32f103c8.md) — clone contract, 25 presets
+- [Maple Mini](boards/maple-mini.md) — D33 LED, USB-DFU note, 25 presets
+- [Nucleo-F103RB](boards/nucleo-f103rb.md) — USART2 Serial, Arduino headers, 25 presets
+- [Generic F103RC](boards/f103rc.md) — high-density set (DAC/FSMC/ADC3/SDIO/UART4-5/SPI3), 26 presets
+- [STM32F105](boards/f105.md) — CAN2 + OTG notes, SVD map, 22 presets
+
 The page shows the live chip (`label · ID … · flash/RAM`) in the stats bar
 after every load, and the GPIO grid renders Arduino aliases from
 `site/board_pins.json` (extracted from the STM32duino variant files).

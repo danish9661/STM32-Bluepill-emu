@@ -663,6 +663,15 @@ export function pwm_duty(addr, channel) {
 }
 
 /**
+ * Live current-draw estimate in µA (see `pwr_estimate_ua` for the caveats).
+ * @returns {number}
+ */
+export function pwr_estimate() {
+    const ret = wasm.pwr_estimate();
+    return ret >>> 0;
+}
+
+/**
  * Live power state from the model (0=RUN, 1=SLEEP, 2=STOP, 3=STANDBY).
  * Truthful mode tracking for tests and host tools; current-draw numbers
  * stay a documented estimate (DS5319-typical, uncalibrated — see
