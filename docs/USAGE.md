@@ -48,6 +48,8 @@ emu.gpioReadOutput(port, pin); emu.gpioReadInput(port, pin); emu.gpioSetInput(..
 emu.gpioSetSlew(n);         // output slew delay in instructions (0 = instant) — IDR readback shows the old level until the transition settles
 emu.pwmDuty(timerAddr, channel);    // duty 0-100, e.g. (0x40000000, 0) = TIM2 CH1
 emu.setSimAdc(value);      // ADC conversion result firmware will read (conversion timing is real)
+emu.adcSetInternal(ch, v); // drive temp/VREFINT/VBAT (ch 16/17/18); 65535 clears to nominal
+emu.pwrMode();             // live power state: 0=RUN, 1=SLEEP, 2=STOP, 3=STANDBY (WFI-tracked)
 emu.gpioSetAnalog(port, pin, level); // wire a 12-bit analog voltage onto a GPIO pin: ADC channels mapped to that pin sample it via an RC sample-and-hold instead of the sim value; level 0xFFFF disconnects
 emu.adcSetRcTau(cycles);   // RC sample-and-hold time constant in ADC cycles (1 instr = 1 cycle), default 12
 emu.setTouch(periphAddr, x, y, pressure);  // ADS7846 touch injection
@@ -118,8 +120,23 @@ enabled (`BCR.MBKEN`; NOR writes also require `BCR.WREN`). Unmapped data accesse
 handlers in firmware work normally (faults escalate to HardFault unless the SHCSR
 enable bits are set via `SCB.SHCSR`).
 
-### GPIO inputs, EXTI and page-side drivers
+### System-memory bootloader (AN3155 USART flow, no hardware)
 
+```js
+emu.bootloaderEnable(true);   // claim USART1 RX for the ROM responder
+emu.uartRxAddr(0x40013800, 0x7F); // autobaud -> ACK
+// ... GET / READ / GO / WRITE / ERASE frames (XOR checksums) ...
+emu.bootloaderGoAddr();       // last GO target, or -1
+emu.bootloaderEnable(false);  // hand USART1 back to the model
+```
+
+Answers the host flashing flow headlessly (autobaud, GET/version/ID
+PID `0x0410`, READ/GO/WRITE/ERASE): flash and RAM operations land in the
+real loaded image, so erase-write-verify cycles run in CI
+(`tests/test_bootloader.mjs` 45/45). WRP is not enforced (ROM-privilege
+model); GO records its address without retargeting the CPU.
+
+### GPIO inputs, EXTI and page-side drivers
 - `emu.gpioSetInput(port, pin, true|false)` sets an external input level; a level
   **change fires EXTI edges** just like a real push-button (IMR/RTSR/FTSR gated), so
   `attachInterrupt(pin, isr, RISING)` in firmware works with page-driven buttons.

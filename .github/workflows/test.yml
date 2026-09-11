@@ -114,6 +114,11 @@ jobs:
         run: |
           pip install unicorn==2.1.4 capstone==5.0.9
           python3 tests/fuzz_diff.py --cases 200 --seed 1
+          python3 tests/fuzz_diff.py --cases 200 --seed 4
+      - name: Spec vectors (CRC anchors + CAN filter differential)
+        run: node tests/test_spec_vectors.mjs
+      - name: DFU bootloader (AN3155 session)
+        run: node tests/test_bootloader.mjs
       - name: Firmware format + ESM smoke tests
         run: |
           node tests/test_firmware_formats.mjs

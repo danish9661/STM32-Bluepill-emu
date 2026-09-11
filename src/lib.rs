@@ -103,6 +103,7 @@ pub fn init() {
     system::INSTRUCTION_COUNT.store(0, Ordering::Relaxed);
     DBG_IDCODE.store(0x1001_6410, Ordering::Relaxed);
     peripherals::gpio::clear_pin_events();
+    peripherals::bootloader::reset();
     native::reset();
     set_sys(WasmSystem::new());
     system::sync_mpu_gate(sys());
@@ -131,6 +132,7 @@ pub fn init_svd(svd_xml: &str) {
     console_error_panic_hook::set_once();
     system::INSTRUCTION_COUNT.store(0, Ordering::Relaxed);
     peripherals::gpio::clear_pin_events();
+    peripherals::bootloader::reset();
     native::reset();
     set_sys(WasmSystem::new_svd(svd_xml));
     system::sync_mpu_gate(sys());
@@ -622,6 +624,46 @@ pub fn rcc_fail_hse() -> bool {
     sys().p.rcc_fail_hse(&*sys())
 }
 
+/// Enable/disable the system-memory bootloader responder (AN3155 USART
+/// protocol on USART1). While enabled it claims USART1 RX and answers the
+/// host flashing flow instead of the USART model.
+#[wasm_bindgen]
+pub fn bootloader_enable(on: bool) {
+    peripherals::bootloader::set_enabled(on);
+}
+
+/// Last GO target address issued to the bootloader, or -1 when none.
+#[wasm_bindgen]
+pub fn bootloader_go_addr() -> i32 {
+    peripherals::bootloader::go_addr().map(|a| a as i32).unwrap_or(-1)
+}
+
+/// Power-state mapping (pure, unit-tested): 0=RUN, 1=SLEEP (WFI, no deep),
+/// 2=STOP (WFI + SLEEPDEEP), 3=STANDBY (WFI + SLEEPDEEP + PWR PDDS).
+pub fn pwr_mode_of(sleeping: bool, deep: bool, standby_sel: bool) -> u32 {
+    match (sleeping, deep, standby_sel) {
+        (true, true, true) => 3,
+        (true, true, false) => 2,
+        (true, false, _) => 1,
+        (false, _, _) => 0,
+    }
+}
+
+/// Live power state from the model (0=RUN, 1=SLEEP, 2=STOP, 3=STANDBY).
+/// Truthful mode tracking for tests and host tools; current-draw numbers
+/// stay a documented estimate (DS5319-typical, uncalibrated — see
+/// docs/PERIPHERALS.md), not a modeled quantity.
+#[wasm_bindgen]
+pub fn pwr_mode() -> u32 {
+    match try_sys() {
+        Some(sys) => {
+            let sleeping = system::CPU_SLEEPING.load(std::sync::atomic::Ordering::Relaxed);
+            pwr_mode_of(sleeping, sys.p.in_deep_sleep(), sys.p.pwr_standby())
+        }
+        None => 0,
+    }
+}
+
 /// Collect UART output since last call.
 #[wasm_bindgen]
 pub fn get_uart_output() -> String {
@@ -729,6 +771,13 @@ pub fn adc_set_sim_value(val: u16) {
     peripherals::adc::set_adc_value(val);
 }
 
+/// Override an internal ADC channel (16=temp, 17=VREFINT, 18=VBAT) with a
+/// 12-bit value; pass 65535 (u16::MAX) to clear back to nominal.
+#[wasm_bindgen]
+pub fn adc_set_internal(channel: u8, val: u16) {
+    peripherals::adc::set_adc_internal(channel, val);
+}
+
 /// Register a software SPI device. Must be called before init().
 #[wasm_bindgen]
 pub fn add_software_spi(name: &str, cs: Option<String>, clk: &str, miso: &str, mosi: &str) {
@@ -832,3 +881,18 @@ pub fn i2c_oled_writes(peripheral: &str, address: u32) -> u64 {
     0
 }
 
+
+#[cfg(test)]
+mod lib_tests {
+    use super::pwr_mode_of;
+
+    #[test]
+    fn power_state_mapping() {
+        assert_eq!(pwr_mode_of(false, false, false), 0); // RUN
+        assert_eq!(pwr_mode_of(false, true, true), 0); // awake beats config
+        assert_eq!(pwr_mode_of(true, false, false), 1); // SLEEP
+        assert_eq!(pwr_mode_of(true, false, true), 1); // PDDS irrelevant awake-shallow
+        assert_eq!(pwr_mode_of(true, true, false), 2); // STOP
+        assert_eq!(pwr_mode_of(true, true, true), 3); // STANDBY
+    }
+}

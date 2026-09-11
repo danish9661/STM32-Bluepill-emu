@@ -1,6 +1,16 @@
 /* @ts-self-types="./stm32_bluepill_wasm.d.ts" */
 
 /**
+ * Override an internal ADC channel (16=temp, 17=VREFINT, 18=VBAT) with a
+ * 12-bit value; pass 65535 (u16::MAX) to clear back to nominal.
+ * @param {number} channel
+ * @param {number} val
+ */
+export function adc_set_internal(channel, val) {
+    wasm.adc_set_internal(channel, val);
+}
+
+/**
  * RC sample-and-hold time constant in ADC cycles (1 instr = 1 cycle).
  * @param {number} cycles
  */
@@ -137,6 +147,25 @@ export function add_touchscreen(peripheral, touch_detected_pin, cs) {
     var ptr2 = isLikeNone(cs) ? 0 : passStringToWasm0(cs, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     var len2 = WASM_VECTOR_LEN;
     wasm.add_touchscreen(ptr0, len0, ptr1, len1, ptr2, len2);
+}
+
+/**
+ * Enable/disable the system-memory bootloader responder (AN3155 USART
+ * protocol on USART1). While enabled it claims USART1 RX and answers the
+ * host flashing flow instead of the USART model.
+ * @param {boolean} on
+ */
+export function bootloader_enable(on) {
+    wasm.bootloader_enable(on);
+}
+
+/**
+ * Last GO target address issued to the bootloader, or -1 when none.
+ * @returns {number}
+ */
+export function bootloader_go_addr() {
+    const ret = wasm.bootloader_go_addr();
+    return ret;
 }
 
 /**
@@ -630,6 +659,18 @@ export function process_batch(count) {
  */
 export function pwm_duty(addr, channel) {
     const ret = wasm.pwm_duty(addr, channel);
+    return ret >>> 0;
+}
+
+/**
+ * Live power state from the model (0=RUN, 1=SLEEP, 2=STOP, 3=STANDBY).
+ * Truthful mode tracking for tests and host tools; current-draw numbers
+ * stay a documented estimate (DS5319-typical, uncalibrated — see
+ * docs/PERIPHERALS.md), not a modeled quantity.
+ * @returns {number}
+ */
+export function pwr_mode() {
+    const ret = wasm.pwr_mode();
     return ret >>> 0;
 }
 

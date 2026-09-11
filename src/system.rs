@@ -23,6 +23,11 @@ pub fn get_ext_devices() -> &'static Mutex<ExtDevices> {
 pub static INSTRUCTION_COUNT: AtomicU64 = AtomicU64::new(0);
 pub fn instruction_count() -> u64 { INSTRUCTION_COUNT.load(Ordering::Relaxed) }
 
+/// Live WFI/WFE sleep mirror for power-state queries (pwr_mode): set when
+/// the core halts in WFI/WFE, cleared on exception entry and reset. One
+/// relaxed store at three cold sites; the hot loop never touches it.
+pub static CPU_SLEEPING: AtomicBool = AtomicBool::new(false);
+
 // Interrupt masks set by JS from CPU state on each batch.
 pub static INTR_MASK_PRIMASK: AtomicU32 = AtomicU32::new(0);
 pub static INTR_MASK_BASEPRI: AtomicU32 = AtomicU32::new(0);

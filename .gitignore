@@ -73,3 +73,4 @@ tests/arduino_hw_showcase/build/compile_commands.json
 tests/arduino_hw_showcase/build/build.options.json
 test-results/
 tests/arduino_coremark/build/
+__pycache__/

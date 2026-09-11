@@ -47,6 +47,7 @@ impl Default for Flash {
 }
 
 impl Peripheral for Flash {
+    fn flash_latency(&self) -> u32 { self.acr & 7 }
     fn read(&mut self, _sys: &System, offset: u32) -> u32 {
         match offset {
             0x00 => self.acr,

@@ -10,7 +10,7 @@ const { init, init_svd, periph_read, periph_write, tick, step_batch, has_pending
         add_sd_card, reset_ext_devices, rcc_sysclk_hz, rcc_fail_hse, add_i2c_eeprom,
         drain_events, usb_inject_setup, usb_inject_out, pwm_duty,
         i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop, i2c_inject_alert,
-        add_lcd, lcd_fb,
+        add_lcd, lcd_fb, adc_set_internal, pwr_mode,
         gpio_take_pin_events } = periph;
 
 let passed = 0, failed = 0;
@@ -327,6 +327,24 @@ assert_eq(sradc & (1 << 1), 1 << 1, 'ADC SR EOC after second SWSTART');
 dr_val = periph_read(ADC1 + 0x4C, 4) & 0xFFF;
 assert_eq(dr_val, 0x155, 'ADC DR second value');
 
+// Internal channel override: drive the temp sensor (ch16) without
+// hardware, then clear back to the 0x6EE nominal. tau=1 settles instantly
+// (the RC model would otherwise still be charging from the last channel).
+adc_set_rc_tau(1);
+periph_write(ADC1 + 0x34, 4, 16); // SQR3 SQ1 = ch16
+adc_set_internal(16, 0xABC);
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 22)); // ADON + SWSTART
+step_batch(14);
+assert_eq(periph_read(ADC1 + 0x00, 4) & (1 << 1), 1 << 1, 'ADC SR EOC on ch16');
+assert_eq(periph_read(ADC1 + 0x4C, 4) & 0xFFF, 0xABC, 'ADC DR temp override');
+adc_set_internal(16, 65535); // clear to nominal
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 22));
+step_batch(14);
+assert_eq(periph_read(ADC1 + 0x4C, 4) & 0xFFF, 0x6EE, 'ADC DR temp nominal 0x6EE');
+periph_write(ADC1 + 0x34, 4, 0); // SQR3 SQ1 back to ch0
+adc_set_rc_tau(12); // restore default tau
+assert_eq(pwr_mode(), 0, 'pwr_mode RUN after init');
+
 // RC sample-and-hold: wire 3.3V analog to PA0 (channel 0), sample with a
 // large RC tau so the cap does NOT reach the target within one sample window.
 // A newly reset cap (0 V) converts to a fraction of the full scale.
@@ -612,6 +630,36 @@ periph_write(STK + 0x00, 4, 0); // clear ENABLE
 assert_eq(has_pending_interrupt(), false, 'SysTick no pending after disable');
 for (let i = 0; i < 1500; i++) tick();
 assert_eq(has_pending_interrupt(), false, 'SysTick still no pending (disabled)');
+
+// ============================================================
+// DWT cycle counter (wait-state aware)
+// ============================================================
+group('DWT');
+
+reset();
+const DWT = 0xE0001000;
+const FLASHB = 0x40022000;
+periph_write(0x40021014, 4, 1 << 4); // AHBENR FLASHEN (FLASH writes are clock-gated)
+// Default: 1 instr = 1 cycle
+step_batch(1000);
+const c0 = periph_read(DWT + 0x04, 4);
+step_batch(1000);
+assert_eq(((periph_read(DWT + 0x04, 4) - c0) >>> 0), 1000, 'DWT CYCCNT 1:1 default');
+// FLASH LATENCY=2 -> each instruction retires 3 cycles (pacing untouched)
+periph_write(FLASHB + 0x00, 4, 2);
+const c1 = periph_read(DWT + 0x04, 4);
+step_batch(1000);
+assert_eq(((periph_read(DWT + 0x04, 4) - c1) >>> 0), 3000, 'DWT CYCCNT 3x with LATENCY=2');
+// Guest write takes effect immediately, then keeps counting
+periph_write(DWT + 0x04, 4, 0x1000);
+assert_eq(periph_read(DWT + 0x04, 4), 0x1000, 'DWT CYCCNT guest write');
+step_batch(100);
+assert_eq(periph_read(DWT + 0x04, 4), 0x1000 + 300, 'DWT CYCCNT resumes at 3x');
+// LATENCY back to 0 -> 1:1 again
+periph_write(FLASHB + 0x00, 4, 0);
+const c2 = periph_read(DWT + 0x04, 4);
+step_batch(500);
+assert_eq(((periph_read(DWT + 0x04, 4) - c2) >>> 0), 500, 'DWT CYCCNT back to 1:1');
 
 // ============================================================
 // TIM (Timer/PWM)
@@ -1483,8 +1531,9 @@ periph_write(0x40006400 + 0x21C, 4, 1); // FA1R: enable filter bank 0
 // Filter 0 word 0: 0x0555XXXX where 0x0555 = ID1(match 0x555), 0xXXXX = ID2
 periph_write(0x40006400 + 0x240, 4, (0x555 << 16) | 0x321); // ID1=0x555, ID2=0x321
 periph_write(0x40006400 + 0x244, 4, (0x123 << 16) | 0x456); // ID3=0x123, ID4=0x456
-// Exit init mode
-periph_write(0x40006400 + 0x200, 4, 0); // FMR: FINIT=0
+// Exit init mode preserving CAN2SB=14 (bare FMR=0 would hand all 28 banks
+// to CAN2 — silicon-true, so keep the split: read-modify-write like HAL)
+periph_write(0x40006400 + 0x200, 4, (14 << 8)); // FMR: FINIT=0, CAN2SB=14
 
 // Now inject a message with STDID=0x555 (should match)
 let msg_tir = ((0x555 << 21) | 1) >>> 0; // TXRQ + STDID=0x555 (unsigned)
@@ -1875,6 +1924,34 @@ assert_eq(periph_read(ECCR2, 4), 0, 'FSMC ECCR2 cleared on ECCEN re-arm');
 periph_write(NAND2, 1, 0xAB);
 periph_write(NAND2 + 1, 1, 0xCD);
 assert_eq(periph_read(ECCR2, 4), ecc1, 'FSMC ECC deterministic for same bytes');
+// Known answers: all-zero and all-0xFF sectors have zero parity everywhere.
+periph_write(PCR2, 4, 0); periph_write(PCR2, 4, 1 << 6); // fresh
+for (let i = 0; i < 64; i++) periph_write(NAND2 + i, 1, 0);
+assert_eq(periph_read(ECCR2, 4), 0, 'FSMC ECC of zeros is 0');
+periph_write(PCR2, 4, 0); periph_write(PCR2, 4, 1 << 6); // fresh
+for (let i = 0; i < 64; i++) periph_write(NAND2 + i, 1, 0xFF);
+assert_eq(periph_read(ECCR2, 4), 0, 'FSMC ECC of 0xFF is 0 (even counts)');
+// Hamming proof: flipping bit 3 of byte 41 must produce syndrome
+// 0x68005996 (row pairs for address bits 0..7 of 41 + cp1/cp3/cp4),
+// decoding to (41,3). The session runs at ECCPS=0 (256B page), so row
+// pairs above bit 15 stay structurally zero — short pages, short codes.
+const secBytes = [];
+for (let i = 0; i < 64; i++) secBytes.push((i * 7 + 1) & 0xFF);
+periph_write(PCR2, 4, 0); periph_write(PCR2, 4, 1 << 6); // fresh
+secBytes.forEach((b, i) => periph_write(NAND2 + i, 1, b));
+const codeA = periph_read(ECCR2, 4) >>> 0;
+periph_write(PCR2, 4, 0); periph_write(PCR2, 4, 1 << 6); // fresh
+secBytes.forEach((b, i) => periph_write(NAND2 + i, 1, i === 41 ? b ^ 0x08 : b));
+const codeB = periph_read(ECCR2, 4) >>> 0;
+const syn = (codeA ^ codeB) >>> 0;
+assert_eq(syn, 0x68005996, 'FSMC ECC syndrome locates bit3@byte41');
+let loc = 0;
+for (let j = 0; j < 6; j++) loc |= ((syn >> (2 * j + 1)) & 1) << j;
+assert_eq(loc, 41, 'FSMC syndrome decodes byte 41');
+assert_eq(syn & 0x03FF0000, 0, 'FSMC syndrome above 256B depth is zero');
+const colSig = (syn >>> 26) & 0x3F;
+const colBits = { 21: 0, 22: 1, 25: 2, 26: 3, 37: 4, 38: 5, 41: 6, 42: 7 };
+assert_eq(colBits[colSig], 3, 'FSMC syndrome decodes bit 3');
 
 // ============================================================
 // Sleep state timing (STOP/STANDBY gating)
@@ -2004,6 +2081,31 @@ group('Chip: STM32F105 (SVD)');
 
   // Unsupported peripherals in the SVD (ETH) are skipped, not fatal
   assert_eq(periph_read(0x40028000, 4), 0, 'F105 ETH (0x40028000) not mapped (skipped)');
+
+  // Shared CAN filter bank (silicon layout): CAN2 owns no filter
+  // registers — reads return 0, writes are ignored.
+  assert_eq(periph_read(0x40006800 + 0x21C, 4), 0, 'CAN2 FA1R reads 0 (no filter regs)');
+  periph_write(0x40006800 + 0x21C, 4, 1);
+  assert_eq(periph_read(0x40006800 + 0x21C, 4), 0, 'CAN2 FA1R write ignored');
+  assert_eq(periph_read(0x40006800 + 0x240, 4), 0, 'CAN2 F0R0 reads 0');
+  // CAN1 bank 0 does NOT serve CAN2 (CAN2 owns banks [CAN2SB=14..28))
+  periph_write(0x40006400 + 0x200, 4, 1); // FINIT
+  periph_write(0x40006400 + 0x204, 4, 0); // 16-bit
+  periph_write(0x40006400 + 0x20C, 4, 0xFFFFFFFF); // list
+  periph_write(0x40006400 + 0x240, 4, (0x555 << 16) | 0x555);
+  periph_write(0x40006400 + 0x244, 4, (0x555 << 16) | 0x555);
+  periph_write(0x40006400 + 0x21C, 4, 1); // enable bank 0
+  periph_write(0x40006400 + 0x200, 4, (14 << 8)); // exit init, CAN2SB=14
+  assert_eq(can_inject_message(0x40006800, ((0x555 << 21) | 1) >>> 0, 8, 0xDEADBEEF, 0), false, 'CAN2 rejects: bank 0 belongs to CAN1');
+  // Bank 14 accept-all (16-bit mask, ID=0 mask=0) serves CAN2 via CAN1's window
+  periph_write(0x40006400 + 0x200, 4, 1); // FINIT (resets modes)
+  periph_write(0x40006400 + 0x20C, 4, 0xFFFFFFFF & ~(1 << 14)); // bank 14 mask mode
+  periph_write(0x40006400 + 0x240 + 14 * 8, 4, 0); // F0R14 ID=0
+  periph_write(0x40006400 + 0x244 + 14 * 8, 4, 0); // F1R14 mask=0
+  periph_write(0x40006400 + 0x21C, 4, 1 << 14); // enable bank 14
+  periph_write(0x40006400 + 0x200, 4, (14 << 8)); // exit init, CAN2SB=14
+  assert_eq(can_inject_message(0x40006800, ((0x123 << 21) | 1) >>> 0, 8, 0xDEADBEEF, 0), true, 'CAN2 matches via shared bank 14');
+  assert_eq(periph_read(0x40006800 + 0x0C, 4) & 0x3, 1, 'CAN2 RF0R FMP=1 after shared match');
 }
 
 // ============================================================

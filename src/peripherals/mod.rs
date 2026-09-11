@@ -1,4 +1,5 @@
 pub mod rcc;
+pub mod bootloader;
 pub mod spi;
 pub mod usart;
 pub mod systick;
@@ -74,6 +75,11 @@ pub trait Peripheral {
     /// SMBus ALERT input: peer pulled SMBA low → SR1 SMBALERT + error IRQ.
     /// Default: unhandled (no flag).
     fn i2c_slave_alert(&mut self, _sys: &System) -> bool { false }
+    /// CAN filter match against shared banks (for CAN2's delegated match
+    /// on CAN1's bank). Default: no match.
+    fn can_match_for(&self, _tir: u32, _for_can2: bool) -> Option<usize> { None }
+    /// PWR deep-standby selection (CR PDDS bit) for power-state queries.
+    fn pwr_standby_selected(&self) -> bool { false }
     /// Configured (sysclk, hclk, pclk1, pclk2) in Hz, if this is RCC.
     fn rcc_clocks(&self) -> Option<(u32, u32, u32, u32)> { None }
     /// Returns AFIO MAPR remap bits for this peripheral, if applicable.
@@ -97,7 +103,9 @@ pub trait Peripheral {
     fn adc_dual_slave_complete(&mut self, _sys: &System) {}
     /// HSE clock failure injection (CSS path): true when CSS fired.
     fn rcc_fail_hse(&mut self, _sys: &System) -> bool { false }
-    /// STOP-mode exit: fall back to HSI (SWS=00, SW kept).
+    /// FLASH ACR wait-state setting (ACR LATENCY bits) for the DWT cycle
+    /// counter. Default 0 (no wait states).
+    fn flash_latency(&self) -> u32 { 0 }    /// STOP-mode exit: fall back to HSI (SWS=00, SW kept).
     fn rcc_wake_from_stop(&mut self) {}
     /// Last regular conversion result (for dual-mode DR packing).
     fn adc_data_reg(&self) -> u32 { 0 }
@@ -191,7 +199,7 @@ fn extract_svd_max_offset(p: &PeripheralInfo) -> u32 {
 
 fn name_has_tick(name: &str) -> bool {
     name.starts_with("TIM") || name.starts_with("DMA") || name == "RTC" || name.starts_with("ADC")
-        || name.starts_with("USART") || name.starts_with("UART") || name == "USB"
+        || name.starts_with("USART") || name.starts_with("UART") || name == "USB" || name == "DWT"
 }
 
 impl Peripherals {
@@ -611,6 +619,12 @@ impl Peripherals {
     }
 
     pub fn rx_byte(&self, sys: &System, addr: u32, byte: u8) -> bool {
+        // System-memory bootloader (when enabled) claims USART1 RX and
+        // answers the AN3155 flashing flow instead of the USART model.
+        if addr == bootloader::USART_BASE && bootloader::is_enabled() {
+            bootloader::rx_byte(sys, byte);
+            return true;
+        }
         if let Some(p) = self.bus.borrow().get(addr) {
             p.peripheral.borrow_mut().rx_byte(sys, byte);
             true
@@ -648,6 +662,22 @@ impl Peripherals {
             return slot.peripheral.borrow().remap_status(name);
         }
         None
+    }
+
+    /// FLASH wait states (ACR LATENCY) for wait-state-aware cycle counting.
+    pub fn flash_latency(&self) -> u32 {
+        if let Some(slot) = self.bus.borrow().get(0x4002_2000) {
+            return slot.peripheral.borrow().flash_latency();
+        }
+        0
+    }
+
+    /// PWR standby selection (CR PDDS) for power-state queries.
+    pub fn pwr_standby(&self) -> bool {
+        if let Some(slot) = self.bus.borrow().get(0x4000_7000) {
+            return slot.peripheral.borrow().pwr_standby_selected();
+        }
+        false
     }
 
     /// Called from GPIO when a pin changes state. Triggers EXTI if the port/pin
@@ -735,6 +765,16 @@ impl Peripherals {
             }
         }
         false
+    }
+
+    /// CAN2 filter match against CAN1's shared bank (banks [CAN2SB..28]).
+    /// CAN2 owns no filter registers on silicon; the match always runs on
+    /// CAN1's bank. Returns None when CAN1 is absent (f103 map).
+    pub fn can_match_can2(&self, tir: u32) -> Option<usize> {
+        if let Some(slot) = self.bus.borrow().get(0x4000_6400) {
+            return slot.peripheral.borrow().can_match_for(tir, true);
+        }
+        None
     }
 
     /// Configured clocks (sysclk, hclk, pclk1, pclk2) in Hz from the RCC

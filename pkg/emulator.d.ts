@@ -227,6 +227,14 @@ export interface BluepillEmulator {
   i2cInjectStop(channel: number): boolean;
   /** SMBus ALERT input: peer pulled SMBA low → SR1 SMBALERT + ER IRQ (ITERREN). */
   i2cInjectAlert(channel: number): boolean;
+  /** Enable/disable the AN3155 bootloader responder (claims USART1 RX while on). */
+  bootloaderEnable(on: boolean): void;
+  /** Last GO target address issued to the bootloader, or -1 when none. */
+  bootloaderGoAddr(): number;
+  /** Override internal ADC channel 16/17/18 (temp/VREF/VBAT); 65535 clears to nominal. */
+  adcSetInternal(channel: number, value: number): void;
+  /** Live power state: 0=RUN, 1=SLEEP, 2=STOP, 3=STANDBY. */
+  pwrMode(): number;
 
   // ── OLED / LCD framebuffers ───────────────────────────────────────────────
 

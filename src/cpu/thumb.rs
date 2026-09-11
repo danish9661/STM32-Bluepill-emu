@@ -798,6 +798,7 @@ pub fn exec16(cpu: &mut Cpu, sys: &WasmSystem, mem: &mut dyn Memory, op: u16, pc
                 // (the exception is taken on the next run-loop iteration).
                 if !(sys.p.nvic.borrow().has_pending() && cpu.regs.primask == 0) {
                     cpu.sleeping = true;
+                    crate::system::CPU_SLEEPING.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
             }
             return true;

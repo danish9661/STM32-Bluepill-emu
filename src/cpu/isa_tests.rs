@@ -562,6 +562,20 @@ fn unpredictable_shapes_fault() {
     assert!(cpu.fault.is_some(), "ldm Rn-in-list+WB should fault");
 }
 
+/// STM with writeback + Rn in its own list stores the ORIGINAL Rn value
+/// (silicon-plausible order; the oracle faults INSN_INVALID on these, so
+/// the fuzzer resamples them structurally — seed 6 `stm.w r0!,{r0,...}`).
+#[test]
+fn stm_rn_in_list_stores_original() {
+    let _held = crate::test_util::lock();
+    // stmia.w r0!, {r0, r3} (E8A0 0009): r0=base, r3=marker.
+    let (cpu, mem) = run_snippet(&[0xE8A0, 0x0009, 0xE7FE], &[(0, 0x20003000), (3, 0xDEADBEEF)]);
+    assert!(cpu.fault.is_none(), "stm Rn-in-list fault: {:?}", cpu.fault);
+    assert_eq!(cpu.regs.r[0], 0x20003008, "writeback lands after the list");
+    assert_eq!(mem.read32(0x20003000), 0x20003000, "stored Rn is the original value");
+    assert_eq!(mem.read32(0x20003004), 0xDEADBEEF, "stored r3 intact");
+}
+
 /// Bcc.W with S=1 (backward): J still direct (J1=o2[11], J2=o2[13]).
 #[test]
 fn bcc_w_backward_s1() {

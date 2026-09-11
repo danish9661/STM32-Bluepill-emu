@@ -6,6 +6,30 @@ const ADC_IRQ: i32 = 18;
 
 static ADC_SIM_VALUE: AtomicU16 = AtomicU16::new(0x3FF);
 
+/// Host override for the internal channels 16 (temp), 17 (VREFINT),
+/// 18 (VBAT), which are otherwise fixed nominal values. `None` sentinel
+/// (u16::MAX) restores nominal. Lets tests drive e.g. a hot temp sensor
+/// without hardware; cleared by init paths with the other inject state.
+static ADC_INTERNAL_OVERRIDE: [AtomicU16; 3] = [
+    AtomicU16::new(u16::MAX),
+    AtomicU16::new(u16::MAX),
+    AtomicU16::new(u16::MAX),
+];
+
+/// Override an internal channel (16/17/18) with a 12-bit value, or clear
+/// back to nominal with `u16::MAX`. Other channels ignored.
+pub fn set_adc_internal(channel: u8, val: u16) {
+    if (16..=18).contains(&channel) {
+        ADC_INTERNAL_OVERRIDE[(channel - 16) as usize].store(val, Ordering::Relaxed);
+    }
+}
+
+pub fn clear_adc_internal() {
+    for o in &ADC_INTERNAL_OVERRIDE {
+        o.store(u16::MAX, Ordering::Relaxed);
+    }
+}
+
 /// RC sample-and-hold time constant in instructions (ADC cycles).
 /// The sampling capacitor charges toward the pin voltage as
 /// V(t) = Vc0 + (Vpin - Vc0) * (1 - e^(-t/tau)). Default 12 cycles.
@@ -200,6 +224,13 @@ impl Adc {
             }
         }
         if let Some(v) = nominal_channel(ch) {
+            // Host override wins over nominal (cleared back with u16::MAX).
+            if (16..=18).contains(&ch) {
+                let o = ADC_INTERNAL_OVERRIDE[(ch - 16) as usize].load(Ordering::Relaxed);
+                if o != u16::MAX {
+                    return (o as u32 & 0xFFF, true);
+                }
+            }
             return (v, true);
         }
         (ADC_SIM_VALUE.load(Ordering::Relaxed) as u32 & 0xFFF, false)

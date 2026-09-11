@@ -50,6 +50,12 @@ impl Can {
 
     fn can_num(&self) -> u8 { if self.irq_base == 19 { 1 } else { 2 } }
 
+    /// CAN2 start bank from FMR CAN2SB[13:8], clamped to 1..27 (RM0008
+    /// reserves CAN2SB=0; bare FMR=0 writes — the common HAL RMW exit —
+    /// keep bank 0 with CAN1 instead of orphaning it, lenient + documented).
+    /// Reset value 14 splits 0..13 to CAN1, 14..27 to CAN2.
+    fn split(&self) -> u32 { ((self.fmr >> 8) & 0x3F).clamp(1, 27) }
+
     /// Time-triggered stamp: low 16 bits of the instruction counter stand
     /// in for the CAN bit-time counter (monotonic, deterministic; full
     /// TTCM sync/calibration frames are out of scope).
@@ -60,7 +66,7 @@ impl Can {
     /// Inject a received message into the CAN peripheral, matching filters.
     /// Returns true if the message was accepted into a FIFO.
     pub fn inject_message(&mut self, sys: &System, tir: u32, tdtr: u32, tdlr: u32, tdhr: u32) -> bool {
-        let fifo = self.match_filter(tir);
+        let fifo = self.match_filter(sys, tir);
         if let Some(fifo_idx) = fifo {
             let (rfxr, fifo) = if fifo_idx == 0 {
                 (&mut self.rf0r, &mut self.rx[0])
@@ -92,18 +98,33 @@ impl Can {
         }
     }
 
-    fn match_filter(&self, tir: u32) -> Option<usize> {
-        if self.fmr & 1 != 0 { return None; } // FINIT=1 means filter init mode, no matching
+    fn match_filter(&self, sys: &System, tir: u32) -> Option<usize> {
+        if self.can_num() == 2 {
+            // Silicon layout: filter banks live ONLY in CAN1 (28 banks);
+            // CAN2 borrows banks [CAN2SB..28] and has no filter registers
+            // of its own. Delegate the match to CAN1's bank.
+            return sys.p.can_match_can2(tir);
+        }
+        self.match_for(tir, false)
+    }
+
+    /// Match `tir` against this bank over `[lo..hi)`. Pure on registers
+    /// (shared by CAN1's own match and CAN2's delegated match).
+    fn match_for(&self, tir: u32, for_can2: bool) -> Option<usize> {
+        let split = self.split();
+        let (lo, hi) = if for_can2 { (split, 28) } else { (0, split) };
+        if self.fmr & 1 != 0 { return None; } // FINIT=1: init mode, no matching
         let _ide = (tir >> 2) & 1; // 0=standard, 1=extended
         let mut best = None;
-        for bank in 0..14 {
+        for bank in lo..hi {
+            let b = bank as usize;
             let enabled = (self.fa1r >> bank) & 1;
             if enabled == 0 { continue; }
             let scale = (self.fm1r >> bank) & 1; // 0=16-bit x 2, 1=32-bit
             let mode = (self.fs1r >> bank) & 1; // 0=ID mask, 1=ID list
             let identifier = tir >> 21; // STDID[10:0] for standard, EXTID[28:0] for extended
-            let f0 = self.filter[bank * 2];
-            let f1 = self.filter[bank * 2 + 1];
+            let f0 = self.filter[b * 2];
+            let f1 = self.filter[b * 2 + 1];
             let matched = if scale == 0 && mode == 0 {
                     let id1 = f0 >> 16; let mask1 = f0 & 0xFFFF;
                     let id2 = f1 >> 16; let mask2 = f1 & 0xFFFF;
@@ -202,12 +223,33 @@ impl Peripheral for Can {
                 }
                 val
             }
-            0x200 => self.fmr,
-            0x204 => self.fm1r,
-            0x20C => self.fs1r,
-            0x214 => self.ffa1r,
-            0x21C => self.fa1r,
+            0x200 => {
+                // CAN2 owns no filter registers on silicon (all 28 banks
+                // live in CAN1, configured through CAN1's window).
+                if self.can_num() == 2 { return 0; }
+                self.fmr
+            }
+            0x204 => {
+                if self.can_num() == 2 { return 0; }
+                self.fm1r
+            }
+            0x20C => {
+                if self.can_num() == 2 { return 0; }
+                self.fs1r
+            }
+            0x214 => {
+                if self.can_num() == 2 { return 0; }
+                self.ffa1r
+            }
+            0x21C => {
+                if self.can_num() == 2 { return 0; }
+                self.fa1r
+            }
             0x240..=0x31C => {
+                // CAN2 owns no filter registers on silicon (all 28 banks
+                // live in CAN1, configured through CAN1's window) — reads
+                // return 0.
+                if self.can_num() == 2 { return 0; }
                 let i = ((offset - 0x240) / 4) as usize;
                 self.filter.get(i).copied().unwrap_or(0)
             }
@@ -217,6 +259,11 @@ impl Peripheral for Can {
 
     fn can_inject_message(&mut self, sys: &System, tir: u32, tdtr: u32, tdlr: u32, tdhr: u32) -> bool {
         self.inject_message(sys, tir, tdtr, tdlr, tdhr)
+    }
+    /// CAN2's delegated filter match against CAN1's shared bank
+    /// (banks [CAN2SB..28]). Default: no match (CAN1 overrides).
+    fn can_match_for(&self, tir: u32, for_can2: bool) -> Option<usize> {
+        self.match_for(tir, for_can2)
     }
 
     fn write(&mut self, sys: &System, offset: u32, value: u32) {
@@ -308,16 +355,31 @@ impl Peripheral for Can {
                 }
             }
             0x200 => {
+                // FMR CAN2SB[13:8] assigns banks [CAN2SB..28] to CAN2.
+                if self.can_num() == 2 { return; }
                 if value & 1 != 0 {
                     self.fm1r = 0; self.fs1r = 0xFFFF_FFFF; self.ffa1r = 0; self.fa1r = 0;
                 }
-                self.fmr = value & 0x3F;
+                self.fmr = value & 0x3F3F;
             }
-            0x204 => self.fm1r = value,
-            0x20C => self.fs1r = value,
-            0x214 => self.ffa1r = value,
-            0x21C => self.fa1r = value,
+            0x204 => {
+                if self.can_num() == 2 { return; }
+                self.fm1r = value
+            }
+            0x20C => {
+                if self.can_num() == 2 { return; }
+                self.fs1r = value
+            }
+            0x214 => {
+                if self.can_num() == 2 { return; }
+                self.ffa1r = value
+            }
+            0x21C => {
+                if self.can_num() == 2 { return; }
+                self.fa1r = value
+            }
             0x240..=0x31C => {
+                if self.can_num() == 2 { return; }
                 let i = ((offset - 0x240) / 4) as usize;
                 if let Some(f) = self.filter.get_mut(i) { *f = value; }
             }

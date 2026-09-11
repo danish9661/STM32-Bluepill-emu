@@ -51,6 +51,20 @@ pub(crate) fn reset() {
     take_writes();
 }
 
+/// Loaded image windows ((flash_base, len), (ram_base, len)) for agents
+/// that validate guest addresses (bootloader ROM flows). None when the
+/// native backend is not initialized.
+pub(crate) fn mem_ranges() -> Option<((u32, u32), (u32, u32))> {
+    unsafe {
+        (*std::ptr::addr_of!(NATIVE)).as_ref().map(|e| {
+            (
+                (e.mem.flash_base, e.mem.flash.len() as u32),
+                (e.mem.ram_base, e.mem.ram.len() as u32),
+            )
+        })
+    }
+}
+
 /// Create the CPU + guest RAM. Call after init()/init_svd() and before load.
 /// `dsp` is always false here (Cortex-M3 has no DSP extension).
 #[wasm_bindgen]

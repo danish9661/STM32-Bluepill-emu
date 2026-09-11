@@ -22,9 +22,9 @@ SPI3, GPIOE-G) are harmless supersets, marked *(S)* below.
 | USART1-3, UART4/5 | APB1/2 | Full | Byte-time pacing, RXNE/TXE IRQs, DMA channels (incl. DMA2 for UART4/5) |
 | I2C1/2 | APB1 | Full | Master TX/RX state machine + slave mode (host inject: OAR match incl. 10-bit, ADDR/STOPF, RXNE/TXE, EV IRQs) |
 | USB (FS device) | 0x40005C00 | Full | EP0-7R toggle semantics, CNTR masks, ISTR (W0C flags; CTR/DIR/EP_ID derived), DADDR, BTABLE, 512 B PMA (byte-exact), RESET on FRES release, SETUP/OUT injection with DTOG sequencing, IN completion as `UsbIn` event + IRQ20. SOF engine (FNR/RXDP, SOF/SUSP/WKUP IRQs, wakeup IRQ42, auto-suspend, RESUME), double-buffered bulk endpoints, isochronous transfers verified (same data path) |
-| CAN1 (+CAN2 via F105 SVD) | APB1 | Full | Mailboxes, ID-list + mask filters, TX/RX IRQs, RX injection |
+| CAN1 (+CAN2 via F105 SVD) | APB1 | Full | Mailboxes, shared filter bank (CAN2 borrows [CAN2SB..28] from CAN1, no CAN2 filter regs — silicon layout), TX/RX IRQs, RX injection |
 | BKP | 0x40006C00 | Full | Backup registers (RM0008 map) + tamper pin (TPE/TPAL, IRQ2, DR clear) |
-| PWR | 0x40007000 | Full | Modes + STOP/STANDBY gating + PVD (fixed-supply model → EXTI16) |
+| PWR | 0x40007000 | Full | Modes + STOP/STANDBY gating + PVD (fixed-supply model → EXTI16); live `pwr_mode()` query (RUN/SLEEP/STOP/STANDBY, WFI-tracked) |
 | DAC | 0x40007400 | Full (S) | Both channels, DMA, →ADC loopback wire |
 | AFIO / EXTI | APB2 | Full | Remap, 20 lines, SWIER, GPIO-edge fan-in |
 | GPIOA-G | APB2 | Full | Electrical model (pull/open-drain/slew), pin events; E-G reachable via SVD (8-port backing) |
@@ -35,7 +35,7 @@ SPI3, GPIOE-G) are harmless supersets, marked *(S)* below.
 | RCC | 0x40021000 | Partial | All enable/reset bits + decoded SYSCLK/HCLK/PCLK query API; wall-clock conversions stay on the fixed 8 MHz instruction budget by decision |
 | FLASH | 0x40022000 | Full | Unlock/program/erase, option bytes, status |
 | CRC | 0x40023000 | Full | |
-| FSMC | 0xA0000000 | Full (S) | 7 banks, MBKEN/WREN, all widths, NAND ECC accumulator (ECCR2/3, self-consistent) |
+| FSMC | 0xA0000000 | Full (S) | 7 banks, MBKEN/WREN, all widths, NAND row+column Hamming ECC (ECCR2/3, single-bit locatable, ECCPS-gated depth) |
 | NVIC / STK / SCB | 0xE000Exxx | Full | Priority dispatch, SysTick debt, SHPR/SHCSR, faults, deep sleep |
 | SCB_ACTRL | 0xE000E008 | Full | RW store (DISMCYCINT/DISFOLD mask 0x7, reset 0); no timing effect — cycle counts are instruction-exact by construction |
 | NVIC_STIR | 0xE000EF00 | Full | Software-triggered IRQs (WO, INTID 9 bits, routed to pending) |
@@ -85,9 +85,15 @@ present — the audit claim was wrong, caught by the compiler).
   stays a no-op: PE is never set, no error injection).
 - SPI: master 8/16-bit + CRC + TI mode decoded (see above).
 - CAN: time-triggered timestamps now modeled (TXRQ/RX stamp TDTxR/RDTxR
-  TIME under TTCM); sync/calibration frames out of scope.
-- FSMC: NAND ECC accumulator on data R/W under PCR.ECCEN (ECCR2/3,
-  self-consistent though not silicon-Hamming-compatible); fixed timing.
+  TIME under TTCM); filter bank shared silicon-style (CAN1 owns all 28,
+  CAN2 borrows [CAN2SB..28], no CAN2 filter regs; reserved CAN2SB=0 keeps
+  bank 0 with CAN1); sync/calibration frames out of scope.
+- FSMC: NAND row+column Hamming ECC on data R/W under PCR.ECCEN (ECCR2/3,
+  ECCPS-gated depth; single-bit flips locate exactly — proven by the
+  0x68005996 syndrome test; bit-exact silicon parity unverified, no
+  oracle exists); fixed timing.
+- DWT: CYCCNT retires 1+LATENCY cycles per instruction (FLASH ACR
+  wait states); pacing untouched — only the cycle counter sees stalls.
 - FLASH: write-protection enforcement signals (WRPRTERR on PG/MER+STRT to
   a WRPR-guarded 4KB block); unlock model permissive, contents immutable.
 - GPIO: A-E all registered (full 16-bit ports; C8 exposes a subset

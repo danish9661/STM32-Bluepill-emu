@@ -140,6 +140,7 @@ impl Cpu {
         self.exc_stack.clear();
         self.it_stack.clear();
         self.sleeping = false;
+        crate::system::CPU_SLEEPING.store(false, std::sync::atomic::Ordering::Relaxed);
         // NOTE: `dsp` is configuration, not CPU state — preserved across reset.
         // it_suppress is per-instruction transient (recomputed at each entry).
         self.it_suppress = false;
@@ -211,6 +212,7 @@ impl Cpu {
         self.it_n = 0;
         self.it_idx = 0;
         self.sleeping = false;
+        crate::system::CPU_SLEEPING.store(false, std::sync::atomic::Ordering::Relaxed);
         self.exc_stack.push(irq);
         // Bank the thread stack, then run the handler on MSP. The frame
         // goes onto the CURRENT stack (PSP if thread+PSP, else MSP) — this

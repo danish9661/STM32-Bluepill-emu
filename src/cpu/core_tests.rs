@@ -33,6 +33,10 @@ fn wfi_sleeps_and_wakes_on_dispatch() {
     assert_eq!(n, 1);
     assert!(cpu.sleeping, "wfi should sleep with nothing pending");
     assert_eq!(cpu.regs.r[15] & !1, 0x080000C2, "resume is staged after wfi");
+    assert!(
+        crate::system::CPU_SLEEPING.load(std::sync::atomic::Ordering::Relaxed),
+        "wfi must mirror to the power-state flag"
+    );
 
     // Driver-style dispatch: pend IRQ6, pop it (clearing the NVIC pending
     // bit, like intr_next does), enter (must wake), run to return.
@@ -42,6 +46,10 @@ fn wfi_sleeps_and_wakes_on_dispatch() {
     assert_eq!(irq, Some(6));
     cpu.take_exception(sys, &mut mem, irq.unwrap());
     assert!(!cpu.sleeping, "exception entry must wake the core");
+    assert!(
+        !crate::system::CPU_SLEEPING.load(std::sync::atomic::Ordering::Relaxed),
+        "exception entry must clear the power-state flag"
+    );
     assert_eq!(cpu.ipsr, 22);
     let mut hd = 0u32;
     while cpu.ipsr != 0 && hd < 100 && cpu.fault.is_none() {

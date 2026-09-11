@@ -54,12 +54,69 @@ pub struct Bank {
     pcr: u32,
     pmem: u32,
     patt: u32,
-    /// NAND ECC accumulator (ECCR2/3): order-sensitive XOR-fold of every
-    /// data byte transferred while PCR.ECCEN is set. NOT silicon
-    /// Hamming-compatible (that needs an oracle to verify); it is
-    /// self-consistent, so firmware store-then-verify ECC flows pass.
-    /// Cleared on ECCEN 0->1 (fresh sector).
-    ecc: u32,
+    /// NAND ECC state (ECCR2/3): standard row+column parity Hamming code
+    /// (Linux nand_ecc construction) over the bytes transferred while
+    /// PCR.ECCEN is set. 1-bit errors are locatable from the code
+    /// difference (syndrome); see `ecc_code` for the bit layout.
+    /// Position counter + accumulators reset on ECCEN 0->1 (fresh sector).
+    ecc: NandEcc,
+}
+
+/// Row+column parity Hamming accumulator for one NAND bank.
+///
+/// For every fed byte at sector position `p`, the byte is XORed into the
+/// row accumulator selected by each address bit of `p`
+/// (`row[2*j + ((p >> j) & 1)]`), and into the column XOR. At read time
+/// each accumulator folds to one parity bit: 26 row bits (address bits
+/// 0..12, covering up to 8192-byte pages) + 6 column bits. Shorter pages
+/// simply leave the high row bits zero (firmware feeds exact page sizes).
+/// Bit-exact silicon parity is unverified (no silicon oracle exists), but
+/// the construction is a true Hamming code: any single-bit flip produces
+/// a syndrome that locates the exact byte and bit (proven in test_all).
+#[derive(Default, Clone, Copy)]
+struct NandEcc {
+    col: u32,
+    row: [u32; 26],
+    pos: u32,
+}
+
+impl NandEcc {
+    /// Feed transfer bytes at the current position. Row depth follows the
+    /// PCR ECCPS page size (bits[19:17]: 0..5 → 256..8192 bytes, i.e.
+    /// address bits 0..7+eccps); higher pairs stay zero, so short pages
+    /// produce short codes exactly like size-gated hardware.
+    fn feed(&mut self, pcr: u32, bytes: &[u8]) {
+        let maxbit = 7 + ((pcr >> 17) & 7).min(5);
+        for &b in bytes {
+            let p = self.pos;
+            self.col ^= b as u32;
+            for j in 0..=maxbit {
+                self.row[(2 * j + ((p >> j) & 1)) as usize] ^= b as u32;
+            }
+            self.pos = self.pos.wrapping_add(1);
+        }
+    }
+
+    /// Packed ECCR value: bits[2j+1:2j] = row-parity pair for address bit
+    /// j (even/odd positions), bits[31:26] = column parities cp0..cp5
+    /// (Linux mapping: cp0={0,2,4,6}, cp1={1,3,5,7}, cp2={0,1,4,5},
+    /// cp3={2,3,6,7}, cp4={0,1,2,3}, cp5={4,5,6,7}).
+    fn code(&self) -> u32 {
+        let par = |v: u32| v.count_ones() & 1;
+        let mut ecc = 0u32;
+        for j in 0..13 {
+            ecc |= par(self.row[2 * j]) << (2 * j);
+            ecc |= par(self.row[2 * j + 1]) << (2 * j + 1);
+        }
+        let c = self.col;
+        ecc |= (((c & 0x55).count_ones() & 1) << 26) as u32;
+        ecc |= (((c & 0xAA).count_ones() & 1) << 27) as u32;
+        ecc |= (((c & 0x33).count_ones() & 1) << 28) as u32;
+        ecc |= (((c & 0xCC).count_ones() & 1) << 29) as u32;
+        ecc |= (((c & 0x0F).count_ones() & 1) << 30) as u32;
+        ecc |= (((c & 0xF0).count_ones() & 1) << 31) as u32;
+        ecc
+    }
 }
 
 impl Bank {
@@ -69,13 +126,12 @@ impl Bank {
         let name = ext_device.as_ref()
             .map(|d| d.borrow_mut().connect_peripheral(&name))
             .unwrap_or(name);
-        Self { name, ext_device, bcr: 0, btr: 0, bwtr: 0, pcr: 0, pmem: 0, patt: 0, ecc: 0 }
+        Self { name, ext_device, bcr: 0, btr: 0, bwtr: 0, pcr: 0, pmem: 0, patt: 0, ecc: NandEcc::default() }
     }
 
     fn ecc_feed(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            self.ecc = self.ecc.rotate_left(1) ^ b as u32;
-        }
+        let pcr = self.pcr;
+        self.ecc.feed(pcr, bytes);
     }
 
     fn read_data(&mut self, sys: &System, offset: u32) -> u32 {
@@ -198,7 +254,7 @@ impl Peripheral for Fsmc {
                     Reg::Pcr => bank.pcr,
                     Reg::Pmem => bank.pmem,
                     Reg::Patt => bank.patt,
-                    Reg::Eccr => bank.ecc,
+                    Reg::Eccr => bank.ecc.code(),
                 }
             }
         }
@@ -241,7 +297,7 @@ impl Peripheral for Fsmc {
                     Reg::Pcr => {
                         // ECCEN 0->1 starts a fresh sector (clear ECC).
                         if value & (1 << 6) != 0 && bank.pcr & (1 << 6) == 0 {
-                            bank.ecc = 0;
+                            bank.ecc = NandEcc::default();
                         }
                         bank.pcr = value & 0x3FFF_FFFF;
                     }

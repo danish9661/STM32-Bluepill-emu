@@ -16,12 +16,21 @@ static void can_setup(uint32_t base) {
     reg(base + 0x00) &= ~1u;   // leave init mode
     spin(100);
     reg(base + 0x1C) = (1u << 30) | (1u << 24) | (3u << 20) | (4u << 16) | 1u;
-    reg(base + 0x200) = 1;     // filter init mode
-    reg(base + 0x204) = 1;     // 32-bit scale, bank 0
-    reg(base + 0x20C) = 0;     // mask mode (not list)
-    reg(base + 0x240) = 0;     // ID=0, mask=0: accept all
-    reg(base + 0x21C) = 1;     // activate filter 0
-    reg(base + 0x200) = 0;     // exit filter init
+}
+
+// Silicon filter bank: all 28 banks live in CAN1 (CAN2SB=14 default splits
+// 0..13 to CAN1, 14..27 to CAN2); CAN2 owns no filter registers. Bank 0
+// (CAN1) and bank 14 (CAN2) both accept-all, 32-bit mask mode.
+static void can_filters(void) {
+    reg(CAN1_B + 0x200) = 1;     // filter init mode
+    reg(CAN1_B + 0x204) = (1u << 0) | (1u << 14); // 32-bit scale, banks 0 + 14
+    reg(CAN1_B + 0x20C) = 0;     // mask mode (not list)
+    reg(CAN1_B + 0x240) = 0;     // bank 0: ID=0, mask=0: accept all
+    reg(CAN1_B + 0x244) = 0;
+    reg(CAN1_B + 0x240 + 14 * 8) = 0; // bank 14: ID=0, mask=0: accept all
+    reg(CAN1_B + 0x244 + 14 * 8) = 0;
+    reg(CAN1_B + 0x21C) = (1u << 0) | (1u << 14); // activate filters 0 + 14
+    reg(CAN1_B + 0x200) = (14u << 8); // exit init, CAN2SB=14 (default)
 }
 
 static void can_xfer(uint32_t base, const char *name, uint32_t id, uint32_t data) {
@@ -56,6 +65,7 @@ void setup() {
     RCC->APB2ENR |= (1 << 3);                // GPIOBEN (pins idle in loopback)
     can_setup(CAN1_B);
     can_setup(CAN2_B);
+    can_filters();
     Serial.println("both buses up");
 }
 

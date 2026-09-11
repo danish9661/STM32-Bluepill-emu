@@ -1,19 +1,27 @@
-use crate::system::System;
+use crate::system::{System, INSTRUCTION_COUNT};
 use super::Peripheral;
 
 /// Minimal ARM DWT (Data Watchpoint and Trace) cycle counter.
 ///
 /// Arduino-STM32's `micros()` and `TwoWire::recoverBus()` spin on
-/// `DWT->CYCCNT` (0xE0001004), which this peripheral model did not
-/// implement — reads returned 0, so any CYCCNT delay loop (e.g. `micros()`,
-/// I2C bus recovery) hung forever. CYCCNT tracks the global
-/// instruction counter (1 instr = 1 cycle, matching the TIM/ADC model);
+/// `DWT->CYCCNT` (0xE0001004), which reads returned 0 for, so any CYCCNT
+/// delay loop hung forever. CYCCNT tracks the global instruction counter
+/// (1 instr = 1 cycle, matching the TIM/ADC model), PLUS flash wait-state
+/// stalls: each instruction retires `1 + LATENCY` cycles where LATENCY is
+/// the FLASH ACR setting (RM0008: 0/1/2 wait states, clamped to 2).
+/// Instruction pacing itself is untouched — only the cycle counter sees
+/// the stalls, so delay loops paced by CYCCNT stretch exactly like silicon
+/// while instruction budgets stay put.
 /// CTRL.CYCCNTENA is stored but not gated (lenient, like the rest of the
 /// model). Other DWT registers read 0 / ignore writes.
 #[derive(Default)]
 pub struct Dwt {
     ctrl: u32,
-    /// Written CYCCNT base: reads return INSTRUCTION_COUNT + offset, so a
+    /// Wait-state-scaled cycles retired up to `last_count`.
+    cycles: u64,
+    /// INSTRUCTION_COUNT at the last tick (delta base).
+    last_count: u64,
+    /// Written CYCCNT base: reads return computed cycles + offset, so a
     /// guest write takes effect immediately and then keeps counting.
     cyccnt_offset: i64,
 }
@@ -23,29 +31,55 @@ impl Dwt {
         if name == "DWT" { Some(Box::new(Self::default())) } else { None }
     }
 
-    fn cyccnt(&self) -> u32 {
-        let count = crate::system::INSTRUCTION_COUNT
-            .load(std::sync::atomic::Ordering::Relaxed) as i64;
-        count.wrapping_add(self.cyccnt_offset) as u32
+    fn count_now() -> u64 {
+        INSTRUCTION_COUNT.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Current cycles per instruction (1 + FLASH wait states, RM0008).
+    /// Read live (not cached) so an ACR write takes effect on the very
+    /// next read/tick with no one-batch lag.
+    fn live_rate(sys: &System) -> u64 {
+        1 + sys.p.flash_latency().min(2) as u64
+    }
+
+    /// Cycles retired so far (exact between ticks).
+    fn computed(&self, sys: &System) -> u64 {
+        let now = Self::count_now();
+        self.cycles + now.saturating_sub(self.last_count) * Self::live_rate(sys)
+    }
+
+    fn cyccnt(&self, sys: &System) -> u32 {
+        (self.computed(sys) as i64).wrapping_add(self.cyccnt_offset) as u32
     }
 }
 
 impl Peripheral for Dwt {
-    fn read(&mut self, _sys: &System, offset: u32) -> u32 {
+    fn tick(&mut self, sys: &System) {
+        let now = Self::count_now();
+        self.cycles += now.saturating_sub(self.last_count) * Self::live_rate(sys);
+        self.last_count = now;
+    }
+
+    fn tick_frozen(&mut self, _sys: &System) {
+        // Deep sleep gates the core clock: resync the delta base WITHOUT
+        // retiring cycles, or the wake tick would redeem the whole sleep
+        // as CYCCNT progress (same class as the TIM catch-up bug).
+        self.last_count = Self::count_now();
+    }
+
+    fn read(&mut self, sys: &System, offset: u32) -> u32 {
         match offset {
             0x00 => self.ctrl,
-            0x04 => self.cyccnt(),
+            0x04 => self.cyccnt(sys),
             _ => 0,
         }
     }
 
-    fn write(&mut self, _sys: &System, offset: u32, value: u32) {
+    fn write(&mut self, sys: &System, offset: u32, value: u32) {
         match offset {
             0x00 => self.ctrl = value,
             0x04 => {
-                let count = crate::system::INSTRUCTION_COUNT
-                    .load(std::sync::atomic::Ordering::Relaxed) as i64;
-                self.cyccnt_offset = (value as i64).wrapping_sub(count);
+                self.cyccnt_offset = (value as i64).wrapping_sub(self.computed(sys) as i64);
             }
             _ => {}
         }

@@ -199,6 +199,33 @@ def skip_excl_rt_pc(first, second):
     return False
 
 
+def skip_ldm_stm_rn_list(first, second):
+    """32-bit LDM/STM with writeback whose Rn is in its own register list
+    (W=o1[5], Rn=o1[3:0], list=o2): UNPREDICTABLE. The oracle faults
+    INSN_INVALID; we execute (stores keep the original value, loads fault
+    per the LDM-Rn-list-WB rule — both silicon-plausible and probe-noted
+    in the decoder). Resample; valid forms are probe-verified
+    (ldmdb_forms) and firmware-exercised. Structural, not mnemonic: seed 6
+    hit `stm.w r0!,{r0,r3,r4,r8,r11,r12}` clean through the mnemonic-based
+    oracle-limit check, which returns False for every ldm/stm spelling by
+    construction. Rn==SP (PUSH.W/POP.W) is oracle-verified working and
+    keeps flowing; 16-bit STMIA/LDMIA never diverged in ~4K cases and
+    stays sampled.
+    """
+    if second is None:
+        return False
+    if (first & 0xF000) != 0xE000:
+        return False
+    if (first & 0x0E40) != 0x0800:  # o1[11:9]==100, bit6==0 (not STRD/LDRD)
+        return False
+    if not (first & 0x0020):  # W
+        return False
+    rn = first & 0x000F
+    if rn == 0xD:
+        return False
+    return bool((second >> rn) & 1)
+
+
 def skip_wb_to_rt(first, second):
     """Single-transfer writeback-to-Rt (Rn==Rt with pre-index `!` or
     post-index): UNPREDICTABLE — the oracle keeps the loaded value while
@@ -340,6 +367,10 @@ def gen_single(rng, ops16, ops32):
         return None
     # UNPREDICTABLE exclusive-into-PC: resample (structural, not mnemonic).
     if skip_excl_rt_pc(first, second):
+        return None
+    # UNPREDICTABLE LDM/STM writeback with Rn in its own list: resample
+    # (structural — the mnemonic oracle-limit check can't see it).
+    if skip_ldm_stm_rn_list(first, second):
         return None
     # UNPREDICTABLE writeback-to-Rt: resample.
     if skip_wb_to_rt(first, second):
