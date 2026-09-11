@@ -235,7 +235,7 @@ export async function createEmulator(opts = {}) {
     gpio_set_input, gpio_read_input,
     can_inject_message, adc_set_sim_value, gpio_set_analog, adc_set_rc_tau,
     touchscreen_set_touch, pwm_duty, raise_fault,
-     i2c_oled_fb, lcd_fb, gpio_take_pin_events,     drain_events, spi_inject_miso, i2c_inject_rx, i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop, i2c_inject_alert, bootloader_enable, bootloader_go_addr, pwr_mode, pwr_estimate, adc_set_internal, usb_inject_setup, usb_inject_out,
+     i2c_oled_fb, lcd_fb, gpio_take_pin_events,     drain_events, spi_inject_miso, i2c_inject_rx, i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop, i2c_inject_alert, bootloader_enable, bootloader_go_addr, pwr_mode, pwr_estimate, adc_set_internal, usb_bus_reset, usb_inject_setup, usb_inject_out,
     rustcpu_init, rustcpu_load, rustcpu_run, rustcpu_fault, rustcpu_fault_clear, rustcpu_dispatch,
     rustcpu_regs, rustcpu_set_pc, rustcpu_set_reg, rustcpu_mem_read, rustcpu_mem_write, rustcpu_mem_write_raw, rustcpu_dma_pump, rustcpu_i2c_hook_fired,
     rustcpu_write_tap, rustcpu_take_writes, set_dbg_idcode } = periph;
@@ -699,6 +699,8 @@ export async function createEmulator(opts = {}) {
         /** Inject a USB SETUP packet (8 bytes) into EP0 (host -> device). Returns false when NAKed. */
         usbInjectSetup(bytes) { return usb_inject_setup(bytes); },
 
+        /** Host-driven USB bus reset (SE0): address clears, endpoints reset, RESET IRQ. */
+        usbBusReset() { return usb_bus_reset(); },
         /** Inject a USB OUT packet into an endpoint (host -> device). Returns false when NAKed. */
         usbInjectOut(ep, bytes) { return usb_inject_out(ep, bytes); },
 

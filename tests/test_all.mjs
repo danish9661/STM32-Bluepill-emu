@@ -2499,21 +2499,22 @@ periph_write(USB + U_EP0, 4, 0x3200); // TYPE=control, STAT_RX VALID
 assert_eq(periph_read(USB + U_EP0, 4), 0x3200, 'USB EP0 control + RX VALID');
 periph_write(USB + U_BTABLE, 4, 0);
 assert_eq(periph_read(USB + U_BTABLE, 4), 0, 'USB BTABLE');
-periph_write(U_PMA + 0, 2, 0x40);   // ADDR0_TX = 0x40
-periph_write(U_PMA + 2, 2, 0);      // COUNT0_TX = 0
-periph_write(U_PMA + 4, 2, 0x80);   // ADDR0_RX = 0x80
-periph_write(U_PMA + 6, 2, 0);      // COUNT0_RX cfg
-periph_write(U_PMA + 12, 2, 0xC0);  // ADDR1_RX = 0xC0
-periph_write(U_PMA + 14, 2, 0);     // COUNT1_RX cfg
+periph_write(U_PMA + 0, 2, 0x30);   // ADDR0_TX = 0x30 (DESC0)
+periph_write(U_PMA + 4, 2, 0);      // COUNT0_TX = 0
+periph_write(U_PMA + 8, 2, 0x20);   // ADDR0_RX = 0x20 (DESC1)
+periph_write(U_PMA + 12, 2, 0);     // COUNT0_RX cfg
+periph_write(U_PMA + 24, 2, 0x40);  // ADDR1_RX = 0x40
+periph_write(U_PMA + 28, 2, 0);     // COUNT1_RX cfg
 
-// SETUP delivery (GET_DESCRIPTOR): PMA bytes, COUNT=8, CTR_RX+SETUP, IRQ20
+// SETUP delivery (GET_DESCRIPTOR): PMA bytes (word 0x20 -> APB 64, 4-stride),
+// COUNT=8, CTR_RX+SETUP, IRQ20
 const setup = [0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x40, 0x00];
 assert_eq(usb_inject_setup(setup), true, 'USB SETUP accepted when armed');
 for (let i = 0; i < 8; i++) {
-    const b = periph_read(U_PMA + 0x80 + i, 1);
+    const b = periph_read(U_PMA + 64 + (i >> 1) * 4 + (i & 1), 1);
     if (b !== setup[i]) { assert_eq(b, setup[i], `USB SETUP PMA byte ${i}`); break; }
 }
-assert_eq(periph_read(U_PMA + 6, 2) & 0x3FF, 8, 'USB COUNT0_RX = 8 after SETUP');
+assert_eq(periph_read(U_PMA + 12, 2) & 0x3FF, 8, 'USB COUNT0_RX = 8 after SETUP');
 const ep0 = periph_read(USB + U_EP0, 4);
 assert_eq(ep0 & 0x8800, 0x8800, 'USB EP0 CTR_RX + SETUP set');
 assert_eq(ep0 & 0x3000, 0x2000, 'USB EP0 STAT_RX back to NAK');
@@ -2529,11 +2530,12 @@ periph_write(USB + U_EP0, 4, 0x3200);
 assert_eq(periph_read(USB + U_EP0, 4) & 0x8800, 0, 'USB CTR_RX + SETUP cleared together');
 periph_write(USB + U_ISTR, 4, 0xFFFFFFFF & ~(I_CTR | I_DIR));
 
-// IN completion: 18-byte descriptor via PMA TX, STAT_TX -> VALID fires once
+// IN completion: 18-byte descriptor via PMA TX (word 0x30 -> APB 96,
+// 4-stride), STAT_TX -> VALID fires once
 const desc = [];
 for (let i = 0; i < 18; i++) desc.push((0x10 + i) & 0xFF);
-for (let i = 0; i < 18; i++) periph_write(U_PMA + 0x40 + i, 1, desc[i]);
-periph_write(U_PMA + 2, 2, 18); // COUNT0_TX = 18
+for (let i = 0; i < 18; i++) periph_write(U_PMA + 96 + (i >> 1) * 4 + (i & 1), 1, desc[i]);
+periph_write(U_PMA + 4, 2, 18); // COUNT0_TX = 18
 periph_write(USB + U_EP0, 4, 0x0030); // STAT_TX DISABLED -> VALID: transfer!
 const uev = drain_events();
 let usbIn = null;
@@ -2566,9 +2568,9 @@ const U_EP1 = 0x04;
 periph_write(USB + U_EP1, 4, 0x3001);
 assert_eq(periph_read(USB + U_EP1, 4), 0x3001, 'USB EP1 armed for OUT');
 assert_eq(usb_inject_out(1, [9, 8, 7]), true, 'USB bulk OUT accepted when armed');
-assert_eq(periph_read(U_PMA + 0xC0, 1), 9, 'USB OUT PMA byte 0');
-assert_eq(periph_read(U_PMA + 0xC0 + 2, 1), 7, 'USB OUT PMA byte 2');
-assert_eq(periph_read(U_PMA + 14, 2) & 0x3FF, 3, 'USB COUNT1_RX = 3');
+assert_eq(periph_read(U_PMA + 128, 1), 9, 'USB OUT PMA byte 0');
+assert_eq(periph_read(U_PMA + 128 + 4, 1), 7, 'USB OUT PMA byte 2');
+assert_eq(periph_read(U_PMA + 28, 2) & 0x3FF, 3, 'USB COUNT1_RX = 3');
 assert_eq(periph_read(USB + U_EP1, 4) & 0x8000, 0x8000, 'USB EP1 CTR_RX after OUT');
 assert_eq(usb_inject_out(1, [1]), false, 'USB OUT NAKed while not re-armed');
 periph_write(USB + U_EP1, 4, 0x1000); // STAT_RX NAK -> VALID (toggle bit 12 only)
@@ -2580,19 +2582,19 @@ periph_write(USB + U_ISTR, 4, 0);
 // Isochronous endpoints move data exactly like bulk (no SOF-gating in the
 // model; TYPE is stored, mechanics shared). EP2 as ISO OUT then ISO IN.
 // (Toggle writes are relative: compute the mask from live STAT_RX.)
-periph_write(U_PMA + 20, 2, 0x100);  // ADDR2_RX
-periph_write(U_PMA + 22, 2, 0x8800); // COUNT2_RX 64B blocks
+periph_write(U_PMA + 40, 2, 0x50);  // ADDR2_RX (word -> APB 160, 4-stride)
+periph_write(U_PMA + 44, 2, 0x8800); // COUNT2_RX 64B blocks
 {
 const ep2cur = periph_read(USB + U_EP2, 4);
 periph_write(USB + U_EP2, 4, 0x0402 | ((((ep2cur >> 12) & 3) ^ 3) << 12)); // EA2 + TYPE_ISO + RX->VALID
 }
 assert_eq(periph_read(USB + U_EP2, 4) & 0x0600, 0x0400, 'USB EP2 TYPE_ISO stored');
 assert_eq(usb_inject_out(2, [0xAA, 0xBB]), true, 'USB ISO OUT accepted when armed');
-assert_eq(periph_read(U_PMA + 0x100, 1), 0xAA, 'USB ISO OUT lands in RX buffer');
+assert_eq(periph_read(U_PMA + 160, 1), 0xAA, 'USB ISO OUT lands in RX buffer');
 assert_eq(periph_read(USB + U_EP2, 4) & 0x8000, 0x8000, 'USB EP2 CTR_RX after ISO OUT');
-periph_write(U_PMA + 16, 2, 0x140);  // ADDR2_TX
-periph_write(U_PMA + 0x140, 1, 0x5A);
-periph_write(U_PMA + 18, 2, 1);      // COUNT2_TX = 1
+periph_write(U_PMA + 32, 2, 0x58);  // ADDR2_TX (word -> APB 176, 4-stride)
+periph_write(U_PMA + 176, 1, 0x5A);
+periph_write(U_PMA + 36, 2, 1);      // COUNT2_TX = 1
 periph_write(USB + U_EP2, 4, 0x0432); // STAT_TX DISABLED -> VALID (keep EA2+TYPE_ISO)
 const iev = drain_events();
 let isoIn = null;
@@ -2650,18 +2652,17 @@ assert(has_pending_interrupt() && get_next_pending_interrupt() === 42,
 clear_current_interrupt();
 periph_write(USB + U_ISTR, 4, 0);
 periph_write(USB + U_CNTR, 4, 0);
-// Auto-suspend after 3 idle frames (no traffic): SOF freezes too
+// SOF frames are bus activity: idle transfer gaps never suspend (an
+// attached host sends SOF every frame; suspend needs a silent bus, which
+// the always-attached emulated host never produces). FNR keeps advancing.
 const fnr0 = periph_read(USB + 0x48, 4) & 0x7FF;
 step_batch(72000 * 4);
-assert_eq(periph_read(USB + U_ISTR, 4) & (1 << 11), 1 << 11, 'USB auto-suspend after 3 idle frames');
-const fnr1 = periph_read(USB + 0x48, 4) & 0x7FF;
-step_batch(72000 * 2);
-assert_eq(periph_read(USB + 0x48, 4) & 0x7FF, fnr1, 'USB FNR frozen while suspended');
-// Traffic resumes: OUT inject wakes (WKUP) and restarts SOF
+assert_eq(periph_read(USB + U_ISTR, 4) & (1 << 11), 0, 'USB no auto-suspend while SOF flows');
+assert((periph_read(USB + 0x48, 4) & 0x7FF) !== fnr0, 'USB FNR advances across idle frames');
+// Plain traffic delivers with no SUSP/WKUP churn
 periph_write(USB + U_EP1, 4, 0x1000); // re-arm EP1 OUT (NAK -> VALID toggle)
-assert_eq(usb_inject_out(1, [0xAA]), true, 'USB OUT accepted to wake');
-assert_eq(periph_read(USB + U_ISTR, 4) & (1 << 12), 1 << 12, 'USB WKUP on traffic resume');
-assert_eq(periph_read(USB + U_ISTR, 4) & (1 << 11), 0, 'USB SUSP cleared on resume');
+assert_eq(usb_inject_out(1, [0xAA]), true, 'USB OUT accepted while awake');
+assert_eq(periph_read(USB + U_ISTR, 4) & ((1 << 11) | (1 << 12)), 0, 'USB no SUSP/WKUP on plain traffic');
 periph_write(USB + U_ISTR, 4, 0);
 // Remote wakeup: RESUME pulse (CNTR.4) self-clears after a frame + WKUP
 periph_write(USB + U_CNTR, 4, (1 << 11) | (1 << 12) | (1 << 1)); // FSUSP again
@@ -2672,8 +2673,8 @@ assert_eq(periph_read(USB + U_ISTR, 4) & (1 << 12), 1 << 12, 'USB WKUP after RES
 periph_write(USB + U_ISTR, 4, 0);
 periph_write(USB + U_CNTR, 4, 0);
 
-// Double-buffered bulk EP3 OUT: DTOG_RX selects the buffer block (RX desc
-// at DTOG=0, TX desc repurposed at DTOG=1); STAT stays VALID across fills.
+// Double-buffered bulk EP3 OUT: DTOG_RX ping-pongs between DESC0
+// (DTOG=0) and DESC1 (DTOG=1); STAT stays VALID across fills.
 reset();
 periph_write(USB + U_CNTR, 4, 0);
 periph_write(USB + U_BTABLE, 4, 0);
@@ -2682,21 +2683,21 @@ const U_EP3 = 0x0C;
 // written value, so split writes would clear EA/KIND again).
 periph_write(USB + U_EP3, 4, 0x3103);          // EA=3, KIND, STAT_RX VALID
 assert_eq(periph_read(USB + U_EP3, 4), 0x3103, 'USB EP3 DB armed');
-periph_write(U_PMA + 24, 2, 0x100);  // ADDR3_TX (buffer B) = 0x100
-periph_write(U_PMA + 26, 2, 0);      // COUNT3_TX
-periph_write(U_PMA + 28, 2, 0x140);  // ADDR3_RX (buffer A) = 0x140
-periph_write(U_PMA + 30, 2, 0);      // COUNT3_RX
+periph_write(U_PMA + 48, 2, 0x50);  // ADDR3 DESC0 (buffer A) = 0x50
+periph_write(U_PMA + 52, 2, 0);     // COUNT3 DESC0
+periph_write(U_PMA + 56, 2, 0x60);  // ADDR3 DESC1 (buffer B) = 0x60
+periph_write(U_PMA + 60, 2, 0);     // COUNT3 DESC1
 assert_eq(usb_inject_out(3, [0x11]), true, 'USB DB OUT fill buffer A');
-assert_eq(periph_read(U_PMA + 0x140, 1), 0x11, 'USB DB buffer A byte');
+assert_eq(periph_read(U_PMA + 160, 1), 0x11, 'USB DB buffer A byte');
 assert_eq(periph_read(USB + U_EP3, 4) & 0x3000, 0x3000, 'USB DB stays VALID after first fill');
 assert_eq(usb_inject_out(3, [0x22]), true, 'USB DB OUT fill buffer B');
-assert_eq(periph_read(U_PMA + 0x100, 1), 0x22, 'USB DB buffer B byte');
+assert_eq(periph_read(U_PMA + 192, 1), 0x22, 'USB DB buffer B byte');
 // Double-buffered bulk EP4 IN: DTOG_TX selects the source block.
 // Descriptors first (the VALID transition completes immediately).
 const U_EP4 = 0x10;
-periph_write(U_PMA + 32, 2, 0x180);  // ADDR4_TX (buffer A)
-periph_write(U_PMA + 34, 2, 1);      // COUNT4_TX = 1
-periph_write(U_PMA + 0x180, 1, 0x77);
+periph_write(U_PMA + 64, 2, 0x70);  // ADDR4 DESC0 (buffer A)
+periph_write(U_PMA + 68, 2, 1);     // COUNT4 DESC0 = 1
+periph_write(U_PMA + 224, 1, 0x77);
 periph_write(USB + U_EP4, 4, 0x0134); // EA=4 + KIND + STAT_TX VALID, one write
 const dev = Array.from(drain_events());
 let usb = [];

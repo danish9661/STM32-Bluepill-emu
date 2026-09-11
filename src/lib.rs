@@ -474,11 +474,21 @@ pub fn drain_events() -> Vec<i32> {
     }
 }
 
+/// Host-driven USB bus reset (SE0): device address clears, endpoints
+/// reset, RESET event + IRQ — what a real plug-in sends. Returns false
+/// with no USB peripheral mapped.
+#[wasm_bindgen]
+pub fn usb_bus_reset() -> bool {
+    match try_sys() {
+        Some(sys) => sys.p.usb_bus_reset(sys),
+        None => false,
+    }
+}
+
 /// Inject a USB SETUP packet (8 bytes) into EP0's RX buffer (host -> device).
 /// Returns false when NAKed (endpoint not armed VALID) or the address is bad.
 #[wasm_bindgen]
-pub fn usb_inject_setup(data: &[u8]) -> bool {
-    if data.len() != 8 {
+pub fn usb_inject_setup(data: &[u8]) -> bool {    if data.len() != 8 {
         return false;
     }
     match try_sys() {

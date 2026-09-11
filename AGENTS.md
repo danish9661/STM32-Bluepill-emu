@@ -468,6 +468,35 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
   reviewed: hub, boards, API, tables, badges, no duplicate H1;
   CPU.md → PATH_B.md click-through with correct title).
 
+### 40. Real-stack USB: BTABLE stride + PMA window + SETUP-always-ACK + SOF-activity + EP2-IN echo [this sprint]
+- **BTABLE stride was 8, silicon is 16** (`src/peripherals/usb.rs`): ST's F1 HAL
+  (`PCD_SET_EP_*` macros, `PMA_ACCESS = 2`) puts DESC0 ADDR/CNT @ +0/+4 and
+  DESC1 @ +8/+12 per endpoint (single: TX=DESC0/RX=DESC1; DB: DTOG picks).
+  Proven 4 ways (header macros, `USB_ActivateEndpoint` disasm, IRQ-handler
+  read sites, live `PMA[8]=0x20` = app's EP0-RX address). Data buffers are PMA
+  words with 4-byte APB spread. Unit-test pokes + `arduino_usb_cdc` demo
+  firmware ported to the ST layout (it was written against the old one).
+- **PMA window is 1024 B, model had 512** (`PMA_BYTES`, `0x400..0x800` range):
+  Arduino CDC-IN buffer @ word 288 lands at window offset 576+ — silently
+  dropped before. Bus maps already covered `0x40006000-0x40006400`.
+- **SETUP always ACKed** (`deliver_rx`): F1 silicon accepts SETUP while NAK —
+  the ST stack never re-arms RX after status-IN transfers (found by watching
+  EP0R stick at RX-NAK after SET_ADDRESS kill enumeration).
+- **SOF is bus activity** (`tick_usb`): auto-suspend on transfer-idle wedged
+  enumeration (`dev_state` stuck SUSPENDED=4 → SET_CONFIG CtlErrors). An
+  attached host's SOFs always reset the 3 ms timer; suspend is now
+  FSUSP-forced only. Unit tests reworked (SOF-keeps-awake + FSUSP traffic
+  semantics instead of idle-suspend).
+- **Arduino CDC is EP1-OUT/EP2-IN/EP3-CMD** (not EP1-IN): read off the live
+  config descriptor after chasing a phantom IN stall for hours. Test listens
+  on EP2; banner + `Hi` echo verified byte-exact.
+- **Verified**: `test_usb_serial.mjs` 11/11 (was 2/7), `test_usb_cdc.mjs` 22/22,
+  `test_all.mjs` 590/590, wasm rebuilt pinned + `site/` synced.
+- Debug discipline used: resolve ELF symbols fresh per build (a stale
+  `uwTick` addr cost a detour in §32 too), `memRead32` for RAM
+  (`periphRead` on SRAM returns bus zeros — burned an hour on phantom
+  `dev_state=0`), check `drainEvents` discriminants before blaming the model.
+
 
 
 ## Next Phase — Long-term Optimizations

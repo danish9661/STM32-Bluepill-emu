@@ -66,6 +66,11 @@ pub trait Peripheral {
     /// Host-side USB OUT/SETUP delivery into endpoint `ep` (`is_setup` only
     /// legal on EP0). Returns false when NAKed. Default: unhandled.
     fn usb_inject(&mut self, _sys: &System, _ep: usize, _data: &[u8], _is_setup: bool) -> bool { false }
+    /// Host-driven USB bus reset (SE0): device address clears, endpoints
+    /// reset, RESET event + IRQ (what a real plug-in/enumeration sends;
+    /// FRES release alone lands before firmware arms its masks).
+    /// Default: unhandled.
+    fn usb_bus_reset(&mut self, _sys: &System) -> bool { false }
     /// Host-side I2C slave transactions (this peripheral addressed as slave).
     /// Defaults: unhandled (NACK / no data).
     fn i2c_slave_start(&mut self, _sys: &System, _addr: u16, _is_read: bool) -> bool { false }
@@ -375,7 +380,7 @@ impl Peripherals {
             let size = regs.get(i + 1)
                 .map(|&(next, _)| (next - base).min(0x400))
                 .unwrap_or(0x100);
-            // USB needs registers + 512 B packet memory (ends at CAN1 start).
+            // USB needs registers + 1024 B packet-memory window (ends at CAN1 start).
             let size = if name == "USB" { 0x800 } else { size };
 
             let p: Option<Box<dyn Peripheral>> =
@@ -718,6 +723,15 @@ impl Peripherals {
     pub fn usb_inject(&self, sys: &System, ep: usize, data: &[u8], is_setup: bool) -> bool {
         if let Some(slot) = self.bus.borrow().get(0x4000_5C00) {
             slot.peripheral.borrow_mut().usb_inject(sys, ep, data, is_setup)
+        } else {
+            false
+        }
+    }
+
+    /// Host-driven USB bus reset (SE0) on the FS-device peripheral.
+    pub fn usb_bus_reset(&self, sys: &System) -> bool {
+        if let Some(slot) = self.bus.borrow().get(0x4000_5C00) {
+            slot.peripheral.borrow_mut().usb_bus_reset(sys)
         } else {
             false
         }

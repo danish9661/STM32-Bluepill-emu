@@ -13,6 +13,7 @@
 #define PMA_B   0x40006000u
 #define reg(a) (*(volatile uint32_t *)(a))
 #define preg(a) (*(volatile uint16_t *)(a))
+#define pbreg(a) (*(volatile uint8_t *)(a))
 
 // Endpoint register offsets + bits.
 #define EP0R 0x00
@@ -28,19 +29,21 @@
 #define ISTR_CTR (1u << 15)
 #define ISTR_DIR (1u << 4)
 
-// PMA layout (BTABLE = 0).
+// PMA layout (BTABLE = 0, ST stride: 16 bytes/endpoint, DESC0 = TX pair,
+// DESC1 = RX pair). Buffer addresses are PMA words (PMA_ACCESS = 2: word W
+// at APB bytes 2W with a 4-byte stride per 16-bit word).
 #define ADDR0_TX 0x00
-#define COUNT0_TX 0x02
-#define ADDR0_RX 0x04
-#define COUNT0_RX 0x06
-#define ADDR1_TX 0x08
-#define COUNT1_TX 0x0A
-#define ADDR1_RX 0x0C
-#define COUNT1_RX 0x0E
-#define BUF0_TX 0x40
-#define BUF0_RX 0x80
-#define BUF1_TX 0xC0
-#define BUF1_RX 0x100
+#define COUNT0_TX 0x04
+#define ADDR0_RX 0x08
+#define COUNT0_RX 0x0C
+#define ADDR1_TX 0x10
+#define COUNT1_TX 0x14
+#define ADDR1_RX 0x18
+#define COUNT1_RX 0x1C
+#define BUF0_TX 0x20
+#define BUF0_RX 0x30
+#define BUF1_TX 0x40
+#define BUF1_RX 0x50
 
 // EP0R/EP1R direct-field keep values (EA | TYPE): STAT bits written 0
 // never toggle, CTR bits written 0 clear.
@@ -77,13 +80,13 @@ static void ep1_rx_valid(void) {  // RX -> VALID, TX untouched, TX CTR kept
     uint32_t cur = reg(USB_B + EP1R);
     reg(USB_B + EP1R) = EP1_KEEP | CTR_TX | ((((cur >> 12) & 3) ^ 3) << 12);
 }
-static inline void pma_write(uint32_t off, const uint8_t *src, uint32_t len) {
+static inline void pma_write(uint32_t word, const uint8_t *src, uint32_t len) {
     for (uint32_t i = 0; i < len; i++)
-        preg(PMA_B + off + i) = src[i];
+        pbreg(PMA_B + word * 2 + (i >> 1) * 4 + (i & 1)) = src[i];
 }
-static inline void pma_read(uint32_t off, uint8_t *dst, uint32_t len) {
+static inline void pma_read(uint32_t word, uint8_t *dst, uint32_t len) {
     for (uint32_t i = 0; i < len; i++)
-        dst[i] = (uint8_t)preg(PMA_B + off + i);
+        dst[i] = pbreg(PMA_B + word * 2 + (i >> 1) * 4 + (i & 1));
 }
 
 // --- Descriptors ---------------------------------------------------------

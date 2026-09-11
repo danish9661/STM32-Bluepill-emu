@@ -63,13 +63,14 @@ const U = 0x40005C00, PMA = 0x40006000;
 mcu._emu.periphWrite(U + 0x40, 4, 0x8000); // CNTR: CTRM
 mcu._emu.periphWrite(U + 0x00, 4, 0x3200); // EP0 control + RX VALID
 mcu._emu.periphWrite(U + 0x50, 4, 0);      // BTABLE = 0
-mcu._emu.periphWrite(PMA + 0, 2, 0x40);    // ADDR0_TX
-mcu._emu.periphWrite(PMA + 2, 2, 4);       // COUNT0_TX = 4
-mcu._emu.periphWrite(PMA + 4, 2, 0x80);    // ADDR0_RX
+mcu._emu.periphWrite(PMA + 0, 2, 0x30);    // ADDR0_TX (DESC0)
+mcu._emu.periphWrite(PMA + 4, 2, 4);       // COUNT0_TX = 4
+mcu._emu.periphWrite(PMA + 8, 2, 0x20);    // ADDR0_RX (DESC1)
 ok(mcu._emu.usbInjectSetup([1, 2, 3, 4, 5, 6, 7, 8]) === true, 'usbInjectSetup accepted');
 mcu._emu.periphWrite(U + 0x00, 4, 0x3200); // clear CTR_RX
-for (let i = 0; i < 4; i++) mcu._emu.periphWrite(PMA + 0x40 + i, 1, 0xA0 + i);
-mcu._emu.periphWrite(PMA + 2, 2, 4);
+// TX buffer at PMA word 0x30 -> APB bytes 96/97/100/101 (4-byte spread)
+for (let i = 0; i < 4; i++) mcu._emu.periphWrite(PMA + 96 + (i >> 1) * 4 + (i & 1), 1, 0xA0 + i);
+mcu._emu.periphWrite(PMA + 4, 2, 4);
 mcu._emu.periphWrite(U + 0x00, 4, 0x0030); // STAT_TX DISABLED -> VALID: IN fires
 mcu.step(5000);
 ok(usbIn && usbIn[0] === 0 && usbIn[1].join(',') === '160,161,162,163',

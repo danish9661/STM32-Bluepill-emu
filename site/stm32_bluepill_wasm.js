@@ -1018,6 +1018,17 @@ export function uart_rx_pending(addr) {
 }
 
 /**
+ * Host-driven USB bus reset (SE0): device address clears, endpoints
+ * reset, RESET event + IRQ — what a real plug-in sends. Returns false
+ * with no USB peripheral mapped.
+ * @returns {boolean}
+ */
+export function usb_bus_reset() {
+    const ret = wasm.usb_bus_reset();
+    return ret !== 0;
+}
+
+/**
  * Inject a USB OUT packet into an endpoint's RX buffer (host -> device).
  * Returns false when NAKed (endpoint not armed VALID) or the address is bad.
  * @param {number} ep
