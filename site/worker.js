@@ -260,6 +260,7 @@ function loop() {
           case 14: case 15: return 12;
           case 16: return 4; case 17: return 6;
           case 18: return 3 + (flat[j+2]||0);
+          case 19: return 3; // I2cAlert [ch, asserted]
           case 20: return 5 + (flat[j+4]||0);
           case 21: return 4;
           case 2: case 3: case 6: case 8: case 10: return 3;

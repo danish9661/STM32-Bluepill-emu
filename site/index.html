@@ -991,6 +991,7 @@ function usbDrainMain() {
         const len = flat[i+2] || 0;
         usbInbox.push([flat[i+1], Array.from(flat.slice(i+3, i+3+len))]);
         adv = 3 + len;
+      } else if (t === 19) { adv = 3; // I2cAlert [ch, asserted]
       } else if (t === 20) { adv = 5 + (flat[i+4] || 0); // HostTx: device-mode inbox below
         hostTxQ.push([flat[i+1], flat[i+2], flat[i+3], Array.from(flat.slice(i+5, i+5+(flat[i+4]||0)))]);
       } else if (t === 21) { adv = 4; // HostRx request: device-mode inbox below

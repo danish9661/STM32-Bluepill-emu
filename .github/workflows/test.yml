@@ -221,3 +221,9 @@ jobs:
         run: |
           npx playwright install chromium --with-deps
           npx playwright test tests/test_browser.mjs --reporter=list --timeout=300000
+      - name: Browser demo presets (all page presets live)
+        run: npx playwright test tests/test_browser_demos.mjs --reporter=list --timeout=300000
+      - name: Browser board presets (chip + ELF matrix)
+        run: npx playwright test tests/test_browser_boards.mjs --reporter=list --timeout=300000
+      - name: Browser bus-tap decode (7-seg write-tap path)
+        run: npx playwright test tests/test_browser_segdecode.mjs --reporter=list --timeout=300000

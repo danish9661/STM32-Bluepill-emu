@@ -45,8 +45,8 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 
 ## Current Status (all work below is committed; see git log)
 
-> Last updated: 2026-09-09. The emulator is **feature-complete and stable**:
-> 537 unit tests, 39/39 firmware checks, ~70M IPS headless (shared-box noise ±30%). Recent work:
+> Last updated: 2026-09-12. The emulator is **feature-complete and stable**:
+> 629 unit tests, 39/39 firmware checks, ~70M IPS headless (shared-box noise ±30%). Recent work:
 > `--help`/`--verbose` CLI + better errors, comprehensive About page, **removed all
 > `panic!` from user-input paths** (bad pin names / empty bus ranges now degrade
 > gracefully instead of aborting the WASM module), and an audit document
@@ -237,8 +237,8 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
   `uart_rx`/`gpio_set`/`can_inject` commands from clients. Flags: `--port`, `--max`.
   Idle when no clients connected. Rebuild requires `npm install ws` (runtime dep).
 - **`site/ws-viewer.html`**: Standalone browser page that auto-connects to the WS
-  server. Decodes all 17 event types (SPI/I2C/USART/EXTI/ADC/TIM/DAC/CRC/RTC/
-  WDG/CAN/FSMC). Renders: UART terminal, GPIO pin grid (click to toggle input),
+  server. Decodes all 21 event types (SPI/I2C/USART/EXTI/ADC/TIM/DAC/CRC/RTC/
+  WDG/CAN/FSMC/USB/Alert/host). Renders: UART terminal, GPIO pin grid (click to toggle input),
   event log, FPS/instruction counter. Reconnects on disconnect.
 - **Usage**: `node pkg/ws-server.mjs <firmware.elf> [--port=8080]`, then open
   `http://localhost:8080/ws-viewer.html` in a browser.

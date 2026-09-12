@@ -235,6 +235,26 @@ mcu.onI2cAlert = (channel, asserted) => ...; // SMBA driven low (true) / release
   (bit 15, write-0-clears, error IRQ when ITERREN). Encoded as flat
   discriminant 19 (`I2cAlert`: `[channel, asserted]`).
 
+## USB OTG host events
+
+```js
+mcu.onHostTx = (ch, ep, setup, data) => ...; // OUT/SETUP completion: bytes pushed to the wire
+mcu.onHostRx = (ch, ep, len) => ...;         // IN token: peer must answer with data
+```
+
+- `onHostTx(ch, ep, setup, data)` fires when firmware completes a host
+  OUT/SETUP transfer on channel `ch` (`otg.rs` `finish_hc`): `setup` is true
+  for SETUP tokens, `data` the pushed bytes. Observation-only.
+- `onHostRx(ch, ep, len)` fires when firmware arms a host IN transfer
+  (CHENA edge on an IN channel). Answer it with
+  `mcu._emu.otgHostFeedIn(ep, bytes, stall=false)`, which stages `bytes`
+  into the RXFIFO, queues the GRXSTSP received/completed statuses and sets
+  XFRC (`otg.rs` `host_feed_in`; false when no channel is waiting).
+  Attach the virtual device first with `mcu._emu.otgHostAttach(true)`
+  (survives CSFTRST like silicon). Encoded as flat discriminants 20
+  (`HostTx`: `[ch, ep, setup, len, bytes...]`) and 21 (`HostRx`:
+  `[ch, ep, len]`).
+
 ## Complete worked examples
 
 ### Virtual I2C EEPROM (write-back store)
@@ -401,7 +421,7 @@ await mcu.execute(2_000_000);
 
 ### WebSocket bridge (headless Node + browser viewer)
 
-`pkg/ws-server.mjs` runs the emulator headlessly and streams all 17 event
+`pkg/ws-server.mjs` runs the emulator headlessly and streams all 21 event
 types to connected browser clients over WebSocket. `site/ws-viewer.html`
 provides a ready-made viewer with UART terminal, GPIO pin grid, event log,
 and FPS counter. Any WebSocket client can connect and exchange JSON messages.

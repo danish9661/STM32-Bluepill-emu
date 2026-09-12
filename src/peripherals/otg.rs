@@ -606,8 +606,13 @@ impl OtgFs {
         }
         self.grxq
             .push_back(stat_grx(ep, data.len(), PKTSTS_OUT_RX, self.frame));
+        // The transfer-completed status carries no new bytes (BCNT 0, like
+        // silicon): firmware drains per-BCNT on the received status and
+        // learns the length from HCTSIZ remaining. (The device-side
+        // inject() keeps full-BCNT DONE: the CDC demo sizes its echo from
+        // it — asymmetric but each side matches its proven consumer.)
         self.grxq
-            .push_back(stat_grx(ep, data.len(), PKTSTS_OUT_DONE, self.frame));
+            .push_back(stat_grx(ep, 0, PKTSTS_OUT_DONE, self.frame));
         let mut tsiz = self.hc[ch].tsiz;
         tsiz = (tsiz & !HCTSIZ_XFRSIZ_MASK) | ((tsiz & HCTSIZ_XFRSIZ_MASK).saturating_sub(data.len() as u32));
         tsiz &= !(0x1FF << HCTSIZ_PKTCNT_SHIFT);

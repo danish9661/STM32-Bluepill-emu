@@ -103,7 +103,7 @@ function logEvent(text) {
 // Event type names for the log
 const EVT_NAMES = ['','SpiTransfer','I2cStart','I2cWrite','I2cRead','I2cStop','UartTx',
   'ExtiEdge','AdcDone','TimUpdate','DacWrite','CrcResult','RtcAlarm','WdogReset',
-  'CanTx','CanRx','TimCapture','FsmcAccess','UsbIn','I2cAlert'];
+  'CanTx','CanRx','TimCapture','FsmcAccess','UsbIn','I2cAlert','HostTx','HostRx'];
 
 function decodeEvents(arr) {
   let i = 0;
@@ -132,7 +132,9 @@ function decodeEvents(arr) {
       case 17: { const bank = arr[i++], off = arr[i++], wr = arr[i++], sz = arr[i++], val = arr[i++]; logEvent(`FSMC bank${bank} ${wr?'W':'R'} off=0x${off.toString(16)} sz=${sz} val=0x${(val>>>0).toString(16)}`); break; }
       case 18: { const ep = arr[i++], len = arr[i++]; i += len; logEvent(`USB EP${ep} IN ${len}B`); break; }
       case 19: { const ch = arr[i++], a = arr[i++]; logEvent(`I2C${ch} SMBA ${a?'asserted':'released'}`); break; }
-      default: return;
+      case 20: { const ch = arr[i++], ep = arr[i++], su = arr[i++], ln = arr[i++]; const d = []; for (let k=0;k<ln;k++) d.push(arr[i++] & 0xFF); logEvent(`HOST ch${ch} ep${ep} ${su?'SETUP':'OUT'} ${ln}B [${d.map(b=>b.toString(16).padStart(2,'0')).join(' ')}]`); break; }
+      case 21: { const ch = arr[i++], ep = arr[i++], ln = arr[i++]; logEvent(`HOST ch${ch} ep${ep} IN-req ${ln}B`); break; }
+      default: logEvent(`unknown event disc ${t} (truncating frame)`); return;
     }
   }
 }

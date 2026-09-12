@@ -325,7 +325,9 @@ ok(otg_host_feed_in(0, din, false) === true, 'host IN feed accepted');
 st = R(0x020);
 eq(st & 0xF, 0, 'fed packet reports EP0');
 eq((st >> 17) & 0xF, 2, 'fed packet status = IN received');
-eq((R(0x020) >> 17) & 0xF, 3, 'fed packet status = IN completed');
+const doneSt = R(0x020);
+eq((doneSt >> 17) & 0xF, 3, 'fed packet status = IN completed');
+eq((doneSt >> 4) & 0x7FF, 0, 'fed DONE status carries BCNT 0 (no new bytes)');
 // RXFIFO holds the fed bytes (LE words via DFIFO0).
 eq(R(0x1000), 0x43424140, 'fed FIFO word0');
 eq(R(0x1000), 0x47464544, 'fed FIFO word1');

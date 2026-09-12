@@ -161,6 +161,8 @@ export interface BluepillEmulator {
   uartRxAddr(addr: number, byte: number): boolean;
   /** Inject multiple bytes into UART RX. */
   uartRxBytes(bytes: Uint8Array | number[]): boolean;
+  /** Inject a LIN break into a USART (LBD in LIN mode, framing error + 0x00 byte otherwise). */
+  uartInjectBreak(addr: number): boolean;
   /** Unread bytes in UART RX buffer. */
   rxPending(): number;
   /** True while a DMA transfer is queued. */
@@ -199,6 +201,8 @@ export interface BluepillEmulator {
   usbInjectSetup(bytes: Uint8Array, addr?: number): boolean;
   /** Inject a USB OUT packet into an endpoint. addr selects hardware address filtering (omit = correctly addressed). Returns false when NAKed/filtered. */
   usbInjectOut(ep: number, bytes: Uint8Array, addr?: number): boolean;
+  /** Real bus reset (SE0 on the wire): FRES release alone is NOT a reset. */
+  usbBusReset(): boolean;
   /** Host disconnect (pull-up off): tokens stop, IN stalls, SOF freezes; next bus reset reattaches. */
   usbDetach(): boolean;
   /** Inject a USB OTG_FS SETUP packet (8 bytes) into EP0. addr selects DCFG.DAD filtering (omit = correctly addressed). Returns false when dropped. */

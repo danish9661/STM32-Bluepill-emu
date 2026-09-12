@@ -152,11 +152,13 @@ every real Blue Pill storage project uses SD.
 
 ## 5. Test coverage of the above
 
-- `tests/test_all.mjs` (537): SDIO init/R/W/IRQ/DMA/no-card/SVD; DMA global
-  streams; WWDG EWI; PVD edges; RTC second/overflow + flags; RCC clock decode;
+- `tests/test_all.mjs` (629): SDIO init/R/W/IRQ/DMA/no-card/SVD; DMA global
+  streams; WWDG EWI; PVD edges; RTC second/overflow + flags; RCC clock decode
+  (SYSCLK + full-tree prescaler/multiplier audit via `rcc_clocks_hz`);
   tamper; USB toggles/RESET/control/bulk/IRQ/SOF/suspend/double-buffer; TIM
   DMA-burst window; CAN TX edge-trigger (no-re-pend); ACTRL store; ADC temp/
-  VREFINT nominals; everything in §1 marked Full has a group.
+  VREFINT nominals; OTG attach-survives-CSFTRST; everything in §1 marked
+  Full has a group.
 - `tests/canary.mjs` + 200M runs (both paths): 39/39 real-firmware checks.
 - `tests/test_pwm_wave.mjs` pins the millis() rate end to end (8 exact wave
   steps in a fixed 70M budget — catches SysTick under-delivery).

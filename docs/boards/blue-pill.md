@@ -18,16 +18,78 @@ or [STM32F105](f105.md) where they really exist.
 - `Serial` = **USART1** (PA9/PA10) — the page terminal shows it
 - 8 MHz crystal, NRST + BOOT0 headers, USB device port
 
-## Demos on this chip (25 presets)
+## Demos on this chip (28 presets)
 
-All 21 portable demos (blink, echo, comprehensive, periph37, fade,
+All 24 shared presets (blink, echo, comprehensive, periph37, fade,
 timer_uart, pwm_wave, servo, adc_uart, dac_sine, rtc_clock, stopwatch,
 flash_demo, showcase, ws2812, i2c_scan, i2c_slave, can_chat, sd_logger,
-usb_cdc, mini_rtos) plus the Blue Pill builds: `board_pill`,
-`board_pill_echo`, `board_pill_showcase`, `board_pill_rtc`.
+usb_cdc, usb_serial, otg_cdc, otg_host, mini_rtos) plus the Blue Pill builds:
+`board_pill`, `board_pill_echo`, `board_pill_showcase`, `board_pill_rtc`.
+(USB/OTG presets show on every chip but only function where the
+peripheral is mapped — see the matrix.)
 
 ## Verification
 
 - periph39 firmware: **39/39** (`node tests/canary.mjs`)
 - `tests/test_board_demo.mjs`, `test_board_echo.mjs`,
   `test_board_showcase.mjs`, `test_board_rtc.mjs` green on `stm32f103c8`
+
+## Feature matrix (silicon vs emulator)
+
+Silicon = real STM32F103C8 (medium-density, LQFP48). Emulator = this
+project's model on the builtin F103 map. Statuses: **Full** =
+register-level incl. IRQs/DMA/events; **Partial** = subset (see remark);
+**Gap** = reads zero/lenient, no consumer; **Absent** = correctly
+unmapped (no such silicon here); **SVD-map only** = modeled, needs a
+custom SVD map. Other labels (Driver/IDCODE only, Out of scope,
+Assumed) as marked. Depth details: [PERIPHERALS](../PERIPHERALS.md).
+
+| Feature | Silicon | Emulator | Remark |
+|---|---|---|---|
+| Cortex-M3 Thumb-2 (UDIV/SDIV, LDREX/STREX, TBB/TBH, unaligned) | Yes | Full | differential-fuzzed vs Unicorn oracle, 0 divergences |
+| MPU (8 regions, subregions, AP/XN) | Yes | Full | enforced live on every access |
+| Faults (MemManage/BusFault/UsageFault→HardFault, CFSR/BFAR/HFSR) | Yes | Full | SHCSR-gated escalation |
+| SVC / PendSV, SHPR priorities, EXC_RETURN, PSP | Yes | Full | mini_rtos proof (preemptive PSP tasks) |
+| SysTick (24-bit, debt drain) | Yes | Full | phase-exact multi-period re-pend |
+| DWT CYCCNT | Yes | Partial | CYCCNT +1/latency from FLASH ACR; ITM/ETM/TPIU absent |
+| Debug (SWD/JTAG, ETM trace) | Yes | IDCODE only | DBGMCU readout; flashing/debugging out of scope (GDB stub instead) |
+| RCC (HSI/HSE/PLL ×2–16, prescalers, CSS) | Yes | Full | clocks queryable (`rcc_clocks_hz`); MCO pin not modeled; timing stays instruction-budget |
+| FLASH 64K (program/erase, WRPRTERR) | Yes | Full | option bytes not modeled (no consumer) |
+| PWR (PVD, Sleep/Stop/Standby) | Yes | Full | PVD→EXTI16; SLEEPDEEP freezes timers (RTC+IWDG keep running) |
+| BKP (10 regs, tamper, RTC cal) | Yes | Full | TPE/TPAL edges + IRQ, W1C |
+| RTC (second/alarm/overflow, PRL) | Yes | Full | 1 Hz PRL model; LSE/LSI assumed running |
+| CRC-32 | Yes | Full | known-answer vectors |
+| IWDG | Yes | Full | reset-request path |
+| WWDG + EWI | Yes | Full | early-wakeup IRQ proven |
+| 96-bit UID @0x1FFFF7E8 | Yes | Gap | reads zero; no consumer |
+| GPIOA–D | Yes | Full | electrical model (pull-up/down, slew, open-drain, analog) |
+| GPIOE–G | No (100-pin+) | Full (A–E) | harmless superset on this 48-pin part |
+| AFIO (remap, EXTI select) | Yes | Full | MAPR incl. TIM2/3/4 + CAN fixes; SWJ_CFG debug-disable not modeled |
+| EXTI 0–15, 16/PVD, 17/RTC, 18/USB | Yes | Full | edge IRQs + ADC triggers; no line 19 (no ETH on F1) |
+| DMA1 (7 ch, all requests) | Yes | Full | full request matrix (TIM/ADC/DAC/USART/SPI/I2C) |
+| DMA2 (5 ch) | No (HD/CL only) | Full | superset: mapped and working here too |
+| ADC1/ADC2 (SMP timing, AWD, temp sensor) | Yes | Full | Tconv-accurate, dual mode, injected + ext triggers |
+| ADC3 | No (HD/XL) | SVD-map only | not on the builtin F103 map |
+| DAC 2ch + loopback | No (HD only) | Full | superset: PA4/PA5 wires + ADC loopback |
+| TIM1 (advanced, BDTR/break) | Yes | Full | MOE/BKIN/LOCK; DTG stored |
+| TIM2–4 (GP, capture, DMA burst, slave) | Yes | Full | input capture + AFIO remap, burst window, slave modes |
+| TIM5 | No (HD/CL) | SVD-map only | not on the builtin F103 map |
+| TIM6/7 (basic) | Yes | Full | update IRQ + DMA requests |
+| TIM8–14 | No F1 silicon | Driver only | instantiable for custom maps; out of scope |
+| USART1–3 (TX pacing, LIN, errors) | Yes | Full | ORE SR→DR recovery, LIN SBK/LBD |
+| UART4/5 | No (HD/CL) | SVD-map only | not on the builtin F103 map |
+| IrDA / smartcard / HDSEL | USARTs have it | Gap | pulse-shaping-invisible at register level; no consumer |
+| SPI1/2 (+CRC-8/16) | Yes | Full | CRCNEXT phase + CRCERR |
+| SPI3 | No (HD/CL) | Full | superset on this chip |
+| TI frame format (FRF) | SPIs have it | Gap | no consumer |
+| I2S audio (via SPI2/3) | Yes | Full | I2SCFGR/I2SPR + audio-gen model |
+| I2C1/2 (master/slave/10-bit/PEC/GENCALL) | Yes | Full | slave inject API; stretch-equivalent NACKs |
+| SMBus ALERT | Yes | Full | both directions (CR1 drive + inject); ARP out of scope |
+| CAN1 (loopback/silent, filters, TTCM) | Yes | Full | TX edge-trigger IRQ, timestamps |
+| CAN2 | No (CL only) | SVD-map only | use the F105 map |
+| USB FS device (EP0–7, SOF, suspend) | Yes | Full | BTABLE-16/PMA-1K/double-buffer/ISO/HP/PDWN/detach/DADDR |
+| USB OTG_FS (device + host) | No (CL only) | SVD-map only | use the F105 map (119 unit + HCD e2e) |
+| FSMC (NOR/NAND/PC-card) | No (HD 100-pin+) | Full | superset (needs image); MBKEN/WREN + ECC accum |
+| SDIO (+MMC, DMA2) | No (HD only) | Full | superset (needs image); SDHC-only |
+| LED / button / Serial / USB port | PC13 / — / USART1 / device | Full | aliases in `board_pins.json` |
+| 8 MHz crystal, NRST + BOOT0 | Yes | Assumed | fixed instruction budget; no clock fault surface |

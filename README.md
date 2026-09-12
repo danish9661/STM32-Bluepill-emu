@@ -233,6 +233,8 @@ These callbacks fire on specific hardware events:
 | `onFsmcAccess` | `(bank, offset, write, size, value) => void` | FSMC bus transaction |
 | `onUsbIn` | `(ep, data) => void` | USB IN completion (device → host) |
 | `onI2cAlert` | `(channel, asserted) => void` | SMBus SMBA drive edge (firmware CR1 ALERT) |
+| `onHostTx` | `(ch, ep, setup, data) => void` | OTG host OUT/SETUP completion (MCU → wire) |
+| `onHostRx` | `(ch, ep, len) => void` | OTG host IN token (answer via `otgHostFeedIn`) |
 
 ### Display Framebuffers
 
@@ -422,13 +424,13 @@ and FPS counter. The server streams all virtual-peripheral events as JSON.
 ## Development
 
 ```bash
-# Rebuild Rust peripherals → WASM
-PATH=/tmp/binaryen-version_132/bin:$PATH \
+# Rebuild Rust peripherals → WASM (pinned binaryen 132 from ~/.local/binaryen — never /tmp, the box wipes it)
+PATH=~/.local/binaryen/binaryen-version_132/bin:$PATH \
 RUSTFLAGS="--remap-path-prefix=$HOME=/build" \
 wasm-pack build --target web --out-dir pkg
 
 # Run tests
-node tests/test_all.mjs              # 565 unit asserts
+node tests/test_all.mjs              # 629 unit asserts
 node tests/canary.mjs                # 39/39 firmware checks (~2s)
 node tests/test_emulator_js.mjs      # browser run-loop path (200M, 39/39)
 node tests/test_chips.mjs            # chip variants (IDCODE per chip + GD32 boot)
