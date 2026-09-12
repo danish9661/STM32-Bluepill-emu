@@ -102,6 +102,8 @@ jobs:
           cp site/arduino_spi_flash2.bin tests/arduino_periph_test/build/spi_flash2.bin
           mkdir -p tests/arduino_coremark/build
           cp site/arduino_coremark.elf tests/arduino_coremark/build/arduino_coremark.ino.elf
+          mkdir -p tests/arduino_echo/build
+          cp site/arduino_echo.elf tests/arduino_echo/build/arduino_echo.ino.elf
       - name: Unit tests
         run: node tests/test_all.mjs
       - name: CPU decoder census (16-bit + 32-bit gates)
