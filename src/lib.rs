@@ -521,6 +521,51 @@ pub fn usb_detach() -> bool {
     }
 }
 
+/// Inject a USB OTG_FS SETUP packet (8 bytes) into EP0's RX FIFO (host ->
+/// device). `addr` selects hardware address filtering (None =
+/// correctly-addressed host). Returns false when dropped.
+#[wasm_bindgen]
+pub fn otg_inject_setup(data: &[u8], addr: Option<u8>) -> bool {
+    if data.len() != 8 {
+        return false;
+    }
+    match try_sys() {
+        Some(sys) => sys.p.otg_inject(sys, 0, data, true, addr),
+        None => false,
+    }
+}
+
+/// Inject a USB OTG_FS OUT packet into an endpoint's RX FIFO (host ->
+/// device). `addr` selects hardware address filtering (None =
+/// correctly-addressed host). Returns false when dropped.
+#[wasm_bindgen]
+pub fn otg_inject_out(ep: u8, data: &[u8], addr: Option<u8>) -> bool {
+    match try_sys() {
+        Some(sys) => sys.p.otg_inject(sys, ep as usize, data, false, addr),
+        None => false,
+    }
+}
+
+/// Host-driven OTG_FS bus reset (SE0): endpoints + FIFOs + address reset,
+/// USBRST + ENUMDNE events. Returns false with no OTG peripheral mapped.
+#[wasm_bindgen]
+pub fn otg_bus_reset() -> bool {
+    match try_sys() {
+        Some(sys) => sys.p.otg_bus_reset(sys),
+        None => false,
+    }
+}
+
+/// Host disconnect on OTG_FS (pull-up off). Returns false with no OTG
+/// peripheral mapped.
+#[wasm_bindgen]
+pub fn otg_detach() -> bool {
+    match try_sys() {
+        Some(sys) => sys.p.otg_detach(sys),
+        None => false,
+    }
+}
+
 /// Queue injected MISO bytes for a SPI channel (virtual device -> MCU).
 #[wasm_bindgen]
 pub fn spi_inject_miso(channel: u8, bytes: &[u8]) {

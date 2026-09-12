@@ -530,6 +530,7 @@ footer .foot-tag {
                     <optgroup label="USB &amp; systems">
                     <option value="usb_cdc">USB CDC Serial (enumerate + echo)</option>
                     <option value="usb_serial">USB Serial, real Arduino stack (enumerate + echo)</option>
+                    <option value="otg_cdc">USB OTG CDC on F105 (enumerate + echo)</option>
                     <option value="mini_rtos">Mini-RTOS (PendSV preemptive tasks)</option>
                     </optgroup>
                     <optgroup label="Boards">
@@ -753,7 +754,7 @@ function handleWorkerMsg(e) {
     }
     // USB CDC host tap
     if (m.usbIn) for (const p of m.usbIn) usbInbox.push(p);
-    if (m.usbAck !== null && m.usbAck !== undefined) lastHostAck = m.usbAck;
+    if (m.usbAck !== null && m.usbAck !== undefined) { lastHostAck = m.usbAck; if (usbAckPending) { usbAckPending = false; usbAckValue = !!m.usbAck; } }
     if (usbEnum || usbEchoWait) usbEnumAdvance();
     if (i2cSeq) i2cAdvance();
     // showcase canvases from worker snapshot
@@ -854,10 +855,13 @@ let usbEnum = null;        // active enumeration {step, frames, cfg}
 let usbEnumerated = false;
 let usbEchoWait = null;    // pending echo {text, frames}
 let usbEchoStream = '';     // accumulated echo-endpoint bytes for tail matching
+let usbAckPending = false;  // a USB send awaits its worker ack
+let usbAckValue = null;     // last USB send ack (true = accepted)
 let usbEchoEp = 1;          // bulk-IN endpoint the echo arrives on (EP1 for usb_cdc, EP2 for usb_serial)
+let usbBackend = 'fs';      // 'fs' (0x40005C00 PMA model) or 'otg' (0x50000000 FIFO model)
 const USB_S_DEV = [0x80,0x06,0x00,0x01,0x00,0x00,0x12,0x00];
 const USB_S_ADDR = [0x00,0x05,0x05,0x00,0x00,0x00,0x00,0x00];
-const USB_S_CFG = [0x80,0x06,0x00,0x02,0x00,0x00,68,0x00];
+const USB_S_CFG = [0x80,0x06,0x00,0x02,0x00,0x00,0xFF,0x00]; // ask 255: device sends min(len, wTotalLength); need comes from the header
 const USB_S_SETCFG = [0x00,0x09,0x01,0x00,0x00,0x00,0x00,0x00];
 const USB_S_LINE = [0x21,0x20,0x00,0x00,0x00,0x00,0x07,0x00];
 const USB_S_STATE = [0x21,0x22,0x03,0x00,0x00,0x00,0x00,0x00];
@@ -866,17 +870,36 @@ function usbTake(ep) {
   return i < 0 ? null : usbInbox.splice(i, 1)[0][1];
 }
 function usbSendSetup(bytes) {
-  if (useWorker && worker) { worker.postMessage({ type: 'usbSetup', bytes }); return null; }
-  try { return emu ? !!emu.usbInjectSetup(bytes) : false; } catch { return false; }
+  usbAckPending = true;
+  const st_setup = usbBackend === 'otg' ? 'otgSetup' : 'usbSetup';
+  if (useWorker && worker) {
+    if (!workerReady) { workerQueue.push({ type: st_setup, bytes }); return null; }
+    worker.postMessage({ type: st_setup, bytes }); return null;
+  }
+  try { const r = emu ? !!(usbBackend === 'otg' ? emu.otgInjectSetup(bytes) : emu.usbInjectSetup(bytes)) : false; usbAckPending = false; usbAckValue = r; return r; } catch { usbAckPending = false; usbAckValue = false; return false; }
 }
 function usbSendReset() {
-  if (useWorker && worker) { worker.postMessage({ type: 'usbReset' }); return null; }
-  try { return emu ? !!emu.usbBusReset() : false; } catch { return false; }
+  const st_reset = usbBackend === 'otg' ? 'otgReset' : 'usbReset';
+  if (useWorker && worker) {
+    if (!workerReady) { workerQueue.push({ type: st_reset }); return null; }
+    worker.postMessage({ type: st_reset }); return null;
+  }
+  try { return emu ? !!(usbBackend === 'otg' ? emu.otgBusReset() : emu.usbBusReset()) : false; } catch { return false; }
 }
 function usbSendOut(ep, bytes) {
-  if (useWorker && worker) { worker.postMessage({ type: 'usbOut', ep, bytes }); return null; }
-  try { return emu ? !!emu.usbInjectOut(ep, bytes) : false; } catch { return false; }
+  usbAckPending = true;
+  const st_out = usbBackend === 'otg' ? 'otgOut' : 'usbOut';
+  if (useWorker && worker) {
+    if (!workerReady) { workerQueue.push({ type: st_out, ep, bytes }); return null; }
+    worker.postMessage({ type: st_out, ep, bytes }); return null;
+  }
+  try { const r = emu ? !!(usbBackend === 'otg' ? emu.otgInjectOut(ep, bytes) : emu.usbInjectOut(ep, bytes)) : false; usbAckPending = false; usbAckValue = r; return r; } catch { usbAckPending = false; usbAckValue = false; return false; }
 }
+// A NAKed send (ack === false) is retried by the waiting step.
+function usbNaked() { return usbAckPending === false && usbAckValue === false; }
+// Gate a timer advance on the previous send having landed (unknown/null
+// passes optimistically; only a confirmed NAK holds the step for a resend).
+function usbSendMissing() { return usbAckPending === false && usbAckValue === false; }
 function usbDrainMain() {
   if (!usbListenMain || !emu) return;
   try {
@@ -904,21 +927,23 @@ function usbEnumAdvance() {
     st.frames++;
     let d;
     switch (st.step) {
-      case -1: if (st.frames > 10) { usbSendSetup(USB_S_DEV); st.step = 0; st.frames = 0; } break;
-      case 0: d = usbTake(0); if (d && d.length === 18) { log('USB: device descriptor (18B, CDC-ACM).', 't-ok'); usbSendOut(0, []); st.step = 1; st.frames = 0; } else if (st.frames % 60 === 0) { usbSendSetup(USB_S_DEV); } else if (st.frames > 600) { usbSendReset(); st.step = -1; st.frames = 0; } break;
-      case 1: if (st.frames > 3) { usbSendSetup(USB_S_ADDR); st.step = 2; st.frames = 0; } break;
-      case 2: d = usbTake(0); if (d && d.length === 0) { log('USB: address 5 assigned.', 't-ok'); usbSendSetup(USB_S_CFG); st.step = 3; st.frames = 0; st.cfg = []; } break;
-      case 3: d = usbTake(0); if (d) { st.cfg = st.cfg.concat(d); const need = st.cfg.length >= 4 ? (st.cfg[2] | (st.cfg[3] << 8)) : 68; if (st.cfg.length >= need) { log(`USB: config descriptor (${st.cfg.length}B, 2 packets).`, 't-ok'); usbSendOut(0, []); st.step = 4; st.frames = 0; } } break;
-      case 4: if (st.frames > 3) { usbSendSetup(USB_S_SETCFG); st.step = 5; st.frames = 0; } break;
-      case 5: d = usbTake(0); if (d) { log('USB: configured.', 't-ok'); usbSendSetup(USB_S_LINE); st.step = 6; st.frames = 0; } break;
+      case -1: if (st.frames === 1) { usbSendReset(); } else if (st.frames > 10) { usbSendSetup(USB_S_DEV); st.step = 0; st.frames = 0; } break;
+      case 0: d = usbTake(0); if (d && d.length === 18) { log('USB: device descriptor (18B, CDC-ACM).', 't-ok'); usbSendOut(0, []); st.step = 10; st.frames = 0; } else if (st.frames > 600) { usbSendReset(); st.step = -1; st.frames = 0; } else if (usbNaked()) { usbSendSetup(USB_S_DEV); } else if (st.frames % 60 === 0) { usbSendSetup(USB_S_DEV); } break;
+      case 10: if (usbSendMissing()) { usbSendOut(0, []); st.frames = 0; } else if (!usbAckPending) { st.step = 1; st.frames = 0; } else if (st.frames > 600) { usbSendReset(); st.step = -1; st.frames = 0; } break;
+      case 1: if (st.frames > 3) { usbSendSetup(USB_S_ADDR); st.step = 2; st.frames = 0; } else if (st.frames % 60 === 0) { usbSendSetup(USB_S_ADDR); } break;
+      case 2: d = usbTake(0); if (d && d.length === 0) { log('USB: address 5 assigned.', 't-ok'); usbSendSetup(USB_S_CFG); st.step = 3; st.frames = 0; st.cfg = []; } else if (usbNaked()) { usbSendSetup(USB_S_ADDR); } else if (st.frames % 60 === 0) { usbSendSetup(USB_S_ADDR); } break;
+      case 3: d = usbTake(0); if (d) { st.cfg = st.cfg.concat(d); const need = st.cfg.length >= 4 ? (st.cfg[2] | (st.cfg[3] << 8)) : 68; if (st.cfg.length >= need) { log(`USB: config descriptor (${st.cfg.length}B, 2 packets).`, 't-ok'); usbSendOut(0, []); st.step = 11; st.frames = 0; } } else if (st.cfg.length === 0 && usbNaked()) { usbSendSetup(USB_S_CFG); } else if (st.cfg.length === 0 && st.frames % 60 === 0) { usbSendSetup(USB_S_CFG); } break;
+      case 11: if (usbSendMissing()) { usbSendOut(0, []); st.frames = 0; } else if (!usbAckPending) { st.step = 4; st.frames = 0; } else if (st.frames > 600) { usbSendReset(); st.step = -1; st.frames = 0; } break;
+      case 4: if (st.frames > 3) { usbSendSetup(USB_S_SETCFG); st.step = 5; st.frames = 0; } else if (st.frames % 60 === 0) { usbSendSetup(USB_S_SETCFG); } break;
+      case 5: d = usbTake(0); if (d) { log('USB: configured.', 't-ok'); usbSendSetup(USB_S_LINE); st.step = 6; st.frames = 0; } else if (usbNaked()) { usbSendSetup(USB_S_SETCFG); } else if (st.frames % 60 === 0) { usbSendSetup(USB_S_SETCFG); } break;
       case 6: if (st.frames > 3) { usbSendOut(0, [0x00,0xC2,0x01,0x00,0x00,0x00,0x08]); st.step = 7; st.frames = 0; } break;
-      case 7: d = usbTake(0); if (d) { log('USB: line coding 115200 8N1.', 't-ok'); usbSendSetup(USB_S_STATE); st.step = 8; st.frames = 0; } break;
+      case 7: d = usbTake(0); if (d) { log('USB: line coding 115200 8N1.', 't-ok'); usbSendSetup(USB_S_STATE); st.step = 8; st.frames = 0; } else if (usbNaked()) { usbSendOut(0, [0x00,0xC2,0x01,0x00,0x00,0x00,0x08]); } else if (st.frames % 60 === 0) { usbSendOut(0, [0x00,0xC2,0x01,0x00,0x00,0x00,0x08]); } break;
       case 8: d = usbTake(0); if (d) {
         log(`USB: enumerated — CDC serial live; EP${usbEchoEp} echoes.`, 't-ok');
         $('usbStatus').textContent = 'enumerated (addr 5, CDC-ACM)';
         $('usbEchoInput').disabled = false; $('usbEchoBtn').disabled = false;
         usbEnumerated = true; usbEnum = null;
-      } break;
+      } else if (usbNaked()) { usbSendSetup(USB_S_STATE); } else if (st.frames % 60 === 0) { usbSendSetup(USB_S_STATE); } break;
     }
     if (st.frames > 600) { log('USB: enumeration stalled — press Run, then Enumerate again.', 't-err'); usbEnum = null; }
   }
@@ -937,7 +962,7 @@ function usbEnumAdvance() {
     }
     if (usbEchoStream.endsWith(w.text)) { log(`USB EP${usbEchoEp} echo: "${w.text}"`, 't-out'); usbEchoWait = null; }
     else if (w.frames > 600) { log('USB: echo timeout.', 't-err'); usbEchoWait = null; }
-    else if (w.frames % 120 === 0) { usbSendOut(1, Array.from(w.text).map(c => c.charCodeAt(0) & 0xFF).slice(0, 64)); }
+    else if (usbNaked() || w.frames % 60 === 0) { usbSendOut(1, Array.from(w.text).map(c => c.charCodeAt(0) & 0xFF).slice(0, 64)); }
   }
 }
 
@@ -947,9 +972,12 @@ let autopilot = false;
 let runSteps = 0;
 let lastTotalInst = 0;
 
+let svdsReadyResolve = null;
+const svdsReady = new Promise((r) => { svdsReadyResolve = r; });
 (async () => {
     try { svdXml = await fetch('STM32F103.svd').then(r => r.text()); } catch (e) {}
     try { f105SvdXml = await fetch('STM32F105xx.svd').then(r => r.text()); } catch (e) {}
+    if (svdsReadyResolve) svdsReadyResolve();
 })();
 
 const PORTS = ['A', 'B', 'C', 'D'];
@@ -1744,13 +1772,25 @@ $('loadPresetBtn').addEventListener('click', async () => {
             await initEmulator(new Uint8Array(buf), 'arduino_usb_cdc.elf (USB CDC serial)', {}, false, { usbListen: true });
             usbListenMain = true;
             usbEchoEp = 1;
+            usbBackend = 'fs';
             $('usbCard').hidden = false;
             log('Press Run — then Enumerate USB device: the page plays host (descriptors, address, line coding) and EP1 echoes.', 't-in');
+        } else if (preset === 'otg_cdc') {
+            await svdsReady; // 1.1MB SVD must be in hand or the F105 map (and OTG) won't build
+            $('chipSelect').value = 'stm32f105';
+            const buf = await fetch('otg_cdc.elf').then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(buf), 'otg_cdc.elf (USB OTG CDC on F105)', {}, false, { usbListen: true });
+            usbListenMain = true;
+            usbEchoEp = 1;
+            usbBackend = 'otg';
+            $('usbCard').hidden = false;
+            log('Press Run \u2014 then Enumerate USB device: the page plays host against the F105 OTG_FS core (EP1 bulk echo).', 't-in');
         } else if (preset === 'usb_serial') {
             const buf = await fetch('arduino_usb_serial.elf').then(r => r.arrayBuffer());
             await initEmulator(new Uint8Array(buf), 'arduino_usb_serial.elf (USBSerial, real STM32duino stack)', {}, false, { usbListen: true });
             usbListenMain = true;
             usbEchoEp = 2;
+            usbBackend = 'fs';
             $('usbCard').hidden = false;
             log('Press Run — then Enumerate USB device: the page plays host against Arduino\u2019s real USB stack (EP1-OUT/EP2-IN/EP3-CMD) and EP2 echoes.', 't-in');
         } else if (preset === 'pwm_wave') {
@@ -1767,6 +1807,7 @@ $('loadPresetBtn').addEventListener('click', async () => {
             await initEmulator(new Uint8Array(buf), 'arduino_mini_rtos.elf (preemptive tasks)');
             log('Press Run — tasks A/B preempt every 1ms via PendSV; sequences must stay gap-free.', 't-in');
         } else if (preset === 'can_dual') {
+            await svdsReady; // same SVD race as otg_cdc (CAN2 lives in the SVD map)
             $('chipSelect').value = 'stm32f105';
             const buf = await fetch('arduino_can_dual.elf').then(r => r.arrayBuffer());
             await initEmulator(new Uint8Array(buf), 'arduino_can_dual.elf (CAN1+CAN2 on F105)');

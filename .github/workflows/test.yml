@@ -159,6 +159,10 @@ jobs:
         run: node tests/test_usb_cdc.mjs
       - name: USB real-stack serial (STM32duino enumerate + echo)
         run: node tests/test_usb_serial.mjs
+      - name: USB OTG FS device (F105 registers + FIFO + IRQs)
+        run: node tests/test_otg.mjs
+      - name: USB OTG CDC demo (F105 enumerate + echo, real machine code)
+        run: node tests/test_otg_cdc.mjs
       - name: CoreMark CPU-semantics check (known-answer CRCs)
         run: node tests/test_coremark.mjs
       - name: Chip variants (DBGMCU IDCODE per chip + GD32 boot)

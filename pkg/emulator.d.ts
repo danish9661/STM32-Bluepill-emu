@@ -201,6 +201,14 @@ export interface BluepillEmulator {
   usbInjectOut(ep: number, bytes: Uint8Array, addr?: number): boolean;
   /** Host disconnect (pull-up off): tokens stop, IN stalls, SOF freezes; next bus reset reattaches. */
   usbDetach(): boolean;
+  /** Inject a USB OTG_FS SETUP packet (8 bytes) into EP0. addr selects DCFG.DAD filtering (omit = correctly addressed). Returns false when dropped. */
+  otgInjectSetup(bytes: Uint8Array, addr?: number): boolean;
+  /** Inject a USB OTG_FS OUT packet into an endpoint. addr selects DCFG.DAD filtering (omit = correctly addressed). Returns false when dropped. */
+  otgInjectOut(ep: number, bytes: Uint8Array, addr?: number): boolean;
+  /** Host-driven OTG_FS bus reset (SE0): endpoints + FIFOs + address reset, USBRST + ENUMDNE. */
+  otgBusReset(): boolean;
+  /** Host disconnect on OTG_FS (pull-up off); next bus reset reattaches. */
+  otgDetach(): boolean;
 
   // ── Bus observers ─────────────────────────────────────────────────────────
 

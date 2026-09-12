@@ -24,6 +24,7 @@ pub mod exti;
 pub mod bkp;
 pub mod dac;
 pub mod usb;
+pub mod otg;
 pub mod sdio;
 pub mod dwt;
 
@@ -85,10 +86,27 @@ pub trait Peripheral {
     /// Host disconnect (pull-up off): tokens stop, IN never completes, SOF
     /// freezes; the next bus reset reattaches. Default: unhandled.
     fn usb_detach(&mut self, _sys: &System) -> bool { false }
-    /// Host-side I2C slave transactions (this peripheral addressed as slave).
+    /// Host-side OTG_FS OUT/SETUP delivery into endpoint `ep` (`is_setup`
+    /// only legal on EP0). `addr` selects hardware address filtering
+    /// (None = correctly-addressed host). Returns false when dropped.
+    /// Default: unhandled.
+    fn otg_inject(
+        &mut self,
+        _sys: &System,
+        _ep: usize,
+        _data: &[u8],
+        _is_setup: bool,
+        _addr: Option<u8>,
+    ) -> bool {
+        false
+    }
+    /// Host-driven OTG_FS bus reset (SE0): endpoints + FIFOs + address
+    /// reset, USBRST + ENUMDNE events. Default: unhandled.
+    fn otg_bus_reset(&mut self, _sys: &System) -> bool { false }
+    /// Host disconnect on OTG_FS (pull-up off). Default: unhandled.
+    fn otg_detach(&mut self, _sys: &System) -> bool { false }    /// Host-side I2C slave transactions (this peripheral addressed as slave).
     /// Defaults: unhandled (NACK / no data).
-    fn i2c_slave_start(&mut self, _sys: &System, _addr: u16, _is_read: bool) -> bool { false }
-    fn i2c_slave_write(&mut self, _sys: &System, _byte: u8) -> bool { false }
+    fn i2c_slave_start(&mut self, _sys: &System, _addr: u16, _is_read: bool) -> bool { false }    fn i2c_slave_write(&mut self, _sys: &System, _byte: u8) -> bool { false }
     fn i2c_slave_read(&mut self, _sys: &System) -> Option<u8> { None }
     fn i2c_slave_stop(&mut self, _sys: &System) -> bool { false }
     /// SMBus ALERT input: peer pulled SMBA low → SR1 SMBALERT + error IRQ.
@@ -221,6 +239,7 @@ fn extract_svd_max_offset(p: &PeripheralInfo) -> u32 {
 fn name_has_tick(name: &str) -> bool {
     name.starts_with("TIM") || name.starts_with("DMA") || name == "RTC" || name.starts_with("ADC")
         || name.starts_with("USART") || name.starts_with("UART") || name == "USB" || name == "DWT"
+        || name.starts_with("USB_OTG")
 }
 
 impl Peripherals {
@@ -269,6 +288,7 @@ impl Peripherals {
             })
             .collect();
 
+        let mut otg_done = false;
         for p in &device.peripherals {
             let p = match p {
                 MaybeArray::Single(p) => p,
@@ -286,6 +306,15 @@ impl Peripherals {
             } else if name.as_str() == "USB" {
                 // Registers + packet memory (SVD only sizes the registers).
                 (0x4000_5C00, 0x4000_6400)
+            } else if name.as_str().starts_with("USB_OTG") {
+                // One shared OTG_FS instance owns registers + all data
+                // FIFOs; the SVD splits them into GLOBAL/HOST/DEVICE/
+                // PWRCLK parts, so register once and skip the rest.
+                if otg_done {
+                    continue;
+                }
+                otg_done = true;
+                (0x5000_0000, 0x5000_5000)
             } else {
                 (p.base_address as u32, p.base_address as u32 + size)
             };
@@ -318,8 +347,8 @@ impl Peripherals {
     }
 
     /// Construct a peripheral implementation from its SVD peripheral name.
-    /// Returns None for peripherals this emulator doesn't model (ETH, USB-OTG
-    /// on some chips, ...) — those are silently skipped.
+    /// Returns None for peripherals this emulator doesn't model (ETH, ...)
+    /// — those are silently skipped.
     fn build_peripheral(name: &str, ext_devices: &ExtDevices, gpio: &mut GpioPorts) -> Option<Box<dyn Peripheral>> {
         None
             .or_else(|| nvic::NvicWrapper::new(name))
@@ -341,6 +370,7 @@ impl Peripherals {
             .or_else(|| Adc::new(name))
             .or_else(|| Can::new(name))
             .or_else(|| Usb::new(name))
+            .or_else(|| OtgFs::new(name))
             .or_else(|| Fsmc::new(name, ext_devices))
             .or_else(|| Afio::new(name))
             .or_else(|| Exti::new(name))
@@ -769,6 +799,42 @@ impl Peripherals {
         }
     }
 
+    /// Host-side OTG_FS delivery into an endpoint's RX buffer (OUT/SETUP).
+    pub fn otg_inject(
+        &self,
+        sys: &System,
+        ep: usize,
+        data: &[u8],
+        is_setup: bool,
+        addr: Option<u8>,
+    ) -> bool {
+        if let Some(slot) = self.bus.borrow().get(0x5000_0000) {
+            slot.peripheral
+                .borrow_mut()
+                .otg_inject(sys, ep, data, is_setup, addr)
+        } else {
+            false
+        }
+    }
+
+    /// Host-driven OTG_FS bus reset (SE0).
+    pub fn otg_bus_reset(&self, sys: &System) -> bool {
+        if let Some(slot) = self.bus.borrow().get(0x5000_0000) {
+            slot.peripheral.borrow_mut().otg_bus_reset(sys)
+        } else {
+            false
+        }
+    }
+
+    /// Host disconnect on OTG_FS (pull-up off).
+    pub fn otg_detach(&self, sys: &System) -> bool {
+        if let Some(slot) = self.bus.borrow().get(0x5000_0000) {
+            slot.peripheral.borrow_mut().otg_detach(sys)
+        } else {
+            false
+        }
+    }
+
     /// I2C base address for a 1-based channel number (F103: I2C1/2 only).
     fn i2c_base(channel: u32) -> Option<u32> {
         match channel {
@@ -975,6 +1041,7 @@ use afio::Afio;
 use exti::Exti;
 use bkp::Bkp;
 use dac::Dac;
+use otg::OtgFs;
 use usb::Usb;
 use sdio::Sdio;
 use dwt::Dwt;

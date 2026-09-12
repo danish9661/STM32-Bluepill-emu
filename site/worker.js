@@ -113,6 +113,19 @@ async function handleMessage(e) {
       usbAck = a;
       break;
     }
+    case 'otgSetup': {
+      let a = false;
+      try { a = !!emu.otgInjectSetup(msg.bytes); } catch {}
+      usbAck = a;
+      break;
+    }
+    case 'otgReset': {
+      let a = false;
+      try { a = !!emu.otgBusReset(); } catch {}
+      usbAck = a;
+      
+break;
+    }
     case 'usbReset': {
       let a = false;
       try { a = !!emu.usbBusReset(); } catch {}
@@ -146,6 +159,12 @@ async function handleMessage(e) {
     case 'usbOut': {
       let a = false;
       try { a = !!emu.usbInjectOut(msg.ep, msg.bytes); } catch {}
+      usbAck = a;
+      break;
+    }
+    case 'otgOut': {
+      let a = false;
+      try { a = !!emu.otgInjectOut(msg.ep, msg.bytes); } catch {}
       usbAck = a;
       break;
     }

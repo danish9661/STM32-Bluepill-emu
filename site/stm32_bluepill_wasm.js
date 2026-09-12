@@ -611,6 +611,57 @@ export function lcd_fb(peripheral) {
 }
 
 /**
+ * Host-driven OTG_FS bus reset (SE0): endpoints + FIFOs + address reset,
+ * USBRST + ENUMDNE events. Returns false with no OTG peripheral mapped.
+ * @returns {boolean}
+ */
+export function otg_bus_reset() {
+    const ret = wasm.otg_bus_reset();
+    return ret !== 0;
+}
+
+/**
+ * Host disconnect on OTG_FS (pull-up off). Returns false with no OTG
+ * peripheral mapped.
+ * @returns {boolean}
+ */
+export function otg_detach() {
+    const ret = wasm.otg_detach();
+    return ret !== 0;
+}
+
+/**
+ * Inject a USB OTG_FS OUT packet into an endpoint's RX FIFO (host ->
+ * device). `addr` selects hardware address filtering (None =
+ * correctly-addressed host). Returns false when dropped.
+ * @param {number} ep
+ * @param {Uint8Array} data
+ * @param {number | null} [addr]
+ * @returns {boolean}
+ */
+export function otg_inject_out(ep, data, addr) {
+    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.otg_inject_out(ep, ptr0, len0, isLikeNone(addr) ? 0xFFFFFF : addr);
+    return ret !== 0;
+}
+
+/**
+ * Inject a USB OTG_FS SETUP packet (8 bytes) into EP0's RX FIFO (host ->
+ * device). `addr` selects hardware address filtering (None =
+ * correctly-addressed host). Returns false when dropped.
+ * @param {Uint8Array} data
+ * @param {number | null} [addr]
+ * @returns {boolean}
+ */
+export function otg_inject_setup(data, addr) {
+    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.otg_inject_setup(ptr0, len0, isLikeNone(addr) ? 0xFFFFFF : addr);
+    return ret !== 0;
+}
+
+/**
  * @param {number} addr
  * @param {number} width
  * @returns {number}

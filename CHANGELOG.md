@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] — F105 USB OTG_FS device mode
+
+### Added
+- USB OTG_FS device model (`src/peripherals/otg.rs`, IRQ 67, F105 map
+  only): Synopsys core registers, GRXSTSP status queue, EP0-3 FIFOs,
+  three-level interrupt masking into IEPINT/OEPINT, suspend/resume,
+  `otg_bus_reset` / `otg_detach` / `otg_inject_setup/out` (+JS + `.d.ts`)
+- Bare-metal OTG CDC demo (`tests/otg_cdc/`, xpack-gcc + custom linker
+  script, ships `site/otg_cdc.elf`): full host enumeration + EP1 bulk
+  echo through real machine code (`tests/test_otg_cdc.mjs` 23/23)
+- `tests/test_otg.mjs` 76/76 (core/reset/FIFO/IRQ/STALL/detach/PWRDWN/
+  DAD-filter/host-inert); both wired into CI
+- `otg_cdc` demo-page preset (F105 + EP1 echo, host-style retries +
+  NAK-driven resends shared with the FS enumerator)
+
 ## [3.0.1] — 2026-09-11 — real-stack USB enumeration
 
 ### Fixed

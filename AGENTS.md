@@ -528,6 +528,37 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
   ESOF never fires under an always-attached host, SOF-gating of ISO is
   firmware-managed (shared bulk mechanics suffice — proven by enumeration).
 
+### 42. F105 USB OTG_FS device mode + bare-metal CDC proof [this sprint]
+- **New `src/peripherals/otg.rs`** (~950 lines): Synopsys OTG_FS core
+  registers, GRXSTSP status queue (SETUP/OUT received+completed, like
+  silicon back-to-back), EP0-3 FIFOs at `0x50001000+EP*0x1000` (word
+  access), three-level interrupt masking (DIEPMSK/DOEPMSK -> DAINT ->
+  DAINTMSK -> IEPINT/OEPINT), suspend/resume (SDIS/RWUSIG/SGONAK/CGONAK),
+  IRQ 67. One shared instance owns regs+FIFOs (SVD splits GLOBAL/HOST/
+  DEVICE/PWRCLK — `from_svd` registers once, skips the rest). Host block
+  inert (MMIS on touch); no-DMA regs read 0; TXFE never fires.
+- **Key semantic vs the FS model**: ST stages DIEPTSIZ + EPENA *before*
+  pushing FIFO data, so IN completes when pushed bytes reach XFRSIZ
+  (zero-length when XFRSIZ == 0 with PKTCNT set) — not on the EPENA edge.
+- **Bugs found by writing it** (all fixed + tested): DCFG has no EF bit
+  (filter compares DAD directly); `name_has_tick` needed the OTG name or
+  the SOF engine never ticks; test-side periph_write arg order.
+- **Bare-metal proof** (`tests/otg_cdc/`, xpack-gcc 14.2.1 + custom
+  linker script, ships `site/otg_cdc.elf`): register-level CDC-ACM
+  (EP1-OUT/EP1-IN/EP3-CMD) enumerates + echoes through real machine code
+  (`tests/test_otg_cdc.mjs` 23/23). Real debugs along the way: OUT data
+  must be read on received (not completed) statuses or zeros clobber the
+  buffer; multi-packet IN collapses to one completion (no continuation);
+  SETUP bypasses the XFRSIZ-armed check.
+- **Page `otg_cdc` preset** (F105 + EP1 echo): worker `otgSetup/otgOut/
+  otgReset` cases, backend-aware sends, `wTotalLength`-parsed config.
+  Page-driver hardening shared with the FS enumerator: bus-reset-first
+  flow, per-stage NAK-driven + periodic resends, ack-gated OUT sends,
+  stream-tail echo match. Browser: usb_cdc + usb_serial + otg_cdc green.
+- **Verified**: `test_otg.mjs` 76/76, `test_otg_cdc.mjs` 23/23,
+  `test_all.mjs` 623/623, usb_cdc 22/22, usb_serial 11/11, canary 39/39,
+  wasm rebuilt pinned + `site/` synced.
+
 
 
 ## Next Phase — Long-term Optimizations

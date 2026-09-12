@@ -50,6 +50,24 @@ test.describe('New demo presets', () => {
     const term = await page.$eval('#terminal', el => el.innerText);
     expect(term).toContain('config descriptor (67B, 2 packets)');
   });
+  test('otg_cdc enumerates and echoes live (F105 OTG_FS)', async ({ page }) => {
+    page.on('console', msg => { if (msg.type() === 'error') console.log('BROWSER ERR:', msg.text()); });
+    await page.goto('http://localhost:8765/');
+    await page.selectOption('#presetSelect', 'otg_cdc');
+    await page.click('#loadPresetBtn');
+    await page.click('#runBtn');
+    await page.click('#usbEnumBtn');
+    await page.waitForFunction(
+      (n) => (document.querySelector('#terminal')?.innerText || '').includes(n),
+      'enumerated — CDC serial live', { timeout: 120000 });
+    await page.fill('#usbEchoInput', 'Hi');
+    await page.click('#usbEchoBtn');
+    await page.waitForFunction(
+      (n) => (document.querySelector('#terminal')?.innerText || '').includes(n),
+      'USB EP1 echo: "Hi"', { timeout: 120000 });
+    const term = await page.$eval('#terminal', el => el.innerText);
+    expect(term).toContain('config descriptor (75B, 2 packets)');
+  });
   test('i2c_slave writes and reads live', async ({ page }) => {
     page.on('console', msg => { if (msg.type() === 'error') console.log('BROWSER ERR:', msg.text()); });
     await page.goto('http://localhost:8765/');
