@@ -139,6 +139,12 @@ test.describe('Browser firmware tests', () => {
     await page.selectOption('#presetSelect', 'periph37');
     await page.click('#loadPresetBtn');
     await expect(page.locator('#runBtn')).toBeEnabled({ timeout: 30000 });
+    // The click returns before the async load handler disables the button,
+    // so runBtn-enabled can pass on the PREVIOUS load's state — wait for
+    // this load's own log line instead of reading the terminal immediately.
+    await page.waitForFunction(
+      () => (document.querySelector('#terminal')?.innerText || '').includes('STM32F105'),
+      null, { timeout: 30000 });
     const termText = await page.locator('#terminal').textContent();
     expect(termText).toContain('STM32F105');
 
