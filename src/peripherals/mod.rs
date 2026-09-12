@@ -104,7 +104,16 @@ pub trait Peripheral {
     /// reset, USBRST + ENUMDNE events. Default: unhandled.
     fn otg_bus_reset(&mut self, _sys: &System) -> bool { false }
     /// Host disconnect on OTG_FS (pull-up off). Default: unhandled.
-    fn otg_detach(&mut self, _sys: &System) -> bool { false }    /// Host-side I2C slave transactions (this peripheral addressed as slave).
+    fn otg_detach(&mut self, _sys: &System) -> bool { false }
+    /// Answer a pending OTG_FS host IN token on `ep` with `data` (or a
+    /// STALL handshake). Matches the first armed IN channel addressed at
+    /// `ep`. Default: unhandled (false).
+    fn otg_host_feed_in(&mut self, _sys: &System, _ep: usize, _data: &[u8], _stall: bool) -> bool {
+        false
+    }
+    /// Virtual-device attach/detach on the OTG_FS host port (PCSTS follows,
+    /// edges raise PCDET + HPRTINT). Default: unhandled (false).
+    fn otg_host_attach(&mut self, _sys: &System, _present: bool) -> bool { false }    /// Host-side I2C slave transactions (this peripheral addressed as slave).
     /// Defaults: unhandled (NACK / no data).
     fn i2c_slave_start(&mut self, _sys: &System, _addr: u16, _is_read: bool) -> bool { false }    fn i2c_slave_write(&mut self, _sys: &System, _byte: u8) -> bool { false }
     fn i2c_slave_read(&mut self, _sys: &System) -> Option<u8> { None }
@@ -830,6 +839,24 @@ impl Peripherals {
     pub fn otg_detach(&self, sys: &System) -> bool {
         if let Some(slot) = self.bus.borrow().get(0x5000_0000) {
             slot.peripheral.borrow_mut().otg_detach(sys)
+        } else {
+            false
+        }
+    }
+
+    /// Answer a pending OTG_FS host IN token on `ep` (or STALL it).
+    pub fn otg_host_feed_in(&self, sys: &System, ep: usize, data: &[u8], stall: bool) -> bool {
+        if let Some(slot) = self.bus.borrow().get(0x5000_0000) {
+            slot.peripheral.borrow_mut().otg_host_feed_in(sys, ep, data, stall)
+        } else {
+            false
+        }
+    }
+
+    /// Virtual-device attach/detach on the OTG_FS host port.
+    pub fn otg_host_attach(&self, sys: &System, present: bool) -> bool {
+        if let Some(slot) = self.bus.borrow().get(0x5000_0000) {
+            slot.peripheral.borrow_mut().otg_host_attach(sys, present)
         } else {
             false
         }

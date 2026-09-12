@@ -466,6 +466,20 @@ pub fn drain_events() -> Vec<i32> {
                         out.push(*channel as i32);
                         out.push(if *asserted { 1 } else { 0 });
                     }
+                    VmEvent::HostTx { ch, ep, setup, data } => {
+                        out.push(20);
+                        out.push(*ch as i32);
+                        out.push(*ep as i32);
+                        out.push(if *setup { 1 } else { 0 });
+                        out.push(data.len() as i32);
+                        for &b in data { out.push(b as i32); }
+                    }
+                    VmEvent::HostRx { ch, ep, len } => {
+                        out.push(21);
+                        out.push(*ch as i32);
+                        out.push(*ep as i32);
+                        out.push(*len as i32);
+                    }
                 }
             }
             out
@@ -566,6 +580,26 @@ pub fn otg_detach() -> bool {
     }
 }
 
+/// Answer a pending OTG_FS host IN token on `ep` with `data` (or a STALL
+/// handshake when `stall`). Returns false when no IN token is waiting.
+#[wasm_bindgen]
+pub fn otg_host_feed_in(ep: u8, data: &[u8], stall: bool) -> bool {
+    match try_sys() {
+        Some(sys) => sys.p.otg_host_feed_in(sys, ep as usize, data, stall),
+        None => false,
+    }
+}
+
+/// Virtual-device attach/detach on the OTG_FS host port (HPRT PCSTS
+/// follows, edges raise PCDET + HPRTINT).
+#[wasm_bindgen]
+pub fn otg_host_attach(present: bool) -> bool {
+    match try_sys() {
+        Some(sys) => sys.p.otg_host_attach(sys, present),
+        None => false,
+    }
+}
+
 /// Queue injected MISO bytes for a SPI channel (virtual device -> MCU).
 #[wasm_bindgen]
 pub fn spi_inject_miso(channel: u8, bytes: &[u8]) {
@@ -643,6 +677,20 @@ pub fn rcc_sysclk_hz() -> u32 {
     match try_sys() {
         Some(sys) => sys.p.rcc_clocks().0,
         None => 8_000_000,
+    }
+}
+
+/// Full configured clock tree (sysclk, hclk, pclk1, pclk2) in Hz decoded
+/// from RCC CFGR HPRE/PPRE1/PPRE2 (HSE assumed 8 MHz). Audit surface for
+/// the divider half of the tree; timing stays instruction-budget based.
+#[wasm_bindgen]
+pub fn rcc_clocks_hz() -> Vec<u32> {
+    match try_sys() {
+        Some(sys) => {
+            let (s, h, p1, p2) = sys.p.rcc_clocks();
+            vec![s, h, p1, p2]
+        }
+        None => vec![8_000_000, 8_000_000, 8_000_000, 8_000_000],
     }
 }
 

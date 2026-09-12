@@ -68,6 +68,23 @@ test.describe('New demo presets', () => {
     const term = await page.$eval('#terminal', el => el.innerText);
     expect(term).toContain('config descriptor (75B, 2 packets)');
   });
+  test('otg_host enumerates and echoes live (F105 HCD)', async ({ page }) => {
+    page.on('console', msg => { if (msg.type() === 'error') console.log('BROWSER ERR:', msg.text()); });
+    await page.goto('http://localhost:8765/');
+    await page.selectOption('#presetSelect', 'otg_host');
+    await page.click('#loadPresetBtn');
+    await page.click('#runBtn');
+    await page.waitForFunction(
+      (n) => (document.querySelector('#terminal')?.innerText || '').includes(n),
+      'bulk echo "Hi" fed back', { timeout: 120000 });
+    // Firmware-verified completion: the HCD reached trace 8 (bulk echo
+    // bytes matched on-device); the page shows it in the USB status.
+    await page.waitForFunction(
+      () => (document.querySelector('#usbStatus')?.innerText || '').includes('done'),
+      null, { timeout: 120000 });
+    const status = await page.$eval('#usbStatus', el => el.innerText);
+    expect(status).toContain('done');
+  });
   test('i2c_slave writes and reads live', async ({ page }) => {
     page.on('console', msg => { if (msg.type() === 'error') console.log('BROWSER ERR:', msg.text()); });
     await page.goto('http://localhost:8765/');

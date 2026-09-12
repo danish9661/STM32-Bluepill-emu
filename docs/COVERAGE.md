@@ -42,7 +42,7 @@ SPI3, GPIOE-G) are harmless supersets, marked *(S)* below.
 | MPU | 0xE000ED90 | Full | 8 regions, RNR/VALID/aliases, priority, subregions, AP/XN, background, PPB rules, MMFSR/MMFAR, MemManage/HardFault escalation (see docs/CPU.md) |
 | DBG / DBGMCU | 0xE0042000 | Missing | Intentional: debug/trace has no headless meaning |
 | ETHERNET_MAC/MMC/PTP/DMA | 0x40028xxx | Skipped | Correct: no F1 silicon has Ethernet (ST SVD quirk) |
-| OTG_FS_* | 0x50000xxx | Skipped on F103 / Full on F105 | Correct: F103 has FS-device USB only, no OTG (SVD quirk — still skipped there); F105 OTG_FS device mode is fully modeled (see PERIPHERALS), host channels inert |
+| OTG_FS_* | 0x50000xxx | Skipped on F103 / Full on F105 | Correct: F103 has FS-device USB only, no OTG (SVD quirk — still skipped there); F105 OTG_FS device + host modes fully modeled (see PERIPHERALS) |
 
 Score: of ~41 real peripherals, **41 Full, 1 Partial, 0 Stubs**, 2 intentionally missing/skipped.
 
@@ -103,12 +103,16 @@ present — the audit claim was wrong, caught by the compiler).
   PVD and BKP tamper already modeled (§21); no stop-mode clock switch
   beyond SWS.
 - NVIC: STIR (0xE000EF00, WO, INTID 9 bits) now routes to pending.
-- USB OTG host mode (F105 `0x5000xxxx` host channels): inert by design —
-  reads 0, writes flag MMIS and are otherwise ignored. A host stack needs
-  channels + SOF scheduling + enumeration against a peer device
-  (multi-sprint, untestable theater without one). Device mode is closed
-  (Full row above: `tests/test_otg.mjs` 76/76 + `tests/test_otg_cdc.mjs`
-  23/23 through real machine code).
+- USB OTG host mode (F105 `0x5000xxxx` host channels): Full — 8 channels
+  (HCCHAR/HCSPLT/HCINT/HCINTMSK/HCTSIZ, CHENA-edge arming, CHDIS halt),
+  DFIFO0-3 shared windows, HCFG/HFIR/HFNUM/HPTXSTS/HAINT/HAINTMSK/HPRT
+  (attach/detach/PPWR/PRST/PENA/PCDET), RXFIFO + GRXSTSP status queue
+  shared with device mode, SOF engine, `HostTx` (disc 20) / `HostRx`
+  (disc 21) events, `otg_host_feed_in` / `otg_host_attach` (+JS +
+  `.d.ts`). CSFTRST preserves a physically attached device (silicon
+  keeps the PHY; a pre-boot attach would otherwise boot into an E0
+  spin). Proven by `tests/otg_host/` bare-metal HCD (control + bulk
+  echo, `tests/test_otg_host.mjs` 5/5) + page `otg_host` preset.
 
 None of these affect the 39/39 firmware suite or any shipped demo; they matter
 only to firmware that specifically exercises them (which then sees lenient

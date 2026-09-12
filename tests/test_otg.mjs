@@ -8,7 +8,8 @@ periph.initSync({ module: readFileSync(new URL('../pkg/stm32_bluepill_wasm_bg.wa
 
 const { init_svd, periph_read, periph_write, step_batch, has_pending_interrupt,
         get_next_pending_interrupt, clear_current_interrupt,
-        drain_events, otg_inject_setup, otg_inject_out, otg_bus_reset, otg_detach } = periph;
+        drain_events, otg_inject_setup, otg_inject_out, otg_bus_reset, otg_detach,
+        otg_host_feed_in, otg_host_attach } = periph;
 
 let passed = 0, failed = 0;
 const ok = (cond, name) => { if (cond) { passed++; } else { failed++; console.log(`FAIL: ${name}`); } };
@@ -219,8 +220,9 @@ W(0xB28, 0xFFFFFFFF);
 
 // 12. Host block inert + MMIS; SOF engine advances FNSOF.
 W(0x400, 0xDEAD); // HCFG write in device mode
-ok((R(0x014) & G_MMIS) !== 0, 'MMIS flagged on host touch');
-eq(R(0x400), 0, 'host registers read 0');
+W(0x400, 3); // HCFG FSLSPCS
+eq(R(0x400) & 0x3, 0x3, 'HCFG stored');
+eq(R(0x414), 0, 'HAINT reads 0 with no channel IRQs');
 W(0x014, G_MMIS);
 const fnr0 = R(0x808);
 step_batch(72000);
@@ -237,6 +239,158 @@ W(0x804, 1); // RWUSIG while suspended: wake + WKUPINT
 eq(R(0x808) & 1, 0, 'RWUSIG wakes (SUSPSTS clear)');
 eq(R(0x014) & G_WKUP, G_WKUP, 'WKUPINT on remote wakeup');
 W(0x804, 0); // SDIS clear
+W(0x014, 0xFFFFFFFF);
+
+// ============================================================
+// Host mode: channels, SOF, port, control/bulk/stall/halt
+// ============================================================
+// Fresh core state (device tests above leave FIFOs/flags behind).
+init_svd(svd);
+periph_write(0xE000E108, 4, 1 << 3); // ISER2: OTG_FS IRQ 67
+W(0x008, 1); // GAHBCFG GINT on
+W(0x018, (1 << 24) | (1 << 25) | (1 << 3)); // GINTMSK HPRTINT|HCINT|SOF
+const H_HCINT = 1 << 25, H_HPRTINT = 1 << 24;
+
+// Host register resets + SOF frame counter.
+eq(R(0x400), 0, 'HCFG reset 0');
+eq(R(0x414), 0, 'HAINT reset 0');
+eq(R(0x440), 0, 'HPRT reset 0 (detached)');
+const hf0 = R(0x408) & 0xFFFF;
+step_batch(72000);
+eq(R(0x408) & 0xFFFF, (hf0 + 1) & 0xFFFF, 'HFNUM advances per frame');
+eq(R(0x014) & G_SOF, G_SOF, 'GINTSTS SOF set');
+W(0x014, G_SOF);
+eq(R(0x410) & 0xFFFF, 0x200, 'HPTXSTS generous space');
+
+// Virtual-device attach: PCSTS follows, PCDET + HPRTINT edge.
+ok(otg_host_attach(true) === true, 'host attach accepted');
+eq(R(0x440) & 1, 1, 'HPRT PCSTS on attach');
+eq(R(0x440) & 2, 2, 'HPRT PCDET on attach edge');
+eq(R(0x014) & H_HPRTINT, H_HPRTINT, 'GINTSTS HPRTINT on attach');
+ok(has_pending_interrupt() && get_next_pending_interrupt() === 67, 'attach pends IRQ 67');
+clear_current_interrupt();
+W(0x440, 2); // W1C PCDET
+eq(R(0x440) & 2, 0, 'HPRT PCDET W1C clears');
+W(0x014, H_HPRTINT);
+W(0x440, (1 << 12) | (1 << 8)); // PPWR + PRST
+eq(R(0x440) & ((1 << 2) | (1 << 12)), (1 << 2) | (1 << 12), 'HPRT PENA follows PPWR');
+// Core soft reset keeps a physically attached device (page attaches at
+// load, firmware CSFTRSTs at boot — wiping it boots into an E0 spin).
+W(0x010, 1); // CSFTRST
+eq(R(0x440) & 1, 1, 'HPRT PCSTS survives CSFTRST');
+
+// Control SETUP on ch0 (EP0 OUT, DAD 5): TSIZ + CHENA, then FIFO words.
+const CHENA = 0x80000000, CHDIS = 0x40000000;
+const EPDIR_IN = 1 << 15;
+const USB_EP0OUT = (64) | (0 << 11) | (0 << 15) | (1 << 18) | (5 << 22);
+W(0x500, USB_EP0OUT); // HCCHAR0
+W(0x50C, 1); // HCINTMSK0 XFRCM
+W(0x41C, 1 << 0); // HAINTMSK ch0
+W(0x510, 8 | (1 << 19) | (3 << 29)); // HCTSIZ0: 8B, PKTCNT=1, DPID=SETUP
+W(0x500, USB_EP0OUT | CHENA); // arm
+W(0x1000, 0x00000680); W(0x1000, 0x00010000); // 8 setup bytes via DFIFO0
+let hev = drain_events(), htx = null;
+for (let i = 0; i < hev.length;) {
+  const t = hev[i++];
+  if (t === 20) { const ch = hev[i++], ep = hev[i++], su = hev[i++], ln = hev[i++]; htx = [ch, ep, su, ln, hev.slice(i, i + ln).join(',')]; i += ln; }
+  else break;
+}
+ok(htx !== null && htx[0] === 0 && htx[1] === 0 && htx[2] === 1 && htx[3] === 8, `HostTx SETUP ch0/ep0/8B (got ${htx})`);
+eq(R(0x508) & 1, 1, 'HCINT0 XFRC on SETUP completion');
+eq(R(0x500) & CHENA, 0, 'CHENA clears on completion');
+eq(R(0x414) & 1, 1, 'HAINT ch0 pending (masked)');
+eq(R(0x014) & H_HCINT, H_HCINT, 'GINTSTS HCINT via HAINTMSK');
+ok(has_pending_interrupt() && get_next_pending_interrupt() === 67, 'host CTR pends IRQ 67');
+clear_current_interrupt();
+W(0x508, 1);
+W(0x014, H_HCINT);
+
+// Control IN (descriptor) on ch1: request event, then feed.
+W(0x520, 64 | (0 << 11) | EPDIR_IN | (1 << 18) | (5 << 22)); // HCCHAR1 EP0 IN
+W(0x52C, 1);
+W(0x41C, (1 << 0) | (1 << 1));
+W(0x530, 18 | (1 << 19) | (1 << 29)); // HCTSIZ1: 18B, PKTCNT=1, DATA1
+W(0x520, 64 | (0 << 11) | EPDIR_IN | (1 << 18) | (5 << 22) | CHENA);
+hev = drain_events();
+let hrx = null;
+for (let i = 0; i < hev.length;) {
+  const t = hev[i++];
+  if (t === 21) { const ch = hev[i++], ep = hev[i++], ln = hev[i++]; hrx = [ch, ep, ln]; }
+  else break;
+}
+ok(hrx !== null && hrx[0] === 1 && hrx[1] === 0 && hrx[2] === 18, `HostRx request ch1/ep0/18B (got ${hrx})`);
+const din = [];
+for (let i = 0; i < 18; i++) din.push(0x40 + i);
+ok(otg_host_feed_in(0, din, false) === true, 'host IN feed accepted');
+st = R(0x020);
+eq(st & 0xF, 0, 'fed packet reports EP0');
+eq((st >> 17) & 0xF, 2, 'fed packet status = IN received');
+eq((R(0x020) >> 17) & 0xF, 3, 'fed packet status = IN completed');
+// RXFIFO holds the fed bytes (LE words via DFIFO0).
+eq(R(0x1000), 0x43424140, 'fed FIFO word0');
+eq(R(0x1000), 0x47464544, 'fed FIFO word1');
+eq(R(0x528) & 1, 1, 'HCINT1 XFRC after feed');
+clear_current_interrupt();
+W(0x528, 1);
+W(0x014, H_HCINT);
+
+// Bulk OUT EP1 on ch2, bulk IN EP1 on ch3 (echo-style round trip).
+W(0x540, 64 | (1 << 11) | (0 << 15) | (2 << 18) | (5 << 22));
+W(0x54C, 1);
+W(0x41C, (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3));
+W(0x550, 3 | (1 << 19));
+W(0x540, 64 | (1 << 11) | (0 << 15) | (2 << 18) | (5 << 22) | CHENA);
+W(0x3000, 0x00070809); // DFIFO2: 'Hi'+pad via its own window
+hev = drain_events(); htx = null;
+for (let i = 0; i < hev.length;) {
+  const t = hev[i++];
+  if (t === 20) { const ch = hev[i++], ep = hev[i++], su = hev[i++], ln = hev[i++]; htx = [ch, ep, su, ln, hev.slice(i, i + ln).join(',')]; i += ln; }
+  else break;
+}
+ok(htx !== null && htx[0] === 2 && htx[1] === 1 && htx[2] === 0 && htx[4] === '9,8,7', `HostTx bulk ch2/ep1 (got ${htx})`);
+clear_current_interrupt();
+W(0x548, 1);
+W(0x014, H_HCINT);
+W(0x560, 64 | (1 << 11) | EPDIR_IN | (2 << 18) | (5 << 22));
+W(0x56C, 1);
+W(0x570, 3 | (1 << 19) | (1 << 29));
+W(0x560, 64 | (1 << 11) | EPDIR_IN | (2 << 18) | (5 << 22) | CHENA);
+ok(otg_host_feed_in(1, [9, 8, 7], false) === true, 'bulk IN feed accepted');
+eq(R(0x568) & 1, 1, 'HCINT3 XFRC after feed');
+clear_current_interrupt();
+W(0x568, 1);
+W(0x014, H_HCINT);
+
+// STALL answer on ch4, then halt clears via CHHLT.
+W(0x580, 64 | (2 << 11) | EPDIR_IN | (2 << 18) | (5 << 22));
+W(0x58C, 1);
+W(0x41C, 0xFF);
+W(0x590, 8 | (1 << 19));
+W(0x580, 64 | (2 << 11) | EPDIR_IN | (2 << 18) | (5 << 22) | CHENA);
+drain_events();
+ok(otg_host_feed_in(2, [], true) === true, 'STALL feed accepted');
+eq(R(0x588) & 8, 8, 'HCINT4 STALL set');
+eq(R(0x580) & CHENA, 0, 'CHENA clears on STALL');
+W(0x580, 64 | (2 << 11) | EPDIR_IN | (2 << 18) | (5 << 22) | CHENA);
+W(0x580, 64 | (2 << 11) | EPDIR_IN | (2 << 18) | (5 << 22) | CHENA | CHDIS);
+eq(R(0x588) & 2, 2, 'HCINT4 CHHLT on halt');
+eq(R(0x580) & CHENA, 0, 'CHENA clears on halt');
+let halted = false;
+for (let i = 0; i < 6; i++) { if (((R(0x020) >> 17) & 0xF) === 7) halted = true; }
+ok(halted, 'GRXSTSP reports channel-halted status');
+clear_current_interrupt();
+W(0x588, 0xFFFFFFFF);
+W(0x014, H_HCINT);
+
+// Feed with no waiter fails; detach drops PCSTS, reattach restores it.
+ok(otg_host_feed_in(7, [1], false) === false, 'feed with no waiter fails');
+ok(otg_host_attach(false) === true, 'host detach accepted');
+eq(R(0x440) & 1, 0, 'HPRT PCSTS clears on detach');
+eq(R(0x440) & 2, 2, 'HPRT PCDET on detach edge');
+ok(otg_host_attach(true) === true, 'host reattach accepted');
+eq(R(0x440) & 1, 1, 'HPRT PCSTS set on reattach');
+W(0x440, 2);
+clear_current_interrupt();
 W(0x014, 0xFFFFFFFF);
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);

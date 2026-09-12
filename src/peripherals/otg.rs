@@ -1,35 +1,48 @@
-//! USB OTG FS device (STM32F105 @ 0x5000_0000, IRQ 67, data FIFOs at
-//! 0x5000_1000 + EP*0x1000). Device-mode synchronous transaction model in
-//! the style of the FS-device (`usb.rs`): endpoint events complete when the
-//! firmware arms them, which is exact for control/bulk/interrupt firmware.
+//! USB OTG FS device + host (STM32F105 @ 0x5000_0000, IRQ 67, data FIFOs
+//! at 0x5000_1000 + N*0x1000). Synchronous transaction model in the style
+//! of the FS-device (`usb.rs`): transfers complete when the firmware arms
+//! them, which is exact for control/bulk/interrupt firmware.
 //!
-//! Implemented: GOTGCTL/GOTGINT (stored/0), GAHBCFG (GINT global gate),
-//! GUSBCFG (stored), GRSTCTL (CSFTRST full reset, RXFFLSH/TXFFLSH+TXFNUM
-//! FIFO flushes, AHBIDL always 1), GINTSTS/GINTMSK (W1C event flags,
-//! RXFLVL/NPTXFE/CMOD derived, level-sensitive IRQ recalc), GRXSTSR/GRXSTSP
-//! (real status queue: SETUP/OUT received+completed), GRXFSIZ/GNPTXFSIZ/
-//! HPTXFSIZ/DIEPTXFx (stored, sizes unenforced), GNPTXSTS/DTXFSTSx
-//! (generous space), GCCFG (stored; PWRDWN gates like FS PDWN), CID
-//! (read-only), DCFG (DAD address filter), DCTL (RWUSIG wake, SDIS
-//! disconnect, SGONAK/CGONAK global-NAK strobes), DSTS (SUSPSTS/ENUMSPD/
-//! FNSOF), DIEPMSK/DOEPMSK + DAINT + DAINTMSK three-level masking into
-//! IEPINT/OEPINT, DIEPCTL/DOEPCTL x4 (EPENA/SNAK/CNAK/STALL/NAKSTS/USBAEP
-//! hardware semantics, EPDIS completion), DIEPINT/DOEPINT x4 (W1C XFRC/
-//! EPDISD/STUP), DIEPTSIZ/DOEPTSIZ x4 (XFRSIZ/PKTCNT/STUPCNT accounting),
-//! PCGCCTL (stored), EP0-3 IN/OUT data FIFOs, SOF engine (FNSOF + SOF IRQ),
-//! suspend/resume (SDIS/detach/RWUSIG/bus-reset), host bus reset + detach
-//! inject APIs, DAD address filtering on injects.
+//! Implemented, device mode: GOTGCTL/GOTGINT (stored/0), GAHBCFG (GINT
+//! global gate), GUSBCFG (stored), GRSTCTL (CSFTRST full reset, RXFFLSH/
+//! TXFFLSH+TXFNUM FIFO flushes, AHBIDL always 1), GINTSTS/GINTMSK (W1C
+//! event flags, RXFLVL/NPTXFE/CMOD derived, level-sensitive IRQ recalc),
+//! GRXSTSR/GRXSTSP (real status queue: SETUP/OUT received+completed),
+//! GRXFSIZ/GNPTXFSIZ/HPTXFSIZ/DIEPTXFx (stored, sizes unenforced),
+//! GNPTXSTS/DTXFSTSx (generous space), GCCFG (stored; PWRDWN gates like
+//! FS PDWN), CID (read-only), DCFG (DAD address filter), DCTL (RWUSIG
+//! wake, SDIS disconnect, SGONAK/CGONAK global-NAK strobes), DSTS
+//! (SUSPSTS/ENUMSPD/FNSOF), DIEPMSK/DOEPMSK + DAINT + DAINTMSK three-level
+//! masking into IEPINT/OEPINT, DIEPCTL/DOEPCTL x4 (EPENA/SNAK/CNAK/STALL/
+//! NAKSTS/USBAEP hardware semantics, EPDIS completion), DIEPINT/DOEPINT x4
+//! (W1C XFRC/EPDISD/STUP), DIEPTSIZ/DOEPTSIZ x4 (XFRSIZ/PKTCNT/STUPCNT
+//! accounting), PCGCCTL (stored), EP0-3 IN/OUT data FIFOs, SOF engine
+//! (FNSOF + SOF IRQ), suspend/resume (SDIS/detach/RWUSIG/bus-reset), host
+//! bus reset + detach inject APIs, DAD address filtering on injects.
 //!
-//! Synchronous-completion rule (differs from the FS PMA model because ST's
-//! OTG HAL programs DIEPTSIZ + EPENA *before* pushing FIFO data): an IN
-//! transfer completes when pushed FIFO bytes reach XFRSIZ (zero-length when
-//! XFRSIZ == 0 with PKTCNT > 0); OUT/SETUP complete per injected packet.
-//! Deliberately absent: host mode (host-channel registers read 0, writes
-//! set MMIS and are otherwise ignored — device-only emulation), DMA
-//! registers (the FS core has no DMA engine; stored as 0), TXFE/empty
-//! interrupts (FIFOs never fill in emulation), OTG negotiation HNP/SRP
-//! (always B-device attached), ESOF (host never misses), isochronous
-//! SOF-gating (ISO shares bulk mechanics, like the FS model).
+//! Implemented, host mode: HCFG/HFIR (stored), HFNUM (SOF frame counter),
+//! HPTXSTS (generous space), HAINT/HAINTMSK into GINTSTS HCINT, HPRT
+//! (PCSTS follows virtual-device attach, PCDET + HPRTINT on edges,
+//! PENA follows PPWR, PRST stored), 8 host channels (HCCHAR/HCSPLT/
+//! HCINT(W1C XFRC/CHHLT/STALL)/HCINTMSK/HCTSIZ; HCDMA reads 0), OUT/SETUP
+//! completion drained as HostTx events when pushed FIFO bytes reach
+//! XFRSIZ (CHENA first, data after — ST's exact order), IN tokens drained
+//! as HostRx request events and completed by otg_host_feed_in (data or
+//! STALL), channel halt (CHDIS -> CHHLT), GRXSTSP/RXFIFO shared with the
+//! device path (one mode at a time in practice).
+//!
+//! Synchronous-completion rule (differs from the FS PMA model because ST
+//! programs TSIZ + EPENA/CHENA *before* pushing FIFO data): an IN/OUT
+//! transfer completes when pushed FIFO bytes reach XFRSIZ (zero-length
+//! when XFRSIZ == 0 with packets programmed); OUT/SETUP device packets
+//! complete per injected packet.
+//! Deliberately absent: host-mode NAK/timeout/retry/timeout-driven
+//! aborts (the scripted peer always answers; pending transfers simply
+//! wait), ping, split/LS transactions, isochronous SOF-gating (ISO shares
+//! bulk mechanics, like the FS model), DMA registers (the FS core has no
+//! DMA engine; reads return 0), TXFE/empty interrupts (FIFOs never fill in
+//! emulation), OTG negotiation HNP/SRP (always B-device attached /
+//! host-driven attach API), ESOF (host never misses).
 
 use crate::system::{System, VmEvent};
 use super::Peripheral;
@@ -75,7 +88,6 @@ const PCGCCTL: u32 = 0xE00;
 
 // GINTSTS/GINTMSK bits.
 const CMOD: u32 = 1 << 0;
-const MMIS: u32 = 1 << 1;
 const OTGINT: u32 = 1 << 2;
 const SOF: u32 = 1 << 3;
 const RXFLVL: u32 = 1 << 4;
@@ -128,6 +140,34 @@ const PKTSTS_SETUP_RX: u32 = 6;
 // GCCFG bits.
 const GCCFG_PWRDWN: u32 = 1 << 16;
 
+// Host-mode GINTSTS bits.
+const HPRTINT: u32 = 1 << 24;
+const HCINTB: u32 = 1 << 25;
+// HPRT bits.
+const HPRT_PCSTS: u32 = 1 << 0;
+const HPRT_PCDET: u32 = 1 << 1;
+const HPRT_PENA: u32 = 1 << 2;
+const HPRT_PRST: u32 = 1 << 8;
+const HPRT_PPWR: u32 = 1 << 12;
+// Host channel CTL bits.
+const HC_EPNUM_SHIFT: u32 = 11;
+const HC_EPDIR: u32 = 1 << 15;
+const HC_CHDIS: u32 = 1 << 30;
+const HC_CHENA: u32 = 1 << 31;
+// Host channel INT bits.
+const HCINT_XFRC: u32 = 1 << 0;
+const HCINT_CHHLT: u32 = 1 << 1;
+const HCINT_STALL: u32 = 1 << 3;
+const HCINT_ACK: u32 = 1 << 5;
+// HCTSIZ fields.
+const HCTSIZ_XFRSIZ_MASK: u32 = 0x7FFFF;
+const HCTSIZ_PKTCNT_SHIFT: u32 = 19;
+const HCTSIZ_DPID_SHIFT: u32 = 29;
+/// HCTSIZ DPID value for SETUP tokens (ST HC_PID_SETUP).
+const DPID_SETUP: u32 = 3;
+// GRXSTSP host packet statuses.
+const PKTSTS_HCHALTED: u32 = 7;
+
 fn stat_grx(ep: usize, len: usize, pktsts: u32, frame: u16) -> u32 {
     ((ep as u32) & 0xF)
         | (((len as u32) & 0x7FF) << 4)
@@ -142,6 +182,18 @@ struct OtgEp {
     int: u32,
     tsiz: u32,
     /// FIFO bytes pushed since the last EPENA arm (IN only).
+    pushed: u32,
+}
+
+/// One host channel's live state.
+#[derive(Clone, Copy, Default)]
+struct OtgHc {
+    char: u32,
+    splt: u32,
+    int: u32,
+    intmsk: u32,
+    tsiz: u32,
+    /// NPTX-FIFO bytes pushed since the last CHENA arm (OUT/SETUP only).
     pushed: u32,
 }
 
@@ -172,9 +224,17 @@ pub struct OtgFs {
     // Endpoints.
     in_ep: [OtgEp; 4],
     out_ep: [OtgEp; 4],
+    // Host mode.
+    hcfg: u32,
+    hfir: u32,
+    haintmsk: u32,
+    hprt: u32,
+    hc: [OtgHc; 8],
+    /// Virtual device presence on the host port (set via otg_host_attach).
+    host_attached: bool,
     // FIFOs (u32 words) + RX status queue.
     rxfifo: std::collections::VecDeque<u32>,
-    txfifo: [std::collections::VecDeque<u32>; 4],
+    txfifo: [std::collections::VecDeque<u32>; 8],
     grxq: std::collections::VecDeque<u32>,
     // SOF engine + link state.
     frame: u16,
@@ -219,13 +279,14 @@ impl OtgFs {
             pcgcctl: 0,
             in_ep: [OtgEp::default(); 4],
             out_ep: [OtgEp::default(); 4],
+            hcfg: 0,
+            hfir: 0,
+            haintmsk: 0,
+            hprt: 0,
+            hc: [OtgHc::default(); 8],
+            host_attached: false,
             rxfifo: std::collections::VecDeque::new(),
-            txfifo: [
-                std::collections::VecDeque::new(),
-                std::collections::VecDeque::new(),
-                std::collections::VecDeque::new(),
-                std::collections::VecDeque::new(),
-            ],
+            txfifo: [const { std::collections::VecDeque::new() }; 8],
             grxq: std::collections::VecDeque::new(),
             frame: 0,
             sof_acc: 0,
@@ -406,11 +467,18 @@ impl OtgFs {
     }
 
     /// Full core reset (GRSTCTL CSFTRST): everything back to defaults
-    /// (SVD reset values), keeping only the SOF clock base stable.
+    /// (SVD reset values), keeping only the SOF clock base stable. A
+    /// physically attached device stays attached across the soft reset
+    /// (silicon keeps the PHY/pull-ups; HPRT PCSTS reflects the port),
+    /// so host_attached survives — otherwise a pre-boot attach (the page
+    /// attaches at load, firmware CSFTRSTs at boot) would boot into an
+    /// E0 "no device" spin with no recovery.
     fn core_reset(&mut self) {
         let last_tick = self.last_tick;
+        let host_attached = self.host_attached;
         *self = Self::fresh();
         self.last_tick = last_tick;
+        self.host_attached = host_attached;
     }
 
     /// Host bus reset (SE0): endpoints + FIFOs + address reset, USBRST +
@@ -437,7 +505,7 @@ impl OtgFs {
 
     /// Host disconnect (pull-up off): tokens stop, IN never completes, SOF
     /// freezes. Cleared by the next bus reset (reattach).
-    fn detach(&mut self, sys: &System) {
+    pub fn detach(&mut self, sys: &System) {
         self.detached = true;
         if !self.suspended {
             self.suspended = true;
@@ -445,6 +513,169 @@ impl OtgFs {
         } else {
             self.recalc(sys);
         }
+    }
+
+    // ----------------------------------------------------------
+    // Host mode (device driver is firmware; the peer device is JS).
+    // ----------------------------------------------------------
+
+    fn hc_ep(&self, ch: usize) -> usize {
+        ((self.hc[ch].char >> HC_EPNUM_SHIFT) & 0xF) as usize
+    }
+
+    fn hc_dir_in(&self, ch: usize) -> bool {
+        self.hc[ch].char & HC_EPDIR != 0
+    }
+
+    fn hc_xfrsiz(&self, ch: usize) -> u32 {
+        self.hc[ch].tsiz & HCTSIZ_XFRSIZ_MASK
+    }
+
+    fn hc_dpid(&self, ch: usize) -> u32 {
+        (self.hc[ch].tsiz >> HCTSIZ_DPID_SHIFT) & 0x3
+    }
+
+    /// HAINT bit for a channel (masked per-channel flags, like DAINT).
+    fn haint(&self) -> u32 {
+        let mut v = 0u32;
+        for (ch, hc) in self.hc.iter().enumerate() {
+            if hc.int & hc.intmsk != 0 {
+                v |= 1 << ch;
+            }
+        }
+        v
+    }
+
+    /// Fold HAINT through HAINTMSK into GINTSTS HCINT.
+    fn fold_haint(&mut self, sys: &System) {
+        if self.haint() & (self.haintmsk & 0xFF) != 0 {
+            self.gintsts |= HCINTB;
+        } else {
+            self.gintsts &= !HCINTB;
+        }
+        self.recalc(sys);
+    }
+
+    fn set_hc_int(&mut self, sys: &System, ch: usize, bits: u32) {
+        self.hc[ch].int |= bits;
+        self.fold_haint(sys);
+    }
+
+    /// Virtual-device attach/detach on the host port: PCSTS follows
+    /// presence, edges raise PCDET + HPRTINT like silicon.
+    pub fn host_attach(&mut self, sys: &System, present: bool) {
+        if present != self.host_attached {
+            self.host_attached = present;
+            self.hprt |= HPRT_PCDET;
+            self.set_gint(sys, HPRTINT);
+        } else {
+            self.recalc(sys);
+        }
+    }
+
+    /// Device->host... host IN feed: the scripted peer answers a pending
+    /// IN token on `ep` with `data` (or a STALL handshake). Matches the
+    /// first armed IN channel addressed at `ep`; returns false when none
+    /// is waiting.
+    pub fn host_feed_in(&mut self, sys: &System, ep: usize, data: &[u8], stall: bool) -> bool {
+        let mut target = None;
+        for (ch, hc) in self.hc.iter().enumerate() {
+            if hc.char & HC_CHENA != 0 && hc.char & HC_EPDIR != 0 && self.hc_ep(ch) == (ep & 0xF) {
+                target = Some(ch);
+                break;
+            }
+        }
+        let ch = match target {
+            Some(ch) => ch,
+            None => return false,
+        };
+        self.hc[ch].char &= !HC_CHENA;
+        if stall {
+            self.set_hc_int(sys, ch, HCINT_STALL);
+            return true;
+        }
+        // Stage answer bytes into the RX FIFO (LE words, last padded).
+        for w in data.chunks(4).map(|c| {
+            let mut w = 0u32;
+            for (i, b) in c.iter().enumerate() {
+                w |= (*b as u32) << (i * 8);
+            }
+            w
+        }) {
+            self.rxfifo.push_back(w);
+        }
+        self.grxq
+            .push_back(stat_grx(ep, data.len(), PKTSTS_OUT_RX, self.frame));
+        self.grxq
+            .push_back(stat_grx(ep, data.len(), PKTSTS_OUT_DONE, self.frame));
+        let mut tsiz = self.hc[ch].tsiz;
+        tsiz = (tsiz & !HCTSIZ_XFRSIZ_MASK) | ((tsiz & HCTSIZ_XFRSIZ_MASK).saturating_sub(data.len() as u32));
+        tsiz &= !(0x1FF << HCTSIZ_PKTCNT_SHIFT);
+        self.hc[ch].tsiz = tsiz;
+        self.set_hc_int(sys, ch, HCINT_XFRC | HCINT_ACK);
+        true
+    }
+
+    /// Try to complete an armed host OUT/SETUP transfer (called on CHENA
+    /// arm and on every NPTX-FIFO push). Zero-length completes at once;
+    /// otherwise completion needs pushed >= XFRSIZ, drained as HostTx.
+    fn try_complete_hc(&mut self, sys: &System, ch: usize) {
+        let char = self.hc[ch].char;
+        if char & HC_CHENA == 0 || self.hc_dir_in(ch) {
+            return;
+        }
+        if self.link_down() || !self.powered() || !self.host_attached {
+            return;
+        }
+        let want = self.hc_xfrsiz(ch) as usize;
+        if want == 0 {
+            self.finish_hc(sys, ch, 0);
+            return;
+        }
+        if self.hc[ch].pushed as usize >= want {
+            self.finish_hc(sys, ch, want);
+        }
+    }
+
+    fn finish_hc(&mut self, sys: &System, ch: usize, len: usize) {
+        // Drain transfer bytes from this channel's TX FIFO window.
+        let mut data = Vec::with_capacity(len);
+        let mut left = len;
+        while left >= 4 {
+            match self.txfifo[ch].pop_front() {
+                Some(w) => {
+                    data.push((w & 0xFF) as u8);
+                    data.push(((w >> 8) & 0xFF) as u8);
+                    data.push(((w >> 16) & 0xFF) as u8);
+                    data.push(((w >> 24) & 0xFF) as u8);
+                }
+                None => break,
+            }
+            left -= 4;
+        }
+        if left > 0 {
+            if let Some(w) = self.txfifo[ch].pop_front() {
+                for i in 0..left {
+                    data.push(((w >> (i * 8)) & 0xFF) as u8);
+                }
+            }
+        }
+        data.truncate(len);
+        let ep = self.hc_ep(ch);
+        let setup = self.hc_dpid(ch) == DPID_SETUP;
+        sys.push_event(VmEvent::HostTx {
+            ch: ch as u8,
+            ep: ep as u8,
+            setup,
+            data,
+        });
+        let mut tsiz = self.hc[ch].tsiz;
+        tsiz = (tsiz & !HCTSIZ_XFRSIZ_MASK) | ((tsiz & HCTSIZ_XFRSIZ_MASK).saturating_sub(len as u32));
+        tsiz &= !(0x1FF << HCTSIZ_PKTCNT_SHIFT);
+        self.hc[ch].tsiz = tsiz;
+        self.hc[ch].char &= !HC_CHENA;
+        self.hc[ch].pushed = 0;
+        self.set_hc_int(sys, ch, HCINT_XFRC | HCINT_ACK);
     }
 
     fn enter_suspend(&mut self, sys: &System) {
@@ -600,6 +831,44 @@ impl OtgFs {
         true
     }
 
+    /// HCCHAR write: full control word stored; CHDIS halts with CHHLT;
+    /// CHENA rising edge arms a transfer (fresh push counter, plus an
+    /// IN-request event for IN channels so the scripted peer can answer).
+    fn write_hcchar(&mut self, sys: &System, ch: usize, v: u32) {
+        const DIRECT: u32 = 0x7FF | (0xF << 11) | (1 << 15) | (1 << 17) | (0x3 << 18) | (0x3 << 20) | (0x7F << 22) | (1 << 29);
+        let cur = self.hc[ch].char;
+        let mut r = (cur & !DIRECT) | (v & DIRECT);
+        if v & HC_CHDIS != 0 {
+            r &= !(HC_CHENA | HC_CHDIS);
+            self.hc[ch].char = r;
+            self.hc[ch].pushed = 0;
+            self.grxq
+                .push_back(stat_grx(self.hc_ep(ch), 0, PKTSTS_HCHALTED, self.frame));
+            self.set_hc_int(sys, ch, HCINT_CHHLT);
+            return;
+        }
+        if v & HC_CHENA != 0 && cur & HC_CHENA == 0 {
+            self.hc[ch].pushed = 0;
+        }
+        if v & HC_CHENA != 0 {
+            r |= HC_CHENA;
+        }
+        self.hc[ch].char = r;
+        if v & HC_CHENA != 0 && cur & HC_CHENA == 0 {
+            if self.hc_dir_in(ch) {
+                let ep = self.hc_ep(ch);
+                let len = self.hc_xfrsiz(ch);
+                sys.push_event(VmEvent::HostRx {
+                    ch: ch as u8,
+                    ep: ep as u8,
+                    len,
+                });
+            }
+            self.try_complete_hc(sys, ch);
+        }
+        self.recalc(sys);
+    }
+
     fn write_ep_in_ctl(&mut self, sys: &System, n: usize, v: u32) {
         let cur = self.in_ep[n].ctl;
         let mut r = cur;
@@ -677,7 +946,7 @@ impl OtgFs {
     fn read_reg(&mut self, sys: &System, offset: u32) -> u32 {
         // Data FIFOs: DFIFO0 reads pop the RX FIFO; other FIFOs read 0
         // (firmware only ever reads RX data through FIFO 0).
-        if (0x1000..0x5000).contains(&offset) {
+        if (0x1000..0x9000).contains(&offset) {
             let n = ((offset - 0x1000) / 0x1000) as usize;
             if n == 0 && offset % 4 == 0 {
                 let w = self.rxfifo.pop_front().unwrap_or(0);
@@ -730,6 +999,16 @@ impl OtgFs {
             DVBUSPULSE => self.dvbuspulse,
             DIEPEMPMSK => self.diepempmsk,
             PCGCCTL => self.pcgcctl,
+            0x400 => self.hcfg,
+            0x404 => self.hfir,
+            0x408 => (self.frame as u32) & 0xFFFF,
+            0x410 => 0x00080200, // generous periodic TX space.
+            0x414 => self.haint(),
+            0x418 => self.haintmsk,
+            0x440 => {
+                (if self.host_attached { HPRT_PCSTS } else { 0 })
+                    | (self.hprt & (HPRT_PCDET | HPRT_PENA | HPRT_PRST | HPRT_PPWR))
+            }
             o if (0x900..0x9C0).contains(&o) && (o - 0x900) % 0x20 < 0x18 => {
                 let n = ((o - 0x900) / 0x20) as usize;
                 match (o - 0x900) % 0x20 {
@@ -749,6 +1028,17 @@ impl OtgFs {
                 }
             }
             o if (0x918..0x980).contains(&o) && (o - 0x918) % 0x20 == 0 => 0x200,
+            o if (0x500..0x600).contains(&o) && (o - 0x500) % 0x20 < 0x18 => {
+                let ch = ((o - 0x500) / 0x20) as usize;
+                match (o - 0x500) % 0x20 {
+                    0x00 => self.hc[ch].char,
+                    0x04 => self.hc[ch].splt,
+                    0x08 => self.hc[ch].int,
+                    0x0C => self.hc[ch].intmsk,
+                    0x10 => self.hc[ch].tsiz,
+                    _ => 0, // HCDMA: no DMA engine on the FS core.
+                }
+            }
             _ => 0,
         }
     }
@@ -756,20 +1046,78 @@ impl OtgFs {
     fn write_reg(&mut self, sys: &System, offset: u32, value: u32) {
         // Data FIFOs: word pushes to the endpoint's TX FIFO (firmware
         // stages IN data after programming DIEPTSIZ + EPENA).
-        if (0x1000..0x5000).contains(&offset) {
+        if (0x1000..0x9000).contains(&offset) {
             let n = ((offset - 0x1000) / 0x1000) as usize;
-            if n < 4 && offset % 4 == 0 {
+            if n < 8 && offset % 4 == 0 {
                 self.txfifo[n].push_back(value);
-                let pushed = self.in_ep[n].pushed + 4;
-                self.in_ep[n].pushed = pushed;
-                self.try_complete_in(sys, n);
+                // Device EP n and host channel n share window n (ST writes
+                // DFIFO(ch) for host OUT, DFIFO(ep) for device IN); each
+                // side completes only when it is itself armed.
+                if n < 4 {
+                    let pushed = self.in_ep[n].pushed + 4;
+                    self.in_ep[n].pushed = pushed;
+                    self.try_complete_in(sys, n);
+                }
+                let hpushed = self.hc[n].pushed + 4;
+                self.hc[n].pushed = hpushed;
+                self.try_complete_hc(sys, n);
             }
             return;
         }
-        // Host block (0x400-0x7FF) is inert in device-only emulation, but a
-        // touch flags mode-mismatch like silicon noticing the wrong mode.
-        if (0x400..0x800).contains(&offset) {
-            self.set_gint(sys, MMIS);
+        // Host block: HCFG/HFIR/HFNUM/HPTXSTS/HAINT/HAINTMSK/HPRT plus
+        // per-channel HCCHAR/HCSPLT/HCINT/HCINTMSK/HCTSIZ (HCDMA stored).
+        if offset == 0x400 {
+            self.hcfg = value;
+            return;
+        }
+        if offset == 0x404 {
+            self.hfir = value;
+            return;
+        }
+        if offset == 0x410 || offset == 0x414 || offset == 0x418 {
+            return; // HPTXSTS/HAINT read-only; HAINTMSK below.
+        }
+        if offset == 0x41C {
+            self.haintmsk = value;
+            self.fold_haint(sys);
+            return;
+        }
+        if offset == 0x440 {
+            // HPRT: PCSTS/PCDET/PENA managed; PRST/PPWR stored.
+            if value & HPRT_PCDET != 0 {
+                self.hprt &= !HPRT_PCDET;
+            }
+            if value & HPRT_PPWR != 0 {
+                self.hprt |= HPRT_PPWR | HPRT_PENA;
+            } else {
+                self.hprt &= !(HPRT_PPWR | HPRT_PENA);
+            }
+            if value & HPRT_PRST != 0 {
+                self.hprt |= HPRT_PRST;
+            } else {
+                self.hprt &= !HPRT_PRST;
+            }
+            self.recalc(sys);
+            return;
+        }
+        if (0x500..0x600).contains(&offset) {
+            let ch = ((offset - 0x500) / 0x20) as usize;
+            if ch < 8 {
+                match (offset - 0x500) % 0x20 {
+                    0x00 => self.write_hcchar(sys, ch, value),
+                    0x04 => self.hc[ch].splt = value,
+                    0x08 => {
+                        self.hc[ch].int &= !value;
+                        self.fold_haint(sys);
+                    }
+                    0x0C => {
+                        self.hc[ch].intmsk = value;
+                        self.fold_haint(sys);
+                    }
+                    0x10 => self.hc[ch].tsiz = value,
+                    _ => {}
+                }
+            }
             return;
         }
         match offset {
@@ -792,7 +1140,7 @@ impl OtgFs {
                 }
                 if value & GRST_TXFFLSH != 0 {
                     let n = ((value >> GRST_TXFNUM_SHIFT) & 0x1F) as usize;
-                    if n < 4 {
+                    if n < 8 {
                         self.txfifo[n].clear();
                     } else {
                         for f in self.txfifo.iter_mut() {
@@ -915,7 +1263,7 @@ impl Peripheral for OtgFs {
         self.write_reg(sys, offset, value)
     }
     fn read_sized(&mut self, sys: &System, offset: u32, size: u8) -> u32 {
-        if (0x1000..0x5000).contains(&offset) {
+        if (0x1000..0x9000).contains(&offset) {
             // Data FIFOs are word-accessed like silicon; sub-word reads
             // return zero (UNPREDICTABLE on hardware).
             if size == 4 && offset % 4 == 0 {
@@ -935,7 +1283,7 @@ impl Peripheral for OtgFs {
         }
     }
     fn write_sized(&mut self, sys: &System, offset: u32, size: u8, value: u32) {
-        if (0x1000..0x5000).contains(&offset) {
+        if (0x1000..0x9000).contains(&offset) {
             // Data FIFOs are word-accessed like silicon; sub-word writes
             // are ignored (UNPREDICTABLE on hardware).
             if size == 4 && offset % 4 == 0 {
@@ -972,6 +1320,15 @@ impl Peripheral for OtgFs {
 
     fn otg_detach(&mut self, sys: &System) -> bool {
         self.detach(sys);
+        true
+    }
+
+    fn otg_host_feed_in(&mut self, sys: &System, ep: usize, data: &[u8], stall: bool) -> bool {
+        self.host_feed_in(sys, ep, data, stall)
+    }
+
+    fn otg_host_attach(&mut self, sys: &System, present: bool) -> bool {
+        self.host_attach(sys, present);
         true
     }
 }

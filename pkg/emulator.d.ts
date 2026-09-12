@@ -209,6 +209,10 @@ export interface BluepillEmulator {
   otgBusReset(): boolean;
   /** Host disconnect on OTG_FS (pull-up off); next bus reset reattaches. */
   otgDetach(): boolean;
+  /** Answer a pending OTG_FS host IN token on ep with data (or STALL it). */
+  otgHostFeedIn(ep: number, bytes: Uint8Array, stall?: boolean): boolean;
+  /** Virtual-device attach/detach on the OTG_FS host port. */
+  otgHostAttach(present: boolean): boolean;
 
   // ── Bus observers ─────────────────────────────────────────────────────────
 

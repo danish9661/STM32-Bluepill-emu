@@ -531,6 +531,7 @@ footer .foot-tag {
                     <option value="usb_cdc">USB CDC Serial (enumerate + echo)</option>
                     <option value="usb_serial">USB Serial, real Arduino stack (enumerate + echo)</option>
                     <option value="otg_cdc">USB OTG CDC on F105 (enumerate + echo)</option>
+                    <option value="otg_host">USB OTG host on F105 (HCD + echo)</option>
                     <option value="mini_rtos">Mini-RTOS (PendSV preemptive tasks)</option>
                     </optgroup>
                     <optgroup label="Boards">
@@ -754,8 +755,31 @@ function handleWorkerMsg(e) {
     }
     // USB CDC host tap
     if (m.usbIn) for (const p of m.usbIn) usbInbox.push(p);
+    if (m.hostTx) for (const p of m.hostTx) hostTxQ.push(p);
+    if (m.hostRx) for (const p of m.hostRx) hostRxQ.push(p);
+    if (m.hostTrace && usbDeviceMode) {
+      const tr = m.hostTrace.slots.map(v => '0x' + (v >>> 0).toString(16)).join(' ');
+      $('usbStatus').textContent = `HCD trace: ${tr}`;
+      if (m.hostTrace.slots.includes(8)) $('usbStatus').textContent += ' — done';
+    }
     if (m.usbAck !== null && m.usbAck !== undefined) { lastHostAck = m.usbAck; if (usbAckPending) { usbAckPending = false; usbAckValue = !!m.usbAck; } }
     if (usbEnum || usbEchoWait) usbEnumAdvance();
+    if (usbDeviceMode) {
+      usbDeviceAdvance();
+      // Main-thread path: poll the HCD RAM trace directly (the worker
+      // path arrives via m.hostTrace above).
+      if (!useWorker && emu && running) {
+        try {
+          const n = emu.memRead32(0x20000080) >>> 0;
+          if (n > 0 && n <= 32) {
+            const slots = [];
+            for (let k = 0; k < n && k < 8; k++) slots.push(emu.memRead32(0x20000084 + k * 4) >>> 0);
+            let tr = slots.map(v => '0x' + (v >>> 0).toString(16)).join(' ');
+            $('usbStatus').textContent = `HCD trace: ${tr}` + (slots.includes(8) ? ' — done' : '');
+          }
+        } catch {}
+      }
+    }
     if (i2cSeq) i2cAdvance();
     // showcase canvases from worker snapshot
     if (m.oledFb) {
@@ -865,6 +889,58 @@ const USB_S_CFG = [0x80,0x06,0x00,0x02,0x00,0x00,0xFF,0x00]; // ask 255: device 
 const USB_S_SETCFG = [0x00,0x09,0x01,0x00,0x00,0x00,0x00,0x00];
 const USB_S_LINE = [0x21,0x20,0x00,0x00,0x00,0x00,0x07,0x00];
 const USB_S_STATE = [0x21,0x22,0x03,0x00,0x00,0x00,0x00,0x00];
+// USB device responder (page otg_host preset): the FIRMWARE is the host
+// (bare-metal HCD); the page plays the virtual USB device over
+// otgHostFeedIn, answering HostTx setups + HostRx IN tokens. Same
+// descriptor shapes as tests/test_otg_host.mjs.
+let usbDeviceMode = false;   // page plays device (otg_host preset)
+let hostTxQ = [];            // collected [ch, ep, setup, bytes[]]
+let hostRxQ = [];            // collected [ch, ep, len]
+let devLastSetup = null;     // last SETUP packet bytes
+let devBulkOut = null;       // last bulk-OUT payload (echo source)
+let devLogged = {};          // milestone keys already logged
+const DEV_DESC = [18,1,0x00,0x02,0xEF,0x02,0x01,64,0x83,0x04,0x40,0x57,0x00,0x01,1,2,0,1];
+const CFG_DESC = [9,2,75,0,2,1,0,0x80,100,8,11,0,2,0x02,0x02,0x01,0,9,4,0,0,1,0x02,0x02,0x01,0,5,0x24,0x00,0x10,0x01,5,0x24,0x01,0x00,1,4,0x24,0x02,0x02,5,0x24,0x06,0,1,7,5,0x83,0x03,8,0,10,9,4,1,0,2,0x0A,0x00,0x00,0,7,5,0x01,0x02,64,0,0,7,5,0x81,0x02,64,0,0];
+function otgHostFeed(ep, bytes) {
+  if (useWorker && worker) {
+    if (!workerReady) { workerQueue.push({ type: 'otgHostFeed', ep, bytes }); return null; }
+    worker.postMessage({ type: 'otgHostFeed', ep, bytes }); return null;
+  }
+  try { return emu ? !!emu.otgHostFeedIn(ep, bytes, false) : false; } catch { return false; }
+}
+function otgHostAttach() {
+  if (useWorker && worker) {
+    if (!workerReady) { workerQueue.push({ type: 'otgHostAttach' }); return; }
+    worker.postMessage({ type: 'otgHostAttach' }); return;
+  }
+  try { emu && emu.otgHostAttach(true); } catch {}
+}
+function usbDeviceAdvance() {
+  if (!usbDeviceMode) return;
+  for (const t of hostTxQ.splice(0)) {
+    const [ch, ep, setup, data] = t;
+    if (setup) {
+      devLastSetup = data;
+      const key = data.slice(0, 4).join(',');
+      const name = key === '128,6,0,1' ? 'GET_DESCRIPTOR device' : key === '0,5,5,0' ? 'SET_ADDRESS(5)' : key === '128,6,0,2' ? 'GET_DESCRIPTOR config' : key === '0,9,1,0' ? 'SET_CONFIGURATION(1)' : `setup [${key}]`;
+      if (!devLogged[key]) { devLogged[key] = true; log(`USB dev: ${name} from HCD ch${ch}.`, 't-in'); }
+    } else if (ep === 1 && data.length > 0) {
+      devBulkOut = data.slice();
+      log(`USB dev: bulk OUT EP1 (${data.length}B "${String.fromCharCode(...data)}").`, 't-in');
+    }
+  }
+  for (const r of hostRxQ.splice(0)) {
+    const [ch, ep, len] = r;
+    if (devLastSetup && devLastSetup[1] === 0x06 && devLastSetup[3] === 1) otgHostFeed(ep, DEV_DESC);
+    else if (devLastSetup && devLastSetup[1] === 0x06 && devLastSetup[3] === 2) {
+      otgHostFeed(ep, CFG_DESC);
+      if (!devLogged.cfg) { devLogged.cfg = true; log('USB dev: config descriptor (75B) fed.', 't-ok'); }
+    } else if (ep === 1 && devBulkOut) {
+      otgHostFeed(ep, devBulkOut);
+      if (!devLogged.echo) { devLogged.echo = true; log(`USB dev: bulk echo "${String.fromCharCode(...devBulkOut)}" fed back.`, 't-ok'); $('usbStatus').textContent = 'bulk echo exchanged'; }
+    } else otgHostFeed(ep, []);
+  }
+}
 function usbTake(ep) {
   const i = usbInbox.findIndex(e => e[0] === ep);
   return i < 0 ? null : usbInbox.splice(i, 1)[0][1];
@@ -915,6 +991,10 @@ function usbDrainMain() {
         const len = flat[i+2] || 0;
         usbInbox.push([flat[i+1], Array.from(flat.slice(i+3, i+3+len))]);
         adv = 3 + len;
+      } else if (t === 20) { adv = 5 + (flat[i+4] || 0); // HostTx: device-mode inbox below
+        hostTxQ.push([flat[i+1], flat[i+2], flat[i+3], Array.from(flat.slice(i+5, i+5+(flat[i+4]||0)))]);
+      } else if (t === 21) { adv = 4; // HostRx request: device-mode inbox below
+        hostRxQ.push([flat[i+1], flat[i+2], flat[i+3] || 0]);
       } else if (t === 2 || t === 3 || t === 6 || t === 8 || t === 10) adv = 3;
       if (adv <= 0) break;
       i += adv;
@@ -1384,6 +1464,8 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
     autopilot = false;
     usbListenMain = false;
     usbInbox = []; usbEnum = null; usbEnumerated = false;
+    usbDeviceMode = false; hostTxQ = []; hostRxQ = [];
+    devLastSetup = null; devBulkOut = null; devLogged = {};
     i2cSeq = null; lastHostAck = null;
     $('i2cStatus').textContent = 'idle';
     runSteps = 0;
@@ -1439,7 +1521,7 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
         const svdForWorker = (chipSel === 'stm32f103c8' && svdXml) ? svdXml : undefined;
         // autoBytes for periph_test autopilot
         const ab = (name.includes('periph_test') || name.includes('arduino_periph_test')) ? [0x41, 0x42] : [];
-        worker.postMessage({ type: 'init', firmware: data, chip, svd: svdForWorker, ext_devices: extDevices, autoBytes: ab, canFlagAddr, usbListen: !!opts.usbListen, uartAddr: opts.uartAddr || 0 });
+        worker.postMessage({ type: 'init', firmware: data, chip, svd: svdForWorker, ext_devices: extDevices, autoBytes: ab, canFlagAddr, usbListen: !!opts.usbListen, hostTrace: !!opts.hostTrace, uartAddr: opts.uartAddr || 0 });
         // Try OffscreenCanvas transfer for showcase (worker renders directly, no copy)
         try {
           if (typeof OffscreenCanvas !== 'undefined' && $('oledCanvas')?.transferControlToOffscreen) {
@@ -1546,6 +1628,7 @@ function runLoop() {
     }
     pollUart();
     if (usbListenMain) { usbDrainMain(); if (usbEnum || usbEchoWait) usbEnumAdvance(); }
+    if (usbDeviceMode) usbDeviceAdvance();
     if (i2cSeq) i2cAdvance();
     if (autopilot) {
         const termText = terminal.textContent;
@@ -1784,7 +1867,18 @@ $('loadPresetBtn').addEventListener('click', async () => {
             usbEchoEp = 1;
             usbBackend = 'otg';
             $('usbCard').hidden = false;
-            log('Press Run \u2014 then Enumerate USB device: the page plays host against the F105 OTG_FS core (EP1 bulk echo).', 't-in');
+            log('Press Run — then Enumerate USB device: the page plays host against the F105 OTG_FS core (EP1 bulk echo).', 't-in');
+        } else if (preset === 'otg_host') {
+            await svdsReady; // same SVD race as otg_cdc (OTG_FS lives in the SVD map)
+            $('chipSelect').value = 'stm32f105';
+            const buf = await fetch('otg_host.elf').then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(buf), 'otg_host.elf (USB OTG host HCD on F105)', {}, false, { usbListen: true, hostTrace: true });
+            usbListenMain = true;
+            usbDeviceMode = true;
+            $('usbCard').hidden = false;
+            $('usbStatus').textContent = 'virtual device attached';
+            otgHostAttach();
+            log('Press Run — the page plays the USB device (descriptors + bulk echo); the HCD trace shows live firmware progress.', 't-in');
         } else if (preset === 'usb_serial') {
             const buf = await fetch('arduino_usb_serial.elf').then(r => r.arrayBuffer());
             await initEmulator(new Uint8Array(buf), 'arduino_usb_serial.elf (USBSerial, real STM32duino stack)', {}, false, { usbListen: true });
@@ -1858,6 +1952,16 @@ $('loadPresetBtn').addEventListener('click', async () => {
 const btnWidget = $('btn-widget');
 $('usbEnumBtn').addEventListener('click', () => {
     if (!running) { log('Press Run first — the device must be polling.', 't-err'); return; }
+    if (usbDeviceMode) {
+        // Host-firmware preset: re-attach the virtual device and restart
+        // the scripted answers; the HCD re-enumerates on the new attach.
+        hostTxQ = []; hostRxQ = [];
+        devLastSetup = null; devBulkOut = null; devLogged = {};
+        $('usbStatus').textContent = 'virtual device attached';
+        otgHostAttach();
+        log('USB: virtual device re-attached; HCD re-enumerates.', 't-in');
+        return;
+    }
     usbInbox = []; usbEnumerated = false; usbEchoWait = null; usbEchoStream = '';
     $('usbStatus').textContent = 'enumerating…';
     $('usbEchoInput').disabled = true; $('usbEchoBtn').disabled = true;

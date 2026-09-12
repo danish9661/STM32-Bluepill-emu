@@ -200,6 +200,10 @@ export class STM32F1 {
         this.onUsbIn = null;
         /** SMBus ALERT drive edge callback: onI2cAlert(channel, asserted) */
         this.onI2cAlert = null;
+        /** OTG host OUT/SETUP completion: onHostTx(ch, ep, setup, data[]) */
+        this.onHostTx = null;
+        /** OTG host IN token request: onHostRx(ch, ep, len) */
+        this.onHostRx = null;
         this._pinUnsub = null;
         this._wire();
     }
@@ -288,6 +292,14 @@ export class STM32F1 {
             } else if (type === 19) { // I2cAlert [channel, asserted]
                 const ch = flat[i++]; const asserted = flat[i++] !== 0;
                 if (this.onI2cAlert) this.onI2cAlert(ch, asserted);
+            } else if (type === 20) { // HostTx [ch, ep, setup, len, bytes...]
+                const ch = flat[i++]; const ep = flat[i++]; const setup = flat[i++] !== 0;
+                const len = flat[i++];
+                const data = []; for (let k = 0; k < len; k++) data.push(flat[i++] & 0xFF);
+                if (this.onHostTx) this.onHostTx(ch, ep, setup, data);
+            } else if (type === 21) { // HostRx [ch, ep, len]
+                const ch = flat[i++]; const ep = flat[i++]; const len = flat[i++];
+                if (this.onHostRx) this.onHostRx(ch, ep, len);
             } else {
                 console.warn('STM32F1: unknown event discriminant', type, 'at index', i - 1);
                 break; // unknown length: stop to avoid desync

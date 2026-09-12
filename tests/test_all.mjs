@@ -7,7 +7,7 @@ const { init, init_svd, periph_read, periph_write, tick, step_batch, has_pending
         gpio_read_input, get_uart_output, uart_rx_byte, uart_inject_break, adc_set_sim_value,
         is_watchdog_reset_requested, can_inject_message, gpio_set_slew, raise_fault,
         add_fsmc_bank, gpio_set_analog, adc_set_rc_tau, register_js_peripheral,
-        add_sd_card, reset_ext_devices, rcc_sysclk_hz, rcc_fail_hse, add_i2c_eeprom,
+        add_sd_card, reset_ext_devices, rcc_sysclk_hz, rcc_clocks_hz, rcc_fail_hse, add_i2c_eeprom,
         drain_events, usb_inject_setup, usb_inject_out, usb_bus_reset, usb_detach, pwm_duty,
         i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop, i2c_inject_alert,
         add_lcd, lcd_fb, adc_set_internal, pwr_mode,
@@ -2416,6 +2416,26 @@ assert_eq(rcc_sysclk_hz(), 36000000, 'RCC PLL HSI/2 x9 -> 36 MHz');
 // HSE direct
 periph_write(RCC_CLK + 0x04, 4, 1);
 assert_eq(rcc_sysclk_hz(), 8000000, 'RCC SW=HSE -> 8 MHz');
+
+// Full-tree audit via rcc_clocks_hz (HSE assumed 8 MHz): prescalers +
+// multiplier edges. CFGR layout: SW[1:0] SWS[3:2] HPRE[7:4] PPRE1[10:8]
+// PPRE2[13:11] PLLSRC[16] PLLXTPRE[17] PLLMUL[21:18].
+const clocks = () => Array.from(rcc_clocks_hz()).join(',');
+assert_eq(clocks(), '8000000,8000000,8000000,8000000', 'RCC default tree all 8 MHz');
+// PLL HSE x9 + HPRE/2 + PPRE1/2 + PPRE2/4: 72/36/18/9 MHz
+periph_write(RCC_CLK + 0x04, 4, (1 << 16) | (7 << 18) | 2 | (8 << 4) | (4 << 8) | (5 << 11));
+assert_eq(clocks(), '72000000,36000000,18000000,9000000', 'RCC prescaled tree 72/36/18/9');
+// Multiplier edges: x2 min (HSE), x16 max (bits 14/15 clamp)
+periph_write(RCC_CLK + 0x04, 4, (1 << 16) | (0 << 18) | 2);
+assert_eq(clocks().split(',')[0], '16000000', 'RCC PLL x2 min -> 16 MHz');
+periph_write(RCC_CLK + 0x04, 4, (1 << 16) | (15 << 18) | 2);
+assert_eq(clocks().split(',')[0], '128000000', 'RCC PLL x16 max -> 128 MHz');
+// HSE/2 source (PLLXTPRE): 4M x9 = 36M
+periph_write(RCC_CLK + 0x04, 4, (1 << 16) | (1 << 17) | (7 << 18) | 2);
+assert_eq(clocks().split(',')[0], '36000000', 'RCC PLL HSE/2 x9 -> 36 MHz');
+// Max dividers: HPRE/512 + PPRE/16 both buses (72M sys)
+periph_write(RCC_CLK + 0x04, 4, (1 << 16) | (7 << 18) | 2 | (15 << 4) | (7 << 8) | (7 << 11));
+assert_eq(clocks(), '72000000,140625,8789,8789', 'RCC max dividers 72M/140625/8789');
 
 // ============================================================
 // Tamper pin (PC13 -> BKP, IRQ2, backup regs cleared)

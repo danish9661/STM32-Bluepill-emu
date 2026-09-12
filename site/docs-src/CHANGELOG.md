@@ -12,10 +12,27 @@ All notable changes to this project will be documented in this file.
 - Bare-metal OTG CDC demo (`tests/otg_cdc/`, xpack-gcc + custom linker
   script, ships `site/otg_cdc.elf`): full host enumeration + EP1 bulk
   echo through real machine code (`tests/test_otg_cdc.mjs` 23/23)
-- `tests/test_otg.mjs` 76/76 (core/reset/FIFO/IRQ/STALL/detach/PWRDWN/
-  DAD-filter/host-inert); both wired into CI
+- `tests/test_otg.mjs` 119/119 (core/reset/FIFO/IRQ/STALL/detach/PWRDWN/
+  DAD-filter/host channels + attach-survives-CSFTRST); device + host
+  wired into CI
 - `otg_cdc` demo-page preset (F105 + EP1 echo, host-style retries +
   NAK-driven resends shared with the FS enumerator)
+- USB OTG_FS host mode (`src/peripherals/otg.rs`): 8 channels
+  (HCCHAR/HCSPLT/HCINT/HCINTMSK/HCTSIZ, CHENA-edge arming, CHDIS halt),
+  HCFG/HFIR/HFNUM/HPTXSTS/HAINT/HAINTMSK/HPRT, RXFIFO + GRXSTSP shared
+  with device mode, `HostTx`/`HostRx` events, `otg_host_feed_in` /
+  `otg_host_attach` (+JS + `.d.ts`)
+- Bare-metal OTG HCD demo (`tests/otg_host/`, xpack-gcc + custom linker
+  script, ships `site/otg_host.elf`): control enumeration + bulk echo
+  through real machine code (`tests/test_otg_host.mjs` 5/5, CI)
+- `otg_host` demo-page preset (F105 + scripted virtual device +
+  live HCD trace; worker defers pre-init attach/feed across the
+  `await createEmulator` message interleave)
+
+### Fixed
+- CSFTRST preserves a physically attached device (silicon keeps the
+  PHY): a pre-boot attach previously booted into an E0 "no device"
+  spin with no recovery
 
 ## [3.0.1] — 2026-09-11 — real-stack USB enumeration
 

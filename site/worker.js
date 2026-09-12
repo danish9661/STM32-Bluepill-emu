@@ -35,8 +35,18 @@ let oledOff = null, lcdOff = null, oledCtx = null, lcdCtx = null;
 let pinBuf = [];
 // USB host taps (page CDC preset): when usbListen, each frame drains the
 // VmEvent queue and forwards UsbIn (type 18) packets to the main thread.
+// hostTraceListen (page otg_host preset) additionally forwards HostTx (20)
+// / HostRx (21) plus the HCD RAM trace so the page can play the device.
 let usbListen = false;
+let hostTraceListen = false;
 let usbAck = null;
+// Control messages that arrive while `await createEmulator` is still
+// pending (e.g. the otg_host preset's load-time attach) must not run
+// against a null emu: worker messages interleave across the await, so a
+// pre-ready otgHostAttach would throw, get swallowed by its try/catch,
+// and the firmware would boot with no device (HCD trace 0xE0). Defer
+// them and flush after successful init.
+let pendingPreInit = [];
 
 function post(type, extra = {}) {
   self.postMessage({ type, ...extra });
@@ -48,6 +58,7 @@ async function handleMessage(e) {
   switch (msg.type) {
     case 'init': {
       if (emu) { try { emu.close(); } catch {} emu = null; }
+      pendingPreInit = [];
       running = false;
       runSteps = 0;
       totalInstBase = 0;
@@ -55,6 +66,7 @@ async function handleMessage(e) {
       uartAddr = msg.uartAddr || 0;
       canInjected = false;
       usbListen = !!msg.usbListen;
+      hostTraceListen = !!msg.hostTrace;
       usbAck = null;
       // Main thread resolves 'canRxArmed' from the ELF symbols (hardcoded
       // addresses go stale on rebuild); fall back for hex/bin firmware.
@@ -72,6 +84,9 @@ async function handleMessage(e) {
         try { self.postMessage({ type: 'debug', msg: 'createEmulator done' }); } catch {}
         emu.onPinChange((port, pin, level) => pinBuf.push(port, pin, level));
         if (msg.symbols) emu.setSymbols(msg.symbols);
+        for (const q of pendingPreInit.splice(0)) {
+          try { await handleMessage({ data: q }); } catch {}
+        }
         const regs = emu.getRegisters();
         let idcode = null;
         try { idcode = emu.periphRead(0xE0042000, 4) >>> 0; } catch {}
@@ -168,6 +183,20 @@ break;
       usbAck = a;
       break;
     }
+    case 'otgHostAttach': {
+      if (!emu) { pendingPreInit.push(msg); break; }
+      let a = false;
+      try { a = !!emu.otgHostAttach(true); } catch {}
+      usbAck = a;
+      break;
+    }
+    case 'otgHostFeed': {
+      if (!emu) { pendingPreInit.push(msg); break; }
+      let a = false;
+      try { a = !!emu.otgHostFeedIn(msg.ep, msg.bytes || [], false); } catch {}
+      usbAck = a;
+      break;
+    }
     case 'setSymbols': {
       if (emu) emu.setSymbols(msg.text);
       const regs = emu.getRegisters();
@@ -217,7 +246,9 @@ function loop() {
   const uartOut = emu.getUartOutput();
   const pins = pinBuf.splice(0);
   // USB tap: forward UsbIn packets (skip other discriminants by length).
-  let usbIn = null;
+  // In host-firmware mode (hostTraceListen) also forward HostTx/HostRx
+  // pairs plus the HCD RAM trace so the page can play the USB device.
+  let usbIn = null, hostTx = null, hostRx = null, hostTrace = null;
   if (usbListen) {
     try {
       const flat = emu.drainEvents();
@@ -229,6 +260,8 @@ function loop() {
           case 14: case 15: return 12;
           case 16: return 4; case 17: return 6;
           case 18: return 3 + (flat[j+2]||0);
+          case 20: return 5 + (flat[j+4]||0);
+          case 21: return 4;
           case 2: case 3: case 6: case 8: case 10: return 3;
           default: return 2; // 4,5,7,9,11,12,13: single-arg events
         }
@@ -238,6 +271,11 @@ function loop() {
         if (t === 18) {
           const ep = flat[i+1], len = flat[i+2] || 0;
           pkts.push([ep, Array.from(flat.slice(i+3, i+3+len))]);
+        } else if (t === 20 && hostTraceListen) {
+          const ch = flat[i+1], ep = flat[i+2], su = flat[i+3], ln = flat[i+4] || 0;
+          (hostTx || (hostTx = [])).push([ch, ep, su, Array.from(flat.slice(i+5, i+5+ln))]);
+        } else if (t === 21 && hostTraceListen) {
+          (hostRx || (hostRx = [])).push([flat[i+1], flat[i+2], flat[i+3] || 0]);
         }
         const adv = skipLen(t, i);
         if (adv <= 0) break;
@@ -247,6 +285,18 @@ function loop() {
     } catch {}
   }
   const usbAckOut = usbAck; usbAck = null;
+  // HCD trace for the host preset (otg_host.elf trace[] at 0x20000080):
+  // trace_n + up to 8 slots so the page can show live HCD progress.
+  if (hostTraceListen && emu) {
+    try {
+      const n = emu.memRead32(0x20000080) >>> 0;
+      if (n > 0 && n <= 32) {
+        const slots = [];
+        for (let k = 0; k < n && k < 8; k++) slots.push(emu.memRead32(0x20000084 + k * 4) >>> 0);
+        hostTrace = { n, slots };
+      }
+    } catch {}
+  }
   // OffscreenCanvas: render directly in worker if transferred, else send FB to main
   let oledFb = null, lcdFb = null, rgbDuty = null, buzz = null;
   if (oledCtx) {
@@ -303,6 +353,7 @@ function loop() {
     gpio: gpioSnap,
     stopped: lastResult ? lastResult.stopped : false,
     usbIn, usbAck: usbAckOut,
+    hostTx, hostRx, hostTrace,
   });
 
   if (lastResult && lastResult.stopped) {

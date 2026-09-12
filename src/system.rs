@@ -115,6 +115,11 @@ pub enum VmEvent {
     FsmcAccess { bank: u8, offset: u32, write: bool, size: u8, value: u32 },
     UsbIn { ep: u8, data: Vec<u8> },
     I2cAlert { channel: u8, asserted: bool },
+    /// OTG_FS host-mode OUT/SETUP completion (host -> device bytes).
+    HostTx { ch: u8, ep: u8, setup: bool, data: Vec<u8> },
+    /// OTG_FS host-mode IN token request (device -> host): feed with
+    /// otg_host_feed_in.
+    HostRx { ch: u8, ep: u8, len: u32 },
 }
 
 /// ARMv7-M MPU region (RBAR + RASR shadows). Plain Copy data behind one

@@ -631,6 +631,32 @@ export function otg_detach() {
 }
 
 /**
+ * Virtual-device attach/detach on the OTG_FS host port (HPRT PCSTS
+ * follows, edges raise PCDET + HPRTINT).
+ * @param {boolean} present
+ * @returns {boolean}
+ */
+export function otg_host_attach(present) {
+    const ret = wasm.otg_host_attach(present);
+    return ret !== 0;
+}
+
+/**
+ * Answer a pending OTG_FS host IN token on `ep` with `data` (or a STALL
+ * handshake when `stall`). Returns false when no IN token is waiting.
+ * @param {number} ep
+ * @param {Uint8Array} data
+ * @param {boolean} stall
+ * @returns {boolean}
+ */
+export function otg_host_feed_in(ep, data, stall) {
+    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.otg_host_feed_in(ep, ptr0, len0, stall);
+    return ret !== 0;
+}
+
+/**
  * Inject a USB OTG_FS OUT packet into an endpoint's RX FIFO (host ->
  * device). `addr` selects hardware address filtering (None =
  * correctly-addressed host). Returns false when dropped.
@@ -743,6 +769,19 @@ export function pwr_mode() {
  */
 export function raise_fault(kind, addr) {
     wasm.raise_fault(kind, addr);
+}
+
+/**
+ * Full configured clock tree (sysclk, hclk, pclk1, pclk2) in Hz decoded
+ * from RCC CFGR HPRE/PPRE1/PPRE2 (HSE assumed 8 MHz). Audit surface for
+ * the divider half of the tree; timing stays instruction-budget based.
+ * @returns {Uint32Array}
+ */
+export function rcc_clocks_hz() {
+    const ret = wasm.rcc_clocks_hz();
+    var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
 }
 
 /**

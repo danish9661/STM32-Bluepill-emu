@@ -559,6 +559,55 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
   `test_all.mjs` 623/623, usb_cdc 22/22, usb_serial 11/11, canary 39/39,
   wasm rebuilt pinned + `site/` synced.
 
+### 43. F105 USB OTG_FS host mode + bare-metal HCD proof + RCC audit [this sprint]
+- **New host model** (`src/peripherals/otg.rs`, ~+450 lines): 8 channels
+  (HCCHAR/HCSPLT/HCINT/HCINTMSK/HCTSIZ, CHENA-edge arming, CHDIS halt
+  with CHHLT + HCHALTED status), DFIFO0-3 shared windows (device EP n
+  and host ch n share window n; each side completes only when itself
+  armed), HCFG/HFIR/HFNUM/HPTXSTS/HAINT/HAINTMSK/HPRT (attach/detach/
+  PPWR/PRST/PENA/PCDET edges), RXFIFO + GRXSTSP shared with device
+  mode, SOF engine, `HostTx` (disc 20) / `HostRx` (disc 21) events,
+  `otg_host_feed_in` / `otg_host_attach` (+JS + `.d.ts`). CSFTRST
+  preserves `host_attached` (silicon keeps the PHY — a pre-boot attach
+  otherwise boots into an E0 spin; proven by the page flow, unit
+  assert added).
+- **Bare-metal proof** (`tests/otg_host/`, xpack-gcc + link.ld +
+  build.sh, ships `site/otg_host.elf` 7384B): register-level HCD
+  (port reset, SETUP + IN + status OUT on ch0, bulk OUT ch1 / IN ch2,
+  exact-path RAM `trace[]` 1..8). `tests/test_otg_host.mjs` 5/5
+  (exact trace, byte-exact echo, HPRT set, HFNUM moves), CI line.
+- **Real firmware races found by writing it** (all in the DEMO, model
+  vindicated each time — verified by PC traces + raw-slot dumps):
+  XFRC-first IN loops return 0 without draining (fix: drain-first);
+  the feed's DONE status double-counts per-BCNT drains (fix: PKTSTS
+  gate) and FIFO word padding over-counts short transfers (fix: n from
+  HCTSIZ.XFRSIZ remaining); batch-boundary stale-register window
+  (GINTSTS load pre-feed + XFRC check post-feed exits undrained —
+  fix: complete-then-recheck, provably live since XFRC=1 implies
+  post-feed); `trace_n` must be `volatile` (gcc -Os kept it in a
+  register across the bulk block, hiding pushes 6..8 from the host).
+  Debug discipline re-confirmed: NEVER hide build output (`>/dev/null`
+  concealed a failing gcc for ~10 cycles — brace duplication shipped
+  no binary change); read raw trace slots, not just `trace_n`.
+- **Page `otg_host` preset** (F105 + scripted virtual device + live
+  HCD trace in the USB card): worker `otgHostAttach`/`otgHostFeed`
+  cases + HostTx/HostRx/trace forwarding, `pendingPreInit` deferral
+  (worker messages interleave across `await createEmulator` — a
+  load-time attach ran against null emu and was swallowed by
+  try/catch). Browser: preset green end-to-end in ~1.3s
+  (`test_browser_demos.mjs` +1).
+- **RCC audit**: new `rcc_clocks_hz()` export (sys/hclk/pclk1/pclk2) +
+  5 divider/multiplier vectors (72/36/18/9 prescaled, x2/x16 edges,
+  HSE/2, max dividers 72M/140625/8789); decode deliberately timing-free
+  (§21 no-rescale decision stands).
+- **Release**: `package.json` 3.0.0 → 3.0.1 (the pending 3.0.1 sync;
+  OTG stays under Unreleased); `npm publish --dry-run` clean
+  (606.1kB, 20 files; no registry creds on this box — publish stays
+  with the maintainer).
+- **Verified**: `test_otg.mjs` 119/119, `test_otg_host.mjs` 5/5,
+  `test_all.mjs` 629/629, wasm rebuilt pinned + `site/` synced;
+  full gate re-run at commit.
+
 
 
 ## Next Phase — Long-term Optimizations
