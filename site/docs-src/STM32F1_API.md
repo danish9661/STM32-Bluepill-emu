@@ -455,4 +455,4 @@ Full protocol reference, event-type field layout, and custom-client examples:
   `i2cInjectRx(ch, bytes)`, `uartRxAddr(addr, byte)`; the wrapper builds on these.
 - Rebuild after Rust changes with the pinned toolchain and re-sync `pkg/` →
   `site/` (CI byte-exact guard):
-  `PATH=binaryen-version_132/bin:$PATH RUSTFLAGS="--remap-path-prefix=$HOME=/build" wasm-pack build --target web`
+  `PATH=~/.local/binaryen/binaryen-version_132/bin:$PATH RUSTFLAGS="--remap-path-prefix=$HOME=/build" wasm-pack build --target web` (persistent path — never /tmp, the box wipes it and wasm-pack silently falls back to a stale wasm-opt)

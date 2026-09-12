@@ -141,7 +141,7 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
 ## To Run / Rebuild
 ```bash
 cargo check                          # Rust sanity (fast)
-PATH=<binaryen-version_132>/bin:$PATH RUSTFLAGS="--remap-path-prefix=$HOME=/build" wasm-pack build --target web   # rebuild pkg (Rust → wasm) — MUST use pinned binaryen version_132 (wasm-opt) AND the path remap, else site/ sync breaks the CI guard
+PATH=~/.local/binaryen/binaryen-version_132/bin:$PATH RUSTFLAGS="--remap-path-prefix=$HOME=/build" wasm-pack build --target web   # rebuild pkg (Rust → wasm) — MUST use pinned binaryen version_132 (wasm-opt) AND the path remap, else site/ sync breaks the CI guard. Keep binaryen OUT of /tmp (box wipes it; a missing dir silently falls back to wasm-pack's cached wasm-opt 117 — red CI for 3 commits 2026-09-11/12 — and VERIFY with `wasm-pack build`'s "found wasm-opt at ..." line). Persistent install: `~/.local/binaryen/` (curl version_132 x86_64-linux tarball).
 # (the remap neutralizes $HOME in panic-location strings baked into the data section:
 #  81 file paths like /home/<user>/.cargo/registry/src/... → the wasm byte-exact on
 #  any machine — CI's runner ($HOME=/home/runner) gets the same flag in the workflow)
@@ -192,7 +192,7 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - **Why**: `getUartOutput()` is USART1-only and USART DR writes do NOT fire `onPeriphWrite`, so per-USART TX (e.g. USART2) could not be observed. The event queue is the transaction-level model Wokwi virtual peripherals expect and captures ALL buses.
 - **`pkg/stm32f1.js`**: `STM32F1` class + `GPIO`/`GPIOPin`/`USART`/`SPI`/`I2C` wrappers. `execute()`/`step()` auto-drain events and dispatch to `gpio.pin().on('change')`, `usartN.onData`, `spiN.onTransfer(ch,tx,rx)`, `i2cN.onStart/onWrite/onRead/onStop`; `usartN.send()`, `spiN.injectMiso()`, `i2cN.injectRx()` for host→MCU injection. Thin layer, no hot-path overhead.
 - **Tests**: `tests/test_stm32f1_api.mjs` (7: USART1 TX + SPI1 transfers via ws2812 elf), `tests/test_i2c_events.mjs` (3: I2C1 Start/Write/Stop via periph_test + empty-data div-by-zero guard on spi_flash requires non-empty image). Both wired into `.github/workflows/test.yml`. `docs/STM32F1_API.md` written.
-- **Rebuild note**: wasm rebuilt with pinned binaryen `version_132` (downloaded to `/tmp/binaryen-version_132` locally) + `RUSTFLAGS="--remap-path-prefix=$HOME=/build"`; `pkg/` and `site/` re-synced (CI byte-exact guard).
+- **Rebuild note**: wasm rebuilt with pinned binaryen `version_132` (persistent `~/.local/binaryen/`, NEVER /tmp — wiped 2026-09-11, silent 117 fallback) + `RUSTFLAGS="--remap-path-prefix=$HOME=/build"`; `pkg/` and `site/` re-synced (CI byte-exact guard).
 
 ### 15. Extend virtual-peripheral event queue to EXTI / ADC / TIM (`src/system.rs`, `src/peripherals/{exti,adc,tim}.rs`, `src/lib.rs`, `pkg/stm32f1.js`) [committed]
 - `VmEvent` gained `ExtiEdge{line}`, `AdcDone{adc,chan}`, `TimUpdate{tim}` (flat discriminants 7/8/9). Pushed in `exti.rs::gpio_pin_changed` (hardware edge), `adc.rs::advance_regular/advance_injected` (EOC/JEOC), `tim.rs::tick_once` + `generate_update` (UIF). Encoded in `src/lib.rs::drain_events`.
