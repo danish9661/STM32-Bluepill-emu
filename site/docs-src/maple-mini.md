@@ -54,9 +54,9 @@ as marked. Depth: [PERIPHERALS](../PERIPHERALS.md).
 | Faults (MemManage/BusFault/UsageFault→HardFault, CFSR/BFAR/HFSR) | Yes | Full | SHCSR-gated escalation |
 | SVC / PendSV, SHPR priorities, EXC_RETURN, PSP | Yes | Full | mini_rtos proof (preemptive PSP tasks) |
 | SysTick (24-bit, debt drain) | Yes | Full | phase-exact multi-period re-pend |
-| DWT CYCCNT | Yes | Partial | CYCCNT +1/latency from FLASH ACR; ITM/ETM/TPIU absent |
+| DWT CYCCNT | Yes | Partial | CYCCNT +1/latency from FLASH ACR; data watchpoints live in the Debug slice (own row); ETM/TPIU absent (ITM stimulus is its own row) |
 | ITM stimulus port 0 | Yes | Full | TER+TCR-gated printf bytes as `ItmByte` events |
-| Debug (SWD/JTAG, ETM trace) | Yes | IDCODE only | DBGMCU `0x10016410`; use the GDB stub instead |
+| Debug (SWD/JTAG, ETM trace) | Yes | Full | DBGMCU `0x10016410`; SWD DP + MEM-AP + DHCSR/DCRSR/DEMCR + 4 data watchpoints + JTAG TAP (transaction-level `swd_*` API, GDB Z0/Z2/Z3/Z4); pin/clock edges + ETM out of scope |
 | USB DFU uploader (factory bootloader) | Yes (ROM) | Full workflow | the ROM binary itself isn't emulated, but the DFU download ritual is real end-to-end: `arduino_dfu` firmware speaks DFU DNLOAD/manifest over EP0 with true flash unlock/program sequencing (`tests/test_dfu.mjs` 51/51), and the page plays host (file or pattern → manifest). Offset-vector boot covers DFU layouts; USART AN3155 bootloader IS modeled |
 | RCC (HSI/HSE/PLL ×2–16, prescalers, CSS) | Yes | Full | clocks queryable (`rcc_clocks_hz`); MCO selection queryable (`rcc_mco_hz`, pin wave out of scope) |
 | FLASH 128K (program/erase, WRPRTERR) | Yes | Full | OBR USER settable; WDG_SW clear runs IWDG from reset |

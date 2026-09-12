@@ -11,6 +11,13 @@ that runs **real, unmodified Arduino / STM32Cube firmware** in Node.js or the br
 
 **~70M instructions/sec** headless (`200M` in `~2.8s`, native Rust CPU + Rust peripherals in one WASM module with full MPU enforcement) and multi-MIPS in the browser demo loop. The interactive page loop stays frame-budgeted.
 
+> **Project status: complete.** The emulator is feature-complete and stable —
+> every peripheral in scope is modeled and proven (736 unit checks, 39/39
+> real-firmware checks, GDB + SWD/JTAG debug, 8 chip variants, live browser
+> demos). What remains intentionally unmodeled is listed under
+> [Out of scope](docs/PERIPHERALS.md#out-of-scope-by-decision-not-by-omission);
+> future work is maintenance only (toolchain pins, firmware rebuilds).
+
 ## Screenshots
 
 Click any screenshot for the full gallery (live demo: https://danish9661.github.io/STM32-Bluepill-emu/).
@@ -431,12 +438,12 @@ RUSTFLAGS="--remap-path-prefix=$HOME=/build" \
 wasm-pack build --target web --out-dir pkg
 
 # Run tests
-node tests/test_all.mjs              # 629 unit asserts
-node tests/canary.mjs                # 39/39 firmware checks (~2s)
+node tests/test_all.mjs              # 736 unit asserts
+node tests/canary.mjs                # 39/39 firmware checks (~25s)
 node tests/test_emulator_js.mjs      # browser run-loop path (200M, 39/39)
 node tests/test_chips.mjs            # chip variants (IDCODE per chip + GD32 boot)
 node tests/test_stm32f1_api.mjs      # high-level wrapper API
-node tests/test_gdbstub.mjs          # GDB remote stub
+node tests/test_gdbstub.mjs          # GDB remote stub (35 checks, incl. Z2/Z3/Z4 watchpoints)
 npx playwright test                  # browser tests (needs local server + Chromium)
 
 # Run firmware directly
@@ -448,16 +455,18 @@ echo -n "AB" | node pkg/cli.mjs --config=config.yaml --max=200000000
 
 ## Supported Peripherals
 
-GPIO (A–G) with electrical model, USART1–3 + UART4/5 (+LIN, HDSEL loopback,
+GPIO (A–E) with electrical model, USART1–3 + UART4/5 (+LIN, HDSEL loopback,
 IrDA/smartcard registers), SPI1–2 (+CRC, TI frame format), I2C1–2
-(master + slave mode, 10-bit, PEC, SMBus ALERT), TIM1–14
-(PWM, input capture, external triggers, slave modes, DMA burst + requests, BDTR/break), ADC1–2
+(master + slave mode, 10-bit, PEC, SMBus ALERT), TIM1–7
+(PWM, input capture, external triggers, slave modes, DMA burst + requests, BDTR/break), ADC1–3
 (real conversion timing, RC sample-and-hold, DAC→ADC loopback, external triggers, dual mode),
 DAC1–2, DMA1 (7ch) + DMA2 (5ch), CAN1+CAN2 (RX injection + filters, TTCM), RTC (alarm),
 CRC, NVIC (priority dispatch + 64-IRQ budget), SysTick, SCB (deep sleep, SHPR
 routing, fault escalation, ACTRL), EXTI, AFIO (pin remap), BKP (tamper), PWR (PVD), FLASH (WRP),
-FSMC (NOR/NAND/PC-Card + ECC), SDIO (SDHC/MMC, CMD engine, DMA2 CH4), USB FS device (SOF engine,
-double-buffered bulk, isochronous, enumeration events), DBG IDCODE per chip.
+IWDG + WWDG (reset semantics, EWI), FSMC (NOR/NAND/PC-Card + ECC), SDIO (SDHC/MMC, CMD engine, DMA2 CH4), USB FS device (SOF engine,
+double-buffered bulk, isochronous, enumeration events), USB OTG_FS device + host (F105 map),
+DWT cycle counter + ITM stimulus port, SWD/JTAG debug slice (DP/MEM-AP/DHCSR/watchpoints,
+GDB Z0/Z2/Z3/Z4), DBG IDCODE per chip.
 
 ---
 
@@ -466,4 +475,17 @@ double-buffered bulk, isochronous, enumeration events), DBG IDCODE per chip.
 MIT — see [LICENSE](LICENSE).
 
 ## Acknowledgements
+
+- STMicroelectronics — CMSIS-SVD device files in `svd/` and the RM0008
+  reference manual the models were verified against.
+- [STM32duino](https://github.com/stm32duino/Arduino_Core_STM32) — the
+  Arduino core the `tests/arduino_*` firmware sketches build on.
+- [CoreMark](https://github.com/eembc/coremark) (EEMBC) — upstream 1.0
+  sources in `tests/arduino_coremark/`, used as a known-answer CPU check.
+- [Capstone](https://www.capstone-engine.org/) and
+  [Unicorn](https://www.unicorn-engine.org/) — test-time only oracles for
+  the decoder census and differential fuzzing (Unicorn was the former
+  emulation backend, long since deleted); neither ships in the package.
+- The Rust/WASM toolchain: `wasm-pack`, `wasm-bindgen`, Binaryen
+  (`wasm-opt`), and the xPack GNU Arm toolchain used for bare-metal demos.
 

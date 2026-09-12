@@ -28,6 +28,7 @@ pub mod otg;
 pub mod sdio;
 pub mod dwt;
 pub mod itm;
+pub mod swd;
 
 use std::cell::RefCell;
 use std::collections::HashMap;

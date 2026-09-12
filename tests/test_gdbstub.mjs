@@ -62,19 +62,57 @@ ok((await send('m20000100,4')) === boyut, 'scratch restored');
 await send('P0=78563412');
 ok((await send('p0')) === '78563412', 'P0 write sticks');
 // Step advances with SIGTRAP.
-const pcBefore = await send('p15');
+const pcBefore = await send('pf');
 await send('s');
-ok((await send('p15')) !== pcBefore, 'single step moves PC');
+ok((await send('pf')) !== pcBefore, 'single step moves PC');
 // Breakpoint at the CURRENT pc always hits on continue.
-const pcc = await send('p15');
+const pcc = await send('pf');
 const baddr = parseInt(pcc.match(/../g).reverse().join(''), 16);
 ok((await send(`Z0,${baddr.toString(16)},2`)) === 'OK', 'Z0 set');
 ok((await send('c')) === 'S05', 'continue stops with SIGTRAP');
-const pcc2 = await send('p15');
+const pcc2 = await send('pf');
 ok(parseInt(pcc2.match(/../g).reverse().join(''), 16) === baddr, 'stopped AT the breakpoint');
 ok((await send(`z0,${baddr.toString(16)},2`)) === 'OK', 'z0 removed');
 await send('s'); // step past the restored instruction
 ok(true, 'step past breakpoint');
+
+// ---- Data watchpoints (Z2/Z3/Z4) ----
+// RAM snippets at 0x20000200 touching the watched byte 0x20000100; PC is
+// aimed with the P15 packet (decimal reg numbers per the RSP spec).
+const le32 = (n) => n.toString(16).padStart(8, '0').match(/../g).reverse().join('');
+const aim = async (pc) => ok((await send(`Pf=${le32(pc)}`)) === 'OK', `Pf aims 0x${pc.toString(16)}`);
+const loadSnippet = async (hex) => ok((await send(`M20000200,${(hex.length / 2).toString(16)}:${hex}`)) === 'OK', 'snippet installed');
+const WATCH_AT = 0x20000100;
+// strb snippet: movs r0,#0xAA; ldr r1,[pc,#4]; strb r0,[r1,#0]; bkpt; .word WATCH_AT
+const STR_SNIPPET = 'aa200149087000be00010020';
+// ldrb snippet: movs r0,#0; ldr r1,[pc,#4]; ldrb r0,[r1,#0]; bkpt; .word WATCH_AT
+const LDR_SNIPPET = '00200149087800be00010020';
+
+// Z2 (write): the strb trips with T05watch:addr; removing + continuing runs
+// into the trailing BKPT (S04 = genuine decode gap, proving execution went on).
+await loadSnippet(STR_SNIPPET);
+await aim(0x20000200);
+ok((await send(`Z2,${WATCH_AT.toString(16)},1`)) === 'OK', 'Z2 set');
+ok((await send('c')) === `T05watch:${WATCH_AT.toString(16)};`, 'write watch trips with T05watch');
+ok((await send(`z2,${WATCH_AT.toString(16)},1`)) === 'OK', 'z2 removed');
+ok((await send('c')) === 'S04', 'continued past the watch into BKPT');
+
+// Z3 (read): the ldrb trips with T05rwatch:addr.
+await loadSnippet(LDR_SNIPPET);
+await aim(0x20000200);
+ok((await send(`Z3,${WATCH_AT.toString(16)},1`)) === 'OK', 'Z3 set');
+ok((await send('c')) === `T05rwatch:${WATCH_AT.toString(16)};`, 'read watch trips with T05rwatch');
+ok((await send(`z3,${WATCH_AT.toString(16)},1`)) === 'OK', 'z3 removed');
+ok((await send('c')) === 'S04', 'continued past the read watch');
+
+// Z4 (access): fires on a write too, reported as T05awatch:addr.
+await loadSnippet(STR_SNIPPET);
+await aim(0x20000200);
+ok((await send(`Z4,${WATCH_AT.toString(16)},1`)) === 'OK', 'Z4 set');
+ok((await send('c')) === `T05awatch:${WATCH_AT.toString(16)};`, 'access watch trips with T05awatch');
+ok((await send(`z4,${WATCH_AT.toString(16)},1`)) === 'OK', 'z4 removed');
+ok((await send('c')) === 'S04', 'continued past the access watch');
+
 sock.end();
 srv.close();
 

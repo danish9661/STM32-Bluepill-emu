@@ -28,6 +28,9 @@ Current status: **236/236 unit tests**, **39/39 firmware checks**, canary ~25s a
    counting + plain-number `instCount` (both ~19–20% speedups, in).
 3. **`step()` per instruction → `step_batch()` once per batch** (all peripheral `tick()`s
    are instruction-delta based): in, 3.8×.
+4. **Single-WASM-module emcc link ("Path A")**: retired. Unicorn is deleted and
+   the native Rust core (option 4 below, "LANDED") already ships ONE WASM
+   module — there is nothing left to link.
 
 ## Options ranked for the next phase
 
@@ -65,46 +68,7 @@ Replace Unicorn entirely: no C build, no `unicorn_arm` binary addon, coherent me
 model (no JS hooks at all — peripherals are plain memory reads). Measure against the
 ~22M IPS baseline before committing.
 
-### 4. Single WASM module (Emscripten link) — "Path A", EXPERIMENT status
-> **Status (2026-08-11): planned experiment, NOT in progress.** The dual-wasm
-> setup (unicorn_arm.cjs/.js + stm32_bluepill_wasm_bg.wasm) stays the default
-> and the shipping artifact until Path A is proven: 236/236 unit tests, 39/39
-> canary, 200M runs on BOTH paths (cli + emulator.js), IPS within ~2× of the
-> ~22M baseline, and the browser page working. Rollback is free — Path A lives
-> on a branch, the current tree is untouched.
-
-**Goal:** compile Rust peripheral code + Unicorn C into ONE `emcc` output —
-the `wasm32-unknown-emscripten` target links both via C ABI, so the JS memory
-hooks and the `unicorn_arm.*` module disappear (peripherals become plain
-memory reads through `uc_mem_map_ptr` on a shared heap).
-
-**Hard constraints discovered so far (the plan is NOT "just build with emcc"):**
-- `wasm-bindgen` does NOT support the `wasm32-unknown-emscripten` target
-  (its linker expects no JS glue). All ~70 `#[wasm_bindgen]` exports in
-  `src/lib.rs` need a raw `#[no_mangle]` shim layer (the pre-2026-08-09 git
-  history of this file has the original `staticlib` + raw-exports plan).
-- Unicorn C source is needed: `third_party/unicorn/` is gitignored — only the
-  prebuilt alexaltea tgz (`unicorn_arm.cjs/.js`) is committed. Fetch
-  `unicorn-engine/unicorn` (GPL-2.0) and compile via emcc.
-- The JS orchestrator STAYS (batch loop, hookless counting, DMA RAM transport,
-  interrupt register transport) — only the memory hooks + unicorn module get
-  absorbed. The unicorn C API must be re-exported raw so cli.mjs/emulator.js
-  can call `uc_emu_start` etc. against the merged module.
-- Licensing: unicorn is GPL-2.0; linking into one binary inherits GPL (already
-  the case for unicorn_arm — no change in practice).
-
-**Acceptance gate (in order):**
-1. Rust → `wasm32-unknown-emscripten` builds as a staticlib with raw exports
-2. Links with emcc-compiled unicorn C into one module; smoke-boots firmware
-3. `tests/test_all.mjs` 236/236 against the merged module
-4. canary 39/39 + 200M cli run + `tests/test_emulator_js.mjs` (browser path)
-5. IPS within ~2× of baseline (~22M) — if slower, the module stays experimental
-
-**Expected gain:** architectural (no hooks, one module, no glue drift), NOT
-performance — the JS boundary was measured at ~0.001 accesses/instruction
-(~0.1% of runtime), so speed is not the win being purchased.
-
-### 5. Pure-Rust Cortex-M core ("Path B") — LANDED (see `docs/PATH_B.md`)
+### 4. Pure-Rust Cortex-M core — LANDED (see `docs/PATH_B.md`)
 Replaced Unicorn with the vendored interpreter (`src/cpu/`): 39/39 on both
 old backends before the cutover, ~3.5x faster headless (72-75 vs 20-21 MIPS),
 exact instruction accounting, no mem hooks. The TCG-parity risk did not

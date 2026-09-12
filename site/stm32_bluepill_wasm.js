@@ -1079,6 +1079,173 @@ export function step_batch(count) {
     return ret >>> 0;
 }
 
+/**
+ * Install a data watchpoint: kind 1 = write (GDB Z2), 2 = read (Z3),
+ * 3 = access (Z4). Returns the slot (0-3) or -1 when full.
+ * @param {number} kind
+ * @param {number} addr
+ * @param {number} len
+ * @returns {number}
+ */
+export function swd_add_watchpoint(kind, addr, len) {
+    const ret = wasm.swd_add_watchpoint(kind, addr, len);
+    return ret;
+}
+
+/**
+ * MEM-AP register read. Bank-0 DRW (reg 0xC) performs the data movement:
+ * reads TAR-width bytes, latches RDBUFF, auto-increments TAR.
+ * @param {number} bank
+ * @param {number} reg
+ * @returns {number}
+ */
+export function swd_ap_read(bank, reg) {
+    const ret = wasm.swd_ap_read(bank, reg);
+    return ret >>> 0;
+}
+
+/**
+ * MEM-AP register write. Bank-0 DRW (reg 0xC) stores TAR-width bytes and
+ * auto-increments TAR.
+ * @param {number} bank
+ * @param {number} reg
+ * @param {number} value
+ */
+export function swd_ap_write(bank, reg, value) {
+    wasm.swd_ap_write(bank, reg, value);
+}
+
+/**
+ * @param {number} addr
+ * @returns {number}
+ */
+export function swd_dp_read(addr) {
+    const ret = wasm.swd_dp_read(addr);
+    return ret >>> 0;
+}
+
+/**
+ * @param {number} addr
+ * @param {number} value
+ */
+export function swd_dp_write(addr, value) {
+    wasm.swd_dp_write(addr, value);
+}
+
+/**
+ * External halt request (probe/GDB Ctrl-C path): sets C_DEBUGEN+C_HALT.
+ */
+export function swd_halt() {
+    wasm.swd_halt();
+}
+
+/**
+ * @returns {boolean}
+ */
+export function swd_halted() {
+    const ret = wasm.swd_halted();
+    return ret !== 0;
+}
+
+/**
+ * JTAG APACC shift with explicit bank. DRW register moves data like the
+ * SWD AP path (rnw=true reads, false writes); other registers are direct.
+ * @param {number} bank
+ * @param {number} reg
+ * @param {boolean} rnw
+ * @param {number} wdata
+ * @returns {number}
+ */
+export function swd_jtag_ap(bank, reg, rnw, wdata) {
+    const ret = wasm.swd_jtag_ap(bank, reg, rnw, wdata);
+    return ret >>> 0;
+}
+
+/**
+ * @param {number} addr
+ * @param {boolean} rnw
+ * @param {number} wdata
+ * @returns {number}
+ */
+export function swd_jtag_dp(addr, rnw, wdata) {
+    const ret = wasm.swd_jtag_dp(addr, rnw, wdata);
+    return ret >>> 0;
+}
+
+/**
+ * @returns {number}
+ */
+export function swd_jtag_idcode() {
+    const ret = wasm.swd_jtag_idcode();
+    return ret >>> 0;
+}
+
+/**
+ * @param {number} ir
+ */
+export function swd_jtag_ir(ir) {
+    wasm.swd_jtag_ir(ir);
+}
+
+export function swd_jtag_reset() {
+    wasm.swd_jtag_reset();
+}
+
+/**
+ * DCRSR-style core register read (0-12, 13 SP, 14 LR, 15 PC, 16 xPSR,
+ * 17 MSP, 18 PSP). Synchronous: DCRDR holds the value on return.
+ * @param {number} idx
+ * @returns {number}
+ */
+export function swd_reg_read(idx) {
+    const ret = wasm.swd_reg_read(idx);
+    return ret >>> 0;
+}
+
+/**
+ * DCRSR-style core register write (same numbering). Synchronous.
+ * @param {number} idx
+ * @param {number} value
+ */
+export function swd_reg_write(idx, value) {
+    wasm.swd_reg_write(idx, value);
+}
+
+/**
+ * @param {number} slot
+ */
+export function swd_remove_watchpoint(slot) {
+    wasm.swd_remove_watchpoint(slot);
+}
+
+/**
+ * Debugger resume: clears C_HALT (C_DEBUGEN stays, like silicon).
+ */
+export function swd_resume() {
+    wasm.swd_resume();
+}
+
+/**
+ * Single-step the halted core once (0/1 executed; faults stay live).
+ * @returns {number}
+ */
+export function swd_step() {
+    const ret = wasm.swd_step();
+    return ret >>> 0;
+}
+
+/**
+ * Take the pending watch trip: [] when clean, else [addr, dir] with dir
+ * 1 = write, 2 = read. One-shot latch; the halt stays until resume.
+ * @returns {Uint32Array}
+ */
+export function swd_take_trip() {
+    const ret = wasm.swd_take_trip();
+    var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
+}
+
 export function tick() {
     wasm.tick();
 }

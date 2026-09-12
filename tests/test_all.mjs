@@ -11,7 +11,9 @@ const { init, init_svd, periph_read, periph_write, tick, step_batch, has_pending
         rcc_fail_hse, pwr_set_supply_mv, add_i2c_eeprom,
         drain_events, usb_inject_setup, usb_inject_out, usb_bus_reset, usb_detach, pwm_duty,
         otg_host_attach,
-        i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop, i2c_inject_alert,
+        swd_dp_read, swd_dp_write, swd_ap_read, swd_ap_write,
+        swd_add_watchpoint, swd_remove_watchpoint, swd_halted, swd_resume,
+        swd_jtag_reset, swd_jtag_idcode, rustcpu_init,        i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop, i2c_inject_alert,
         add_lcd, lcd_fb, adc_set_internal, pwr_mode,
         gpio_take_pin_events } = periph;
 
@@ -34,6 +36,9 @@ function assert_neq(a, b, msg) {
 
 function reset() {
   init();
+  // The swd_*/rustcpu_* debug exports live in the native backend (always
+  // initialized in production); bring it up so debug tests can use it.
+  rustcpu_init(0x20005000, 0x08000001, 65536, 20480);
 }
 
 function group(name) {
@@ -3296,6 +3301,50 @@ assert_eq(periph_read(USB + U_ISTR, 4) & (1 << 8), 1 << 8, 'USB ISTR ESOF on det
 assert(has_pending_interrupt() && get_next_pending_interrupt() === 20,
     'USB detach ESOF pends IRQ 20');
 clear_current_interrupt();
+
+// ============================================================
+// SWD / JTAG debug-port slice
+// ============================================================
+group('SWD/JTAG debug');
+reset();
+// DHCSR needs the DBGKEY or writes are ignored (silicon behavior).
+periph_write(0xE000EDF0, 4, 0x00000003); // no key
+assert_eq(swd_halted(), false, 'keyless DHCSR write ignored');
+periph_write(0xE000EDF0, 4, 0xA05F0003); // KEY + C_DEBUGEN + C_HALT
+assert_eq(swd_halted(), true, 'DHCSR C_HALT halts');
+assert_eq(periph_read(0xE000EDF0, 4) & (1 << 17), 1 << 17, 'DHCSR S_HALT readback');
+swd_resume();
+assert_eq(swd_halted(), false, 'swd_resume releases');
+assert_eq(periph_read(0xE000EDF0, 4) & 1, 1, 'C_DEBUGEN stays after resume');
+// DEMCR store + readback.
+periph_write(0xE000EDFC, 4, (1 << 24) | (1 << 10));
+assert_eq(periph_read(0xE000EDFC, 4) >>> 0, (1 << 24) | (1 << 10), 'DEMCR TRCENA+VC readback');
+// SWD DP register file.
+assert_eq(swd_dp_read(0x0) >>> 0, 0x2BA01477, 'DPIDR Cortex-M3');
+swd_dp_write(0x4, (1 << 30) | (1 << 28)); // power-up REQs
+assert_eq(swd_dp_read(0x4) & ((1 << 31) | (1 << 29)), (1 << 31) | (1 << 29), 'CTRL/STAT ACKs follow REQs');
+swd_dp_write(0x8, 0xF0);
+assert_eq(swd_dp_read(0x8) >>> 0, 0xF0, 'SELECT stored');
+// MEM-AP identification + CSW default + TAR store.
+assert_eq(swd_ap_read(0xF, 0xC) >>> 0, 0x24770011, 'MEM-AP IDR');
+assert_eq(swd_ap_read(0x0, 0x0) >>> 0, 0x23000052, 'CSW reset 32-bit');
+swd_ap_write(0x0, 0x4, 0x20000100);
+assert_eq(swd_ap_read(0x0, 0x4) >>> 0, 0x20000100, 'TAR stored');
+// Watch slots: 4 max, kind 0 rejected, freed slots reusable.
+const sw0 = swd_add_watchpoint(1, 0x20000100, 4);
+const sw1 = swd_add_watchpoint(2, 0x20000200, 4);
+const sw2 = swd_add_watchpoint(3, 0x20000300, 4);
+const sw3 = swd_add_watchpoint(1, 0x20000400, 4);
+assert(sw0 === 0 && sw1 === 1 && sw2 === 2 && sw3 === 3, 'four watch slots fill 0-3');
+assert_eq(swd_add_watchpoint(1, 0x20000500, 4), -1, 'fifth watch rejected');
+assert_eq(swd_add_watchpoint(0, 0x20000500, 4), -1, 'kind 0 rejected');
+swd_remove_watchpoint(sw0); swd_remove_watchpoint(sw1);
+swd_remove_watchpoint(sw2); swd_remove_watchpoint(sw3);
+assert_eq(swd_add_watchpoint(1, 0x20000100, 4), 0, 'freed slot reusable');
+swd_remove_watchpoint(0);
+// JTAG TAP shares the DP (probe helper, no new tests).
+swd_jtag_reset();
+assert_eq(swd_jtag_idcode() >>> 0, 0x4BA00477, 'JTAG TAP IDCODE');
 
 console.log(`\n${'='.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed, ${passed+failed} total`);

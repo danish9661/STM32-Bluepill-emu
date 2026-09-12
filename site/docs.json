@@ -90,11 +90,6 @@
   "blurb": "Deferred optimization ideas"
  },
  {
-  "file": "PATH_A.md",
-  "title": "Path A experiment",
-  "blurb": "Single-module linking spike"
- },
- {
   "file": "PATH_B.md",
   "title": "Path B: native CPU",
   "blurb": "Pure-Rust core cutover notes"

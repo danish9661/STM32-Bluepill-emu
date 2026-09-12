@@ -12,6 +12,10 @@
 // on BKPT, which the stub distinguishes from genuine decode gaps by
 // address: hits report SIGTRAP, anything else SIGILL and halt.
 //
+// Data watchpoints (Z2/Z3/Z4) map onto the model's 4 DWT-style comparator
+// slots and report T05watch:/rwatch:/awatch: with the tripping address.
+// `c` resumes a halted core; `s` single-steps past a halt.
+//
 // Fidelity notes: single thread; `s` steps one thread instruction plus any
 // domestically-pending IRQ service for that batch (an interrupt may be
 // entered as part of a step, like silicon); `c` runs until a breakpoint,
@@ -53,6 +57,11 @@ export async function serveGdb(opts = {}) {
     emu.setSymbols([]); // no UNDEFINSTR escalation: faults surface via takeFault
     const bps = new Map(); // addr -> { orig: number[] }
     let reinsert = null;   // addr whose BKPT was lifted for a single-step
+    // Data watchpoints (GDB Z2/Z3/Z4 -> model kinds 1/2/3): addr -> { slot, zkind }.
+    // Model checks are exact byte ranges on guest data accesses; debugger
+    // memory writes use the raw path and never trip.
+    const watches = new Map();
+    const zkindToModel = { 2: 1, 3: 2, 4: 3 };
 
     const memReadBytes = (addr, len) => {
         const out = [];
@@ -89,11 +98,29 @@ export async function serveGdb(opts = {}) {
         };
         const stopReply = () => 'S05';
 
+        // GDB stop reason for a watch trip ([addr, dir 1=write/2=read]):
+        // the Z-kind comes from the first watch covering the address
+        // (trip may land mid-range for len > 1), else the direction.
+        const watchStopReply = (trip) => {
+            let zkind = trip[1] === 2 ? 3 : 2;
+            for (const w of watches.values()) {
+                if (trip[0] >= w.addr && trip[0] < w.addr + w.len) { zkind = w.zkind; break; }
+            }
+            const name = zkind === 3 ? 'rwatch' : zkind === 4 ? 'awatch' : 'watch';
+            return `T05${name}:${(trip[0] >>> 0).toString(16)};`;
+        };
+
         const runUntilEvent = async () => {
             for (;;) {
                 if (closed) return null;
                 if (inbuf.includes('\x03')) { inbuf = inbuf.replace('\x03', ''); return 'S02'; }
                 const r = await emu.step(chunk);
+                // Watchpoint trip first: the debug stop reason outranks a
+                // same-batch fault (which stays live for takeFault).
+                const trip = emu.swdTakeTrip();
+                if (trip.length >= 2) return watchStopReply(trip);
+                // DHCSR halt with no trip (probe halt, VC catch): plain trap.
+                if (emu.swdHalted()) return 'S05';
                 const f = emu.takeFault();
                 if (f) {
                     const fpc = f[0] >>> 0;
@@ -135,19 +162,32 @@ export async function serveGdb(opts = {}) {
             if (cmd.startsWith('qXfer:features:read:target-features')) return send('');
             if (cmd === 'qC') return send('QC1');
             if (cmd === 'g') return send(regs());
-            if (/^p\d+$/.test(cmd)) {
-                const n = parseInt(cmd.slice(1), 10);
+            // NOTE: RSP register numbers are HEX (`Pf` = PC = 15) — a real
+            // GDB client found the old decimal parse dropping `set $pc`.
+            if (/^p[0-9a-fA-F]+$/.test(cmd)) {
+                const n = parseInt(cmd.slice(1), 16);
                 const r = emu.getRegisters();
                 const order = [...Array(13).keys()].map((i) => r[`R${i}`]);
                 const all = [...order, r.SP, r.LR, r.PC, r.xPSR];
                 if (n < 0 || n >= all.length) return send('E01');
                 return send(u32le(all[n]));
             }
-            if (/^P\d+=/.test(cmd)) {
+            if (/^P[0-9a-fA-F]+?=/.test(cmd)) {
                 const [rn, val] = cmd.slice(1).split('=');
-                const n = parseInt(rn, 10);
+                const n = parseInt(rn, 16);
                 if (n < 0 || n > 15) return send('E01');
                 emu.setReg(n, parseInt(val.slice(0, 8).match(/../g).reverse().join(''), 16));
+                return send('OK');
+            }
+            // G = write all 17 registers at once (GDB's fallback when a
+            // single P fails; now that P is hex-correct this rarely fires).
+            if (cmd.startsWith('G')) {
+                const words = cmd.slice(1).match(/.{8}/g) || [];
+                if (words.length !== 17) return send('E01');
+                words.forEach((w, i) => {
+                    if (i > 15) return; // xPSR stays read-only, like P
+                    emu.setReg(i, parseInt(w.match(/../g).reverse().join(''), 16));
+                });
                 return send('OK');
             }
             if (cmd.startsWith('m')) {
@@ -179,7 +219,29 @@ export async function serveGdb(opts = {}) {
                 if (reinsert === addr) reinsert = null;
                 return send('OK');
             }
+            // Data watchpoints: Z2 = write, Z3 = read, Z4 = access.
+            // Model slots are a scarce 4 (like DWT comparators); the stub
+            // maps one slot per Z-packet and frees it on z*/restart.
+            if (/^Z[234],/.test(cmd)) {
+                const zkind = parseInt(cmd[1], 10);
+                const [a, l] = cmd.slice(3).split(',').map((x) => parseInt(x, 16));
+                if (!(a >= 0) || !(l > 0)) return send('E01');
+                const slot = emu.swdAddWatch(zkindToModel[zkind], a >>> 0, l >>> 0);
+                if (slot < 0) return send('E01');
+                watches.set(a >>> 0, { slot, zkind, addr: a >>> 0, len: l >>> 0 });
+                return send('OK');
+            }
+            if (/^z[234],/.test(cmd)) {
+                const [a] = cmd.slice(3).split(',').map((x) => parseInt(x, 16));
+                const w = watches.get(a >>> 0);
+                if (w) { emu.swdRemoveWatch(w.slot); watches.delete(a >>> 0); }
+                return send('OK');
+            }
             if (cmd === 'c' || cmd.startsWith('c;') || cmd === 'vCont;c') {
+                // A stale halt (watch trip, DHCSR C_HALT) must not wedge
+                // continue: GDB `c` means run. (BKPT re-insert dance below
+                // is unaffected — resume only clears the halt mirror/bits.)
+                emu.swdResume();
                 if (reinsert !== null) {
                     await emu.step(1); // run the original instruction once
                     const bp = bps.get(reinsert);
@@ -189,13 +251,17 @@ export async function serveGdb(opts = {}) {
                 return send(await runUntilEvent());
             }
             if (cmd === 's' || cmd.startsWith('s;') || cmd === 'vCont;s') {
-                await emu.step(1);
-                emu.takeFault();
+                // Step past a halt (trip/DHCSR) with the debug single-step;
+                // otherwise a normal one-instruction batch.
+                if (emu.swdHalted()) emu.swdStep();
+                else { await emu.step(1); emu.takeFault(); }
                 return send('S05');
             }
             if (cmd === 'vCont?') return send('vCont;c;s');
             if (cmd === 'k' || cmd === 'D') { send('OK'); sock.end(); closed = true; return; }
-            if (cmd === 'Hc' || cmd === 'Hg' || cmd === 'Hc-1' || cmd === 'Hg-1' || cmd === 'Hc0' || cmd === 'Hg0') return send('OK');
+            // Single thread: any Hc/Hg selection (GDB 15 sends Hc0/Hc1/Hc-1)
+            // addresses our one thread.
+            if (/^H[gc]-?[0-9]*$/.test(cmd)) return send('OK');
             return send('');
         };
 

@@ -31,7 +31,6 @@ const DOCS = [
   ['docs/WEBSOCKET_BRIDGE.md', 'WebSocket bridge', 'Headless server + browser viewer'],
   ['docs/AUDIT.md', 'Audit (historical)', 'Memory, security and overhead notes'],
   ['docs/NEXT_PHASE.md', 'Next phase (historical)', 'Deferred optimization ideas'],
-  ['docs/PATH_A.md', 'Path A experiment', 'Single-module linking spike'],
   ['docs/PATH_B.md', 'Path B: native CPU', 'Pure-Rust core cutover notes'],
   ['docs/summary.md', 'Summary (historical)', 'Frozen project summary'],
   ['CHANGELOG.md', 'Changelog', 'Release history'],

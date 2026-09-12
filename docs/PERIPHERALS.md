@@ -18,6 +18,7 @@ including interrupt generation, status flags, and timing. Support levels:
 | NVIC | Full | 68 IRQs, priority-based dispatch, pending/active sets, PRIMASK/BASEPRI gating, `last_popped` fairness so hot IRQs don't starve others. ISR return is one Rust call (`finish_interrupt(irq)`) that pops the active-priority stack **and** drains SysTick debt ticks internally — no JS re-pend loop. Driver note: pending bits coalesce intra-batch events (one delivery per batch per IRQ) — rate-accurate runs need production-sized batches (~20K), never 1M steps. |
 | SysTick | Full | 1 ms debt accrual with phase-preserving trigger (no overshoot loss at any batch size), one re-pend per delivery (whole-debt drains coalesce into the single pending bit and lose ticks), COUNTFLAG, calibration register. `millis()`/`delay()` run at exact instruction rate. |
 | SCB | Full | Core system control block registers. |
+| Debug slice (SWD/JTAG) | Full | Transaction-level (`src/peripherals/swd.rs`, `swd_*` exports, GDB Z0/Z2/Z3/Z4): SWD DPv1 (DPIDR `0x2BA01477`, CTRL/STAT ACKs + sticky W1C, SELECT, RDBUFF) + MEM-AP (CSW `0x23000052` with SIZE/AddrInc, TAR, DRW data port, BD0-3, CFG/BASE/IDR) + Cortex debug at real addresses (DHCSR DBGKEY/C_HALT/C_STEP, synchronous DCRSR/DCRDR transfers incl. MSP/PSP, DEMCR TRCENA + VC_HARDERR halt) routed from the SCB window on both maps + minimal JTAG TAP (IDCODE `0x4BA00477`, BYPASS/DPACC/APACC/ABORT) + 4 exact-range data watchpoints (halt-after-access, disarmed = one mirror branch). Pin/clock-edge SWDIO + ETM trace out of scope. |
 
 ## Power, reset, clock
 
@@ -103,6 +104,30 @@ These are *extra* peripherals the STM32 talks to over SPI/I2C — the "rest of t
   doesn't slow down and wake is immediate on the next IRQ.
 - Slew rise/fall shaping (transitions are 2-state), glitches, and external pull
   *strength* (drivers are digital).
+
+### Out of scope (by decision, not by omission)
+
+- **Pin/clock-level SWDIO** — the debug slice (`src/peripherals/swd.rs`) is a
+  transaction-level DP host API (DP/AP registers, DHCSR/DCRSR/DEMCR,
+  watchpoints, JTAG TAP, GDB Z0/Z2/Z3/Z4). Clocked SWDIO edges, line
+  turnaround and GPIO tristate are not modeled: GPIO here is push-pull only
+  and pin-level tracing would cost ~1B wire events per run for zero
+  behavioral gain. Use the `swd_*` exports (or GDB) instead of bit-banging.
+- **ETM trace / TPIU** — no instruction trace; ITM stimulus port 0 (printf
+  channel) is modeled, ports 1–31 and timestamps are not.
+- **ST-Link probe hardware** — the emulator *is* the target; there is no
+  probe firmware, mass-storage flashing flow, or SWV transport. Flashing is
+  `rustcpu_load` (ELF/hex/bin install) and debugging is the GDB stub.
+- **Ethernet (ETH)** — none of the targets have it (F107 connectivity line
+  only); EXTI line 19 has no source. Would need a TAP/TUN device backend.
+- **Printer mechanics** — no TMC drivers, TFT, heaters or motion planning
+  (the ext-device + JS-peripheral framework could host them; no consumer).
+- **GD32 quirks** — GD32F103 runs identical F103 binaries here (the clone
+  contract: same map, own IDCODE `0x2BA01477`); GD32's 108 MHz rating,
+  UID layout and flash timing are invisible at instruction-budget timing.
+- **ROM bootloaders** — DFU/USART system-memory rituals are firmware-driven
+  against the real peripherals (proven by the Maple DFU demo); the factory
+  ROM binary itself is not emulated.
 
 ## Verification coverage
 

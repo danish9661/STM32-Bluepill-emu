@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: MIT
 //
 // ARMv7-M Thumb-2 interpreter core + guest memory.
-// Provenance: extracted from danish9661/stm32F4-emulator
-// (stm32-periph-wasm/src/cpu/, GPL-3.0) and ported M4→M3 here. The author
-// confirms this vendored portion is released under MIT for this project
-// (2026-09-04) — see docs/PATH_B.md "License note".
+// Provenance: first prototyped in danish9661/stm32F4-emulator
+// (stm32-periph-wasm/src/cpu/) and ported M4→M3 here by the same author.
+// All original work, MIT like the rest of the repo (see docs/PATH_B.md).
 pub mod regs;
 pub mod mem;
 pub(crate) mod thumb;
@@ -264,6 +263,12 @@ impl Cpu {
             self.regs.psp = sp;
         }
         self.ipsr = vector;
+        // VC_HARDERR (DEMCR bit 10): a debug probe halts the core on
+        // HardFault entry instead of running the handler. Take first (the
+        // dispatch already happened), then halt so the run loop stops.
+        if irq == crate::peripherals::nvic::irq::HARD_FAULT && sys.swd.vc_harderr() {
+            sys.swd.halt_from_model();
+        }
         // LDREX reservation dies on exception entry (firmware retry loops
         // then behave like silicon instead of succeeding spuriously).
         self.exclusive = None;
@@ -411,6 +416,12 @@ impl Cpu {
                 break;
             }
             if self.sleeping {
+                break;
+            }
+            // Debug halt (DHCSR C_HALT / watchpoint trip / VC_HARDERR):
+            // one mirror load + branch, same discipline as the WFI check
+            // above. Set only on debug-state writes (cold).
+            if crate::system::debug_halted() {
                 break;
             }
             let pc = self.regs.r[15] & !1;

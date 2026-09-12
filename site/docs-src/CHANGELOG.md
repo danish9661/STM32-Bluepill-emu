@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] — F105 USB OTG_FS device/host mode + Maple DFU bootloader
+## [3.1.0] — 2026-09-12 — F105 USB OTG_FS device/host mode + Maple DFU bootloader + SWD/JTAG debug slice
 
 ### Added
 - USB OTG_FS device model (`src/peripherals/otg.rs`, IRQ 67, F105 map
@@ -36,11 +36,24 @@ All notable changes to this project will be documented in this file.
   verify byte-exact (`tests/test_dfu.mjs` 51/51, CI)
 - `dfu` demo-page preset (Maple Mini + scripted host download of a
   .bin file or default pattern, live progress + manifest status)
+- ARM SWD/JTAG debug-port slice (`src/peripherals/swd.rs`,
+  transaction-level, no pin modeling): SWD DPv1 + MEM-AP (CSW/TAR/DRW,
+  TAR auto-inc, RDBUFF) + DHCSR/DCRSR/DCRDR/DEMCR at real addresses
+  (both maps, no bus window) + 4 data watchpoints (halt-after-access) +
+  minimal JTAG TAP sharing the DP file (`swd_*`/`jtag*` exports + `.d.ts`;
+  hot path is one mirror branch, 200M still ~2.8s)
+- GDB RSP data watchpoints (Z2/Z3/Z4 → `T05watch:/rwatch:/awatch:`,
+  `c` resumes a halt, `s` steps past one; `tests/test_gdbstub.mjs`
+  17 → 35/35 incl. live strb/ldrb snippets, proven with real
+  arm-none-eabi-gdb 15: Old 0 → New 170 stop after the store)
 
 ### Fixed
 - CSFTRST preserves a physically attached device (silicon keeps the
   PHY): a pre-boot attach previously booted into an E0 "no device"
   spin with no recovery
+- GDB RSP register numbers are hex (`Pf` = PC): a decimal parse silently
+  dropped real-client `set $pc`; `G` (write-all-regs) implemented, any
+  `Hc`/`Hg` selection accepted on the single thread
 
 ## [3.0.1] — 2026-09-11 — real-stack USB enumeration
 

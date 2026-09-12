@@ -173,6 +173,10 @@ impl Peripheral for Scb {
             0xB0 => _sys.mpu.regions[2].get().rasr,
             0xB4 => _sys.mpu.regions[3].get().rbar,
             0xB8 => _sys.mpu.regions[3].get().rasr,
+            // Cortex debug (DHCSR/DCRSR/DCRDR/DEMCR): owned by the SWD
+            // slice (see swd.rs) — routed here so both maps answer without
+            // touching any bus window (STIR/ACTRL/IDCODE precedent).
+            0xF0 | 0xF4 | 0xF8 | 0xFC => super::swd::scb_debug_read(_sys, offset).unwrap_or(0),
             _ => 0,
         }
     }
@@ -235,6 +239,11 @@ impl Peripheral for Scb {
                 let mut r = sys.mpu.regions[idx].get();
                 r.rasr = value;
                 sys.mpu.regions[idx].set(r);
+            }
+            // Cortex debug block: owned by the SWD slice (no-op here when
+            // the offset is not a debug register).
+            0xF0 | 0xF4 | 0xF8 | 0xFC => {
+                super::swd::scb_debug_write(sys, offset, value);
             }
             _ => {}
         }

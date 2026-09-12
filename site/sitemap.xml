@@ -133,12 +133,6 @@
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://danish9661.github.io/STM32-Bluepill-emu/doc.html?f=PATH_A.md</loc>
-    <lastmod>2026-09-11</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  <url>
     <loc>https://danish9661.github.io/STM32-Bluepill-emu/doc.html?f=PATH_B.md</loc>
     <lastmod>2026-09-11</lastmod>
     <changefreq>monthly</changefreq>

@@ -26,7 +26,7 @@ pub struct MemRegion {
     pub data: Vec<u8>,
 }
 
-fn is_periph(addr: u32) -> bool {
+pub(crate) fn is_periph(addr: u32) -> bool {
     (addr >= 0x40000000 && addr < 0x51000000)
         || (addr >= 0x60000000 && addr < 0x62000000)
         || (addr >= 0xA0000000 && addr < 0xA2000000)
@@ -140,6 +140,12 @@ impl Memory for FlatMemory {
         if is_periph(addr) {
             return self.read8_periph_cold(addr);
         }
+        // Data watchpoint (GDB Z3/Z4): one mirror load + branch when
+        // disarmed. Fetches bypass this entirely via read16_raw/read8_raw.
+        if crate::system::watch_on() {
+            core::hint::cold_path();
+            crate::sys().swd.check_watch(addr, 1, false);
+        }
         self.read8_raw_unchecked(addr)
     }
 
@@ -188,6 +194,13 @@ impl Memory for FlatMemory {
         }
         if is_periph(addr) {
             return self.write8_periph_cold(addr, v);
+        }
+        // Data watchpoint (GDB Z2/Z4): armed check only; the store still
+        // lands — HW halts AFTER the matching instruction completes, and
+        // the run loop stops on top of the next one.
+        if crate::system::watch_on() {
+            core::hint::cold_path();
+            crate::sys().swd.check_watch(addr, 1, true);
         }
         self.write8_raw_unchecked(addr, v)
     }

@@ -214,5 +214,5 @@ audit and are not part of the published package.
    `wasm-pack` no longer warns and `pkg/package.json` carries full metadata. ✅
 3. **(Optional)** Implement real USB-FS if a use case appears; otherwise keep
    the stub.
-4. **(No action)** Performance is at the Unicorn-TCG ceiling; do not pursue
-   Path A/B unless a feature requires CPU-core changes.
+4. **(No action)** Performance is at the native-core ceiling; do not pursue
+   CPU-core changes unless a feature requires them.

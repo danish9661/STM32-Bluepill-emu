@@ -153,7 +153,7 @@ every real Blue Pill storage project uses SD.
 
 ## 5. Test coverage of the above
 
-- `tests/test_all.mjs` (719): SDIO init/R/W/IRQ/DMA/no-card/SVD (+ SDSC byte
+- `tests/test_all.mjs` (736): SDIO init/R/W/IRQ/DMA/no-card/SVD (+ SDSC byte
   addressing, CSD v1); DMA global streams + circular reload/HTIF; WWDG EWI;
   PVD PLS thresholds vs settable supply; WKUP/WUF + standby wake gating;
   RTC second/overflow + flags; RCC clock decode (SYSCLK + full-tree
@@ -164,8 +164,10 @@ every real Blue Pill storage project uses SD.
   window + DTG dead-time; CAN TX edge-trigger (no-re-pend) + silent modes;
   SPI NSS output + TI transfers; USART sync/IrDA transfers; ACTRL store;
   ADC temp/VREFINT nominals + discontinuous chunks + JAUTO (SQR length
-  fixed); ITM stimulus + UID + FLASH option USER/WDG_SW; everything in
-  §1 marked Full has a group.
+  fixed); ITM stimulus + UID + FLASH option USER/WDG_SW; SWD DP/AP +
+  DHCSR/DEMCR + watch slots + JTAG IDCODE (trip path in `swd.rs` unit
+  tests + `test_gdbstub.mjs`, not here — needs the native backend);
+  everything in §1 marked Full has a group.
 - `tests/canary.mjs` + 200M runs (both paths): 39/39 real-firmware checks.
 - `tests/test_pwm_wave.mjs` pins the millis() rate end to end (8 exact wave
   steps in a fixed 70M budget — catches SysTick under-delivery).

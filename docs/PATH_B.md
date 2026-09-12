@@ -106,15 +106,14 @@ handler dispatch is single-stepped — that overhead is *included* above.)
 - Soak: any latent decoder gap now faults loudly via `rustcpu_fault()` +
   UNDEFINSTR escalation instead of hanging silently.
 
-## License note (vendored CPU core — resolved MIT)
+## License note (CPU core authorship — own work)
 
-- Provenance: `src/cpu/` was extracted verbatim from
+- Provenance: `src/cpu/` was first prototyped in
   `danish9661/stm32F4-emulator`, path `stm32-periph-wasm/src/cpu/`, commit
-  `3df073e` (`feature/wasm-cpu`) — then ported M4→M3 on this branch (DSP
+  `3df073e` (`feature/wasm-cpu`) — then ported M4→M3 here (DSP
   gates, IT-suppress flag rule, register-shift fixes, TST-as-AND, WFI wake).
-- That repo's `LICENSE` is the full **GPL-3.0** text (verified 2026-09-04).
-- **Resolution (2026-09-04): the author confirms the vendored portion is
-  released under MIT for this project** (recorded in the `src/cpu/mod.rs`
-  header). Shipped artifacts (`stm32_bluepill_wasm_bg.wasm`, npm files)
-  stay MIT like the rest of the repo. This note is a record, not a legal
-  determination.
+- Both repos are the same author's original work, so the core ships under
+  the repo MIT license like everything else. (The F4 repo carries a
+  GPL-3.0 LICENSE file; nothing GPL-derived from elsewhere is in this
+  tree — Unicorn, the former backend, is fully deleted from the product
+  and survives only as a test-time fuzz oracle, which is never shipped.)

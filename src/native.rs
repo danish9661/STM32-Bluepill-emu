@@ -22,9 +22,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use wasm_bindgen::prelude::*;
 
 use crate::cpu::{
-    mem::{FlatMemory, Memory},
+    mem::{is_periph, FlatMemory, Memory},
     Cpu,
 };
+use crate::system::WasmSystem;
 
 struct NativeEmu {
     cpu: Cpu,
@@ -93,6 +94,19 @@ pub fn rustcpu_load(data: &[u8], base: u32) {
 pub fn rustcpu_run(slice: u32) -> u32 {
     let emu = native_mut();
     let sys = crate::sys();
+    // Debug drains (cold unless a probe attached something): a guest DCRSR
+    // write pends a register transfer, a DHCSR C_STEP edge pends one step.
+    if sys.swd.take_xfer_pending() {
+        debug_do_transfer(sys, &mut emu.cpu);
+    }
+    if sys.swd.take_step_pending() {
+        return debug_single_step(sys, &mut emu.cpu, &mut emu.mem);
+    }
+    // Halted core (DHCSR C_HALT / watchpoint / VC_HARDERR): the debugger
+    // polls `swd_halted()` / steps via `swd_step()`.
+    if crate::system::debug_halted() {
+        return 0;
+    }
     crate::set_intr_masks(emu.cpu.regs.primask, 0);
     let mut done = emu.cpu.run(sys, &mut emu.mem, slice);
     if let Some(f) = emu.cpu.fault.take() {
@@ -131,6 +145,13 @@ fn run_handler_to_return(cpu: &mut Cpu, mem: &mut FlatMemory) -> u32 {
 pub fn rustcpu_dispatch() -> u32 {
     let emu = native_mut();
     let sys = crate::sys();
+    // A halted core takes no exceptions (the probe owns it now).
+    if crate::system::debug_halted() {
+        return 0;
+    }
+    if sys.swd.take_xfer_pending() {
+        debug_do_transfer(sys, &mut emu.cpu);
+    }
     // Honor live PRIMASK (not the stale INTR_MASK snapshot): intr_next()
     // consults the statics, and a batch ending inside a noInterrupts()
     // critical section must not dispatch into it (real HW blocks on live
@@ -300,4 +321,230 @@ pub fn rustcpu_take_writes() -> Vec<u32> {
 
 fn take_writes() -> Vec<u32> {
     std::mem::take(&mut *WRITE_LOG.lock().unwrap())
+}
+
+// ---- ARM debug-port slice (SWD + JTAG-DP + watchpoints) --------------------
+// Transaction-level probe API (see peripherals/swd.rs): the DP/AP register
+// file lives on WasmSystem.swd, DRW data moves here (only place with both
+// SYS and FlatMemory), register transfers touch the live CPU.
+
+/// DCRSR transfer engine (shared by the run-entry drain and `swd_reg_*`).
+/// Synchronous semantics: the value moves immediately and S_REGRDY reads
+/// ready afterwards (the pending flag is only what a bare guest DCRSR write
+/// leaves for the next run entry).
+pub(crate) fn debug_do_transfer(sys: &WasmSystem, cpu: &mut Cpu) {
+    let sel = sys.swd.transfer_regsel();
+    if sys.swd.transfer_is_write() {
+        let w = sys.swd.dcrdr_read();
+        match sel {
+            0..=12 => cpu.regs.r[sel as usize] = w,
+            13 => cpu.regs.r[13] = w,
+            14 => cpu.regs.r[14] = w,
+            15 => cpu.regs.r[15] = w | 1,
+            16 => cpu.regs.xpsr = (w & 0xF800_0000) | 0x0100_0000,
+            17 => cpu.write_msp(w),
+            18 => cpu.write_psp(w),
+            _ => {}
+        }
+    } else {
+        let v = match sel {
+            0..=12 => cpu.regs.r[sel as usize],
+            13 => cpu.regs.r[13],
+            14 => cpu.regs.r[14],
+            15 => cpu.regs.r[15],
+            16 => cpu.regs.xpsr,
+            17 => cpu.read_msp(),
+            18 => cpu.read_psp(),
+            _ => 0,
+        };
+        sys.swd.dcrdr_write(v);
+    }
+}
+
+/// Single-step past a halt: clear the mirror, run exactly one instruction,
+/// re-halt iff DHCSR still asks (C_DEBUGEN && C_HALT). Returns the executed
+/// count (0 or 1; faults stay live for `rustcpu_fault()`).
+fn debug_single_step(sys: &WasmSystem, cpu: &mut Cpu, mem: &mut FlatMemory) -> u32 {
+    crate::system::set_debug_halt(false);
+    crate::set_intr_masks(cpu.regs.primask, 0);
+    let done = cpu.run(sys, mem, 1);
+    crate::system::sync_debug_halt_from_dhcsr(sys.swd.dhcsr_raw());
+    // A step that trips a watchpoint re-halts via the trip itself; the
+    // re-sync above already covers the DHCSR-asked case.
+    done
+}
+
+/// Probe memory read for MEM-AP DRW (debugger path: bypasses MPU and flash
+/// protection like a real probe; peripherals route to the model).
+fn ap_mem_read(sys: &WasmSystem, mem: &FlatMemory, addr: u32, size: u8) -> u32 {
+    if is_periph(addr) {
+        sys.p.read(sys, addr, size)
+    } else {
+        let mut v = 0u32;
+        for k in 0..size {
+            v |= (mem.read8_raw(addr.wrapping_add(k as u32)) as u32) << (8 * k as u32);
+        }
+        v
+    }
+}
+
+/// Probe memory write for MEM-AP DRW (same bypasses; flash stores drop like
+/// guest stores — the probe programs flash through the FLASH peripheral).
+fn ap_mem_write(sys: &WasmSystem, mem: &mut FlatMemory, addr: u32, size: u8, value: u32) {
+    if is_periph(addr) {
+        sys.p.write(sys, addr, size, value);
+    } else {
+        for k in 0..size {
+            mem.write8_raw(addr.wrapping_add(k as u32), ((value >> (8 * k as u32)) & 0xFF) as u8);
+        }
+    }
+}
+
+#[wasm_bindgen]
+pub fn swd_dp_read(addr: u32) -> u32 {
+    crate::sys().swd.dp_read(addr)
+}
+
+#[wasm_bindgen]
+pub fn swd_dp_write(addr: u32, value: u32) {
+    crate::sys().swd.dp_write(addr, value);
+}
+
+/// MEM-AP register read. Bank-0 DRW (reg 0xC) performs the data movement:
+/// reads TAR-width bytes, latches RDBUFF, auto-increments TAR.
+#[wasm_bindgen]
+pub fn swd_ap_read(bank: u32, reg: u32) -> u32 {
+    let emu = native_mut();
+    let sys = crate::sys();
+    if bank == 0 && reg & 0xC == 0xC {
+        let size = sys.swd.ap_data_size();
+        let v = ap_mem_read(sys, &emu.mem, sys.swd.tar(), size);
+        sys.swd.ap_latch_rdbuff(v);
+        sys.swd.ap_tar_advance();
+        return v;
+    }
+    sys.swd.ap_reg_read(bank, reg)
+}
+
+/// MEM-AP register write. Bank-0 DRW (reg 0xC) stores TAR-width bytes and
+/// auto-increments TAR.
+#[wasm_bindgen]
+pub fn swd_ap_write(bank: u32, reg: u32, value: u32) {
+    if bank == 0 && (reg & 0xC) == 0xC {
+        let emu = native_mut();
+        let sys = crate::sys();
+        let size = sys.swd.ap_data_size();
+        let tar = sys.swd.tar();
+        ap_mem_write(sys, &mut emu.mem, tar, size, value);
+        sys.swd.ap_tar_advance();
+        return;
+    }
+    crate::sys().swd.ap_reg_write(bank, reg, value);
+}
+
+/// Install a data watchpoint: kind 1 = write (GDB Z2), 2 = read (Z3),
+/// 3 = access (Z4). Returns the slot (0-3) or -1 when full.
+#[wasm_bindgen]
+pub fn swd_add_watchpoint(kind: u32, addr: u32, len: u32) -> i32 {
+    crate::sys().swd.add_watch(kind, addr, len)
+}
+
+#[wasm_bindgen]
+pub fn swd_remove_watchpoint(slot: u32) {
+    crate::sys().swd.remove_watch(slot);
+}
+
+/// Take the pending watch trip: [] when clean, else [addr, dir] with dir
+/// 1 = write, 2 = read. One-shot latch; the halt stays until resume.
+#[wasm_bindgen]
+pub fn swd_take_trip() -> Vec<u32> {
+    match crate::sys().swd.take_trip() {
+        Some((a, d)) => vec![a, d],
+        None => Vec::new(),
+    }
+}
+
+#[wasm_bindgen]
+pub fn swd_halted() -> bool {
+    crate::system::debug_halted()
+}
+
+/// External halt request (probe/GDB Ctrl-C path): sets C_DEBUGEN+C_HALT.
+#[wasm_bindgen]
+pub fn swd_halt() {
+    crate::sys().swd.halt();
+}
+
+/// Debugger resume: clears C_HALT (C_DEBUGEN stays, like silicon).
+#[wasm_bindgen]
+pub fn swd_resume() {
+    crate::sys().swd.resume();
+}
+
+/// Single-step the halted core once (0/1 executed; faults stay live).
+#[wasm_bindgen]
+pub fn swd_step() -> u32 {
+    let emu = native_mut();
+    let sys = crate::sys();
+    sys.swd.take_step_pending();
+    debug_single_step(sys, &mut emu.cpu, &mut emu.mem)
+}
+
+/// DCRSR-style core register read (0-12, 13 SP, 14 LR, 15 PC, 16 xPSR,
+/// 17 MSP, 18 PSP). Synchronous: DCRDR holds the value on return.
+#[wasm_bindgen]
+pub fn swd_reg_read(idx: u32) -> u32 {
+    let emu = native_mut();
+    let sys = crate::sys();
+    sys.swd.dcrsr_write(idx & 0x7F);
+    sys.swd.take_xfer_pending();
+    debug_do_transfer(sys, &mut emu.cpu);
+    sys.swd.dcrdr_read()
+}
+
+/// DCRSR-style core register write (same numbering). Synchronous.
+#[wasm_bindgen]
+pub fn swd_reg_write(idx: u32, value: u32) {
+    let emu = native_mut();
+    let sys = crate::sys();
+    sys.swd.dcrdr_write(value);
+    sys.swd.dcrsr_write((idx & 0x7F) | (1 << 16));
+    sys.swd.take_xfer_pending();
+    debug_do_transfer(sys, &mut emu.cpu);
+}
+
+// ---- JTAG TAP (shares the DP/AP file; no new tests — probe helper) ----
+
+#[wasm_bindgen]
+pub fn swd_jtag_reset() {
+    crate::sys().swd.jtag_reset();
+}
+
+#[wasm_bindgen]
+pub fn swd_jtag_ir(ir: u32) {
+    crate::sys().swd.jtag_ir_write(ir as u8);
+}
+
+#[wasm_bindgen]
+pub fn swd_jtag_idcode() -> u32 {
+    crate::sys().swd.jtag_idcode()
+}
+
+#[wasm_bindgen]
+pub fn swd_jtag_dp(addr: u32, rnw: bool, wdata: u32) -> u32 {
+    crate::sys().swd.jtag_dp(addr, rnw, wdata)
+}
+
+/// JTAG APACC shift with explicit bank. DRW register moves data like the
+/// SWD AP path (rnw=true reads, false writes); other registers are direct.
+#[wasm_bindgen]
+pub fn swd_jtag_ap(bank: u32, reg: u32, rnw: bool, wdata: u32) -> u32 {
+    if bank == 0 && reg & 0xC == 0xC {
+        if rnw {
+            return swd_ap_read(bank, reg);
+        }
+        swd_ap_write(bank, reg, wdata);
+        return 0;
+    }
+    crate::sys().swd.jtag_ap_reg(bank, reg, rnw, wdata)
 }

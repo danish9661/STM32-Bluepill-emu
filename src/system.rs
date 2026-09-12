@@ -157,6 +157,51 @@ pub(crate) fn sync_mpu_gate(sys: &WasmSystem) {
     unsafe { *std::ptr::addr_of_mut!(MPU_ON) = sys.mpu.enabled(); }
 }
 
+/// Debug-halt mirror for the CPU hot loop (DHCSR C_HALT / watchpoint trip /
+/// VC_HARDERR). Same plain-static discipline as MPU_ON: one `global.get` +
+/// branch per instruction, synced only on debug-state writes (cold).
+static mut DEBUG_HALT: bool = false;
+
+/// Watchpoint-armed mirror for the memory hot paths (read8/write8). One
+/// load + branch per guest data access when disarmed (zero when... — the
+/// branch is always evaluated, but predicted-not-taken; fetches bypass it
+/// entirely via read16_raw). Synced on watch add/remove only.
+static mut WATCH_ON: bool = false;
+
+/// Hot-loop halt check (cpu run + dispatch entry).
+#[inline(always)]
+pub(crate) fn debug_halted() -> bool {
+    unsafe { *std::ptr::addr_of!(DEBUG_HALT) }
+}
+
+/// Hot-path watch gate (FlatMemory read8/write8).
+#[inline(always)]
+pub(crate) fn watch_on() -> bool {
+    unsafe { *std::ptr::addr_of!(WATCH_ON) }
+}
+
+pub(crate) fn set_debug_halt(h: bool) {
+    unsafe { *std::ptr::addr_of_mut!(DEBUG_HALT) = h; }
+}
+
+/// Sync halt from DHCSR C bits: halted = C_DEBUGEN && C_HALT.
+pub(crate) fn sync_debug_halt_from_dhcsr(dhcsr: u32) {
+    unsafe { *std::ptr::addr_of_mut!(DEBUG_HALT) = dhcsr & 3 == 3; }
+}
+
+pub(crate) fn sync_watch_gate(swd: &crate::peripherals::swd::SwdState) {
+    unsafe { *std::ptr::addr_of_mut!(WATCH_ON) = swd.any_watch(); }
+}
+
+/// Fresh-install reset (init/init_svd build a default SwdState anyway; this
+/// clears the process-wide mirrors).
+pub(crate) fn reset_debug_mirrors() {
+    unsafe {
+        *std::ptr::addr_of_mut!(DEBUG_HALT) = false;
+        *std::ptr::addr_of_mut!(WATCH_ON) = false;
+    }
+}
+
 /// ARMv7-M MPU state: 8 regions + control + fault mirrors + the CPU's
 /// current privilege (maintained by the core on MSR CONTROL and exception
 /// transitions — FlatMemory has no CPU context of its own).
@@ -310,6 +355,9 @@ pub struct WasmSystem {
     pub intr: RefCell<crate::interrupts::IntrDispatch>,
     /// ARMv7-M MPU state (registers live in the SCB delegate to this).
     pub mpu: MpuState,
+    /// ARM debug-port slice (SWD DP + MEM-AP + DHCSR/DCRSR/DCRDR/DEMCR +
+    /// watchpoints + JTAG TAP). Registers live in the SCB delegate here.
+    pub swd: crate::peripherals::swd::SwdState,
     /// Set when I2C1 DR is written with the R-bit set; the native driver
     /// drains it per batch for the hi2c Mode RAM patch (same condition as
     /// the former JS mem hook). Taken (cleared) on read.
@@ -327,7 +375,7 @@ impl WasmSystem {
         WasmSystem { p, pending_dma: RefCell::new(Vec::new()), absorb_buf: RefCell::new(Vec::new()),
             event_queue: RefCell::new(Vec::new()), spi_miso: RefCell::new(HashMap::new()),
             i2c_rx: RefCell::new(HashMap::new()), intr: RefCell::new(crate::interrupts::IntrDispatch::default()),
-            i2c_dr_hook: Cell::new(false), mpu: MpuState::default() }
+            i2c_dr_hook: Cell::new(false), mpu: MpuState::default(), swd: crate::peripherals::swd::SwdState::default() }
     }
 
     pub fn new_svd(svd_xml: &str) -> Self {
@@ -340,7 +388,7 @@ impl WasmSystem {
         WasmSystem { p, pending_dma: RefCell::new(Vec::new()), absorb_buf: RefCell::new(Vec::new()),
             event_queue: RefCell::new(Vec::new()), spi_miso: RefCell::new(HashMap::new()),
             i2c_rx: RefCell::new(HashMap::new()), intr: RefCell::new(crate::interrupts::IntrDispatch::default()),
-            i2c_dr_hook: Cell::new(false), mpu: MpuState::default() }
+            i2c_dr_hook: Cell::new(false), mpu: MpuState::default(), swd: crate::peripherals::swd::SwdState::default() }
     }
 
     /// Record the CPU's current privilege for MPU checks (FlatMemory has no

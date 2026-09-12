@@ -121,7 +121,6 @@ echo -n "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml -
 - **test_esm.mjs fixed**: pointed at the current wasm glue (`stm32_periph_wasm.js` → `stm32_bluepill_wasm.js`), made a real pass/fail with exit code (ESM glue loads + Unicorn boots a cortex-m instance).
 - **test_firmware_formats.mjs fixed**: was committed-but-broken (needed a `comprehensive_test` ELF that no longer ships). Rewritten self-contained on the arduino_periph_test artifacts (hex + map committed, ELF copied by CI from site/) with cross-format consistency checks — hex SP == map _estack, hex/elf reset == map Reset_Handler, symbols present, garbage rejection — no hardcoded addresses (those drifted when the sketch/core changed).
 - **CI**: added "Firmware format + ESM smoke tests" step + "Emulator.js path (browser run loop) 200M firmware run" step.
-- Path A (single wasm module) documented as an experiment in docs/NEXT_PHASE.md §4 — see "Next Phase — Long-term Optimizations" item 1.
 ### Unit tests / firmware / misc
 - `tests/test_all.mjs`: 189 → **224 PASS** (DAC→ADC loopback via DOR1/2, TIM1 TRGO/CC1 + EXTI11 external triggers, EXTI 11 → ADC without SWSTART, DMA pump exports `dma_absorb_periph`/`dma_push_periph`; AWD IRQ needs ISER enable: `can_fire` requires the IRQ enabled in the NVIC, real hardware semantics — pending without enable stays pending).
 - Firmware: +SVC (synchronous, `svc #2` in setup()) +PendSV (ICSR-pended, fires next batch) → **39/39**; canary asserts 39.
@@ -170,7 +169,6 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 
 ### Immediate (ALL PASS as of this sprint; re-check after any change)
 1. **Verify nothing regressed** — rerun `tests/test_all.mjs` (372) + canary (`node tests/canary.mjs`, 39/39) after any edit to `src/` or `pkg/cli.mjs`
-2. ~~**Path A spike** (link Rust staticlib with emcc-compiled unicorn C)~~ — **moot**: Unicorn is deleted; there is nothing left to link (single Rust WASM module already).
 
 ### Known issue (monitor only, mostly explained)
 - Historical `Fatal: undefined Stack: undefined` at ~35M+ instructions — **identified (2026-08-11)**: that text is cli.mjs's own catch handler format (`console.error('Fatal:', e.name, e.message)` + `'Stack:', ...`, present since the initial commit), not any wasm/glue string — no "Fatal:" exists in unicorn_arm.cjs/.js, stm32_bluepill_wasm.js or the .wasm. So the incident was a JS promise rejection with a nameless value (bare string/undefined; wasm-bindgen panics throw `new Error(msg)` with name+message, so a REAL Rust/wasm panic would have printed differently). Current handler is hardened (`e?.name || '(no name)'`, `Type:` dump) so a re-occurrence is now diagnosable. Not reproduced across ~6B stress instructions (22 runs, 2026-08-13: 3×200M + 2×500M + 1×1B periph39 cli, canary, emulator.js 200M browser path, showcase/ws2812/echo/fade/flash/timer_uart/adc_uart ELFs 100–200M — all exit 0, zero `Fatal`/`(no name)` in output); monitor only.
@@ -673,13 +671,49 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
   error→ABORT recovery); browser preset green end-to-end (~5s); CI line
   added. Maple matrix DFU rows flipped to Full.
 
+### 46. SWD/JTAG debug-port slice + GDB Z2/Z3/Z4 [this sprint, UNCOMMITTED]
+- **Scope**: transaction-level DP host API, not pin modeling (GPIO is
+  push-pull only; clocked SWDIO + turnaround would need electrical-model
+  changes and ~1B wire events/run — evaluated, rejected).
+- **New `src/peripherals/swd.rs`** (`SwdState` on `WasmSystem`): SWD DPv1
+  (DPIDR `0x2BA01477`, CTRL/STAT ACKs + sticky W1C, SELECT, RDBUFF) +
+  MEM-AP (CSW `0x23000052` SIZE/AddrInc, TAR auto-inc, DRW data port,
+  BD0-3/CFG/BASE/IDR) + Cortex debug (DHCSR DBGKEY/C_HALT/C_STEP,
+  synchronous DCRSR/DCRDR incl. MSP/PSP, DEMCR TRCENA + VC_HARDERR halt)
+  routed from the SCB window 0xF0-0xFC on both maps (STIR/ACTRL/IDCODE
+  precedent, no bus window) + 4 exact-range data watchpoints
+  (halt-after-access, first-trip-wins latch) + minimal JTAG TAP (IDCODE
+  `0x4BA00477`, BYPASS/DPACC/APACC/ABORT) sharing the DP file.
+- **Hot path**: plain-static `DEBUG_HALT` (run loop) + `WATCH_ON`
+  (guest read8/write8 only; fetches bypass via read16_raw) mirrors —
+  200M still 2.84s (~70M IPS, cost unmeasurable).
+- **Real bugs found by writing it**: watch length field contaminated by
+  kind/valid bits on decode (len masked to 28 bits); CSW SIZE is
+  bits[2:0] (not [3:1]); test-side `0x5008`-is-STR-not-STRB snippet bug
+  (stored to r1+r0, off-watch — immediate `0x7008` used); RSP lengths
+  are hex (`Maddr,C:` for 12 bytes).
+- **GDB** (`pkg/gdbstub.mjs`): Z2/Z3/Z4 → slots, `T05watch:/rwatch:/
+  awatch:` stop reasons, `c` resumes a halt, `s` steps past a halt.
+  `tests/test_gdbstub.mjs` 17 → **35/35** (live strb/ldrb snippets).
+- **Real-client bugs found by arm-none-eabi-gdb 15** (synthetic client
+  missed them): RSP `p`/`P` numbers are HEX (`Pf`=PC — decimal parse
+  silently dropped `set $pc`, trips then came from firmware's own
+  writes); `G` (write-all) implemented, any `Hc`/`Hg` accepted. Proven:
+  `watch *(char*)0x20000100` → Old 0 New 170, stop after the store
+  with r0=0xAA/r1=addr, delete+continue → trailing BKPT SIGILL.
+- **Docs**: GDB.md slice section, PERIPHERALS Debug row, all 6 board
+  matrices Debug→Full + DWT row points at the slice; `site/` synced.
+- **Verified**: cargo lib 80/80 (11 new swd), test_all **736/736**
+  (+17 SWD; harness now inits the native backend for `swd_*`),
+  canary 39/39, cli + emulator.js 200M 39/39, census + fuzz green,
+  coremark/chips/otg/dfu/all event+demo suites green, browser 34 + 8.
+
 
 
 ## Next Phase — Long-term Optimizations
-1. **Single WASM module — "Path A" (EXPERIMENT status, see docs/NEXT_PHASE.md §4)**: compile Rust peripherals + Unicorn C into one `emcc` output (`wasm32-unknown-emscripten` + `staticlib` + raw `#[no_mangle]` exports — wasm-bindgen does NOT support the emscripten target, so the ~70 exports need a shim; fetch unicorn C source, `third_party/unicorn/` is gitignored). Dual-wasm stays the default until the acceptance gate passes (224/224, 39/39 both paths, IPS within ~2× of 22M). Gain is architectural, not speed.
-2. ~~**Replace mem hooks with shared linear memory**~~ — **retired (moot)**: `uc_mem_map_ptr(mem, periph_range)` would remove the JS crossing, but peripheral access was measured at 0.001 accesses/instruction (~0.1% of runtime) — no measurable win available
-3. ~~**DMA + interrupts fully in Rust**~~ — **LANDED**: `rustcpu_dma_pump()` + `rustcpu_dispatch()` run fully in Rust against Rust RAM (zero JS round-trips).
-4. ~~**Pure-Rust Cortex-M core — "Path B" (deferred)**~~ — **LANDED (see `docs/PATH_B.md`)**: vendored interpreter in `src/cpu/`, 39/39 both backends pre-cutover, ~3.5x faster, Unicorn deleted.
+1. ~~**Replace mem hooks with shared linear memory**~~ — **retired (moot)**: `uc_mem_map_ptr(mem, periph_range)` would remove the JS crossing, but peripheral access was measured at 0.001 accesses/instruction (~0.1% of runtime) — no measurable win available
+2. ~~**DMA + interrupts fully in Rust**~~ — **LANDED**: `rustcpu_dma_pump()` + `rustcpu_dispatch()` run fully in Rust against Rust RAM (zero JS round-trips).
+3. ~~**Pure-Rust Cortex-M core — "Path B" (deferred)**~~ — **LANDED (see `docs/PATH_B.md`)**: vendored interpreter in `src/cpu/`, 39/39 both backends pre-cutover, ~3.5x faster, Unicorn deleted.
 
 ## Files Most Relevant
 - `src/peripherals/i2c.rs` — I2C state machine

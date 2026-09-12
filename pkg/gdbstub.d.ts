@@ -17,7 +17,8 @@ export interface GdbOptions {
 
 /**
  * Serve one emulator instance over GDB RSP (`target remote :<port>`).
- * Registers, memory, BKPT breakpoints, step/continue, target.xml.
+ * Registers, memory, BKPT breakpoints (Z0), data watchpoints (Z2/Z3/Z4),
+ * step/continue, target.xml.
  */
 export function serveGdb(opts?: GdbOptions): Promise<{
     port: number;

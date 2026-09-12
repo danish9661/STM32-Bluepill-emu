@@ -238,7 +238,11 @@ export async function createEmulator(opts = {}) {
      i2c_oled_fb, lcd_fb, gpio_take_pin_events,     drain_events, spi_inject_miso, i2c_inject_rx, i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop, i2c_inject_alert, bootloader_enable, bootloader_go_addr, pwr_mode, pwr_estimate, adc_set_internal, usb_bus_reset, usb_detach, usb_inject_setup, usb_inject_out, otg_inject_setup, otg_inject_out, otg_bus_reset, otg_detach, otg_host_feed_in, otg_host_attach,
     rustcpu_init, rustcpu_load, rustcpu_run, rustcpu_fault, rustcpu_fault_clear, rustcpu_dispatch,
     rustcpu_regs, rustcpu_set_pc, rustcpu_set_reg, rustcpu_mem_read, rustcpu_mem_write, rustcpu_mem_write_raw, rustcpu_dma_pump, rustcpu_i2c_hook_fired,
-    rustcpu_write_tap, rustcpu_take_writes, set_dbg_idcode } = periph;
+    rustcpu_write_tap, rustcpu_take_writes, set_dbg_idcode,
+    swd_dp_read, swd_dp_write, swd_ap_read, swd_ap_write,
+    swd_add_watchpoint, swd_remove_watchpoint, swd_take_trip,
+    swd_halted, swd_halt, swd_resume, swd_step, swd_reg_read, swd_reg_write,
+    swd_jtag_reset, swd_jtag_ir, swd_jtag_idcode, swd_jtag_dp, swd_jtag_ap } = periph;
 
     // Register external devices BEFORE init()
     reset_ext_devices();
@@ -617,6 +621,38 @@ export async function createEmulator(opts = {}) {
             lastFault = null;
             return f;
         },
+
+        // ---- ARM debug-port slice (SWD + JTAG-DP + watchpoints) ----
+        /** True while the core is halted (DHCSR C_HALT / watchpoint / VC). */
+        swdHalted() { return swd_halted(); },
+        /** External halt request (sets C_DEBUGEN+C_HALT, like a probe). */
+        swdHalt() { swd_halt(); },
+        /** Debugger resume (clears C_HALT; C_DEBUGEN stays, like silicon). */
+        swdResume() { swd_resume(); },
+        /** Single-step the halted core once (returns 0/1 executed). */
+        swdStep() { return swd_step(); },
+        /** Install a data watchpoint (kind 1=write/Z2, 2=read/Z3, 3=access/Z4).
+         *  Returns the slot (0-3) or -1 when full. */
+        swdAddWatch(kind, addr, len) { return swd_add_watchpoint(kind >>> 0, addr >>> 0, len >>> 0); },
+        /** Remove a data watchpoint by slot. */
+        swdRemoveWatch(slot) { swd_remove_watchpoint(slot >>> 0); },
+        /** Take the pending watch trip ([] clean, else [addr, dir 1=write/2=read]). */
+        swdTakeTrip() { return swd_take_trip(); },
+        /** SWD DP register read/write (addr 0x0 DPIDR, 0x4 CTRL/STAT, 0x8 SELECT, 0xC RDBUFF). */
+        swdDpRead(addr) { return swd_dp_read(addr >>> 0); },
+        swdDpWrite(addr, value) { swd_dp_write(addr >>> 0, value >>> 0); },
+        /** MEM-AP register read/write (bank, reg); bank-0 reg 0xC (DRW) moves TAR-width data. */
+        swdApRead(bank, reg) { return swd_ap_read(bank >>> 0, reg >>> 0); },
+        swdApWrite(bank, reg, value) { swd_ap_write(bank >>> 0, reg >>> 0, value >>> 0); },
+        /** DCRSR-style core register access (0-12, 13 SP, 14 LR, 15 PC, 16 xPSR, 17 MSP, 18 PSP). */
+        swdRegRead(idx) { return swd_reg_read(idx >>> 0); },
+        swdRegWrite(idx, value) { swd_reg_write(idx >>> 0, value >>> 0); },
+        /** Minimal JTAG TAP sharing the DP (probe helper, no new tests). */
+        jtagReset() { swd_jtag_reset(); },
+        jtagIr(ir) { swd_jtag_ir(ir >>> 0); },
+        jtagIdcode() { return swd_jtag_idcode(); },
+        jtagDp(addr, rnw, wdata) { return swd_jtag_dp(addr >>> 0, !!rnw, wdata >>> 0); },
+        jtagAp(bank, reg, rnw, wdata) { return swd_jtag_ap(bank >>> 0, reg >>> 0, !!rnw, wdata >>> 0); },
 
         canInjectMessage(addr, tir, tdtr, tdlr, tdhr) {
             return can_inject_message(addr, tir, tdtr, tdlr, tdhr);

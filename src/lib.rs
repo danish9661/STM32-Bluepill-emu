@@ -107,6 +107,7 @@ pub fn init() {
     native::reset();
     set_sys(WasmSystem::new());
     system::sync_mpu_gate(sys());
+    system::reset_debug_mirrors();
 }
 
 /// Debug MCU IDCODE reported at 0xE0042000 (set per chip; defaults to the
@@ -136,6 +137,7 @@ pub fn init_svd(svd_xml: &str) {
     native::reset();
     set_sys(WasmSystem::new_svd(svd_xml));
     system::sync_mpu_gate(sys());
+    system::reset_debug_mirrors();
 }
 
 #[wasm_bindgen]

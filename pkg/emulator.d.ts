@@ -283,6 +283,38 @@ export interface BluepillEmulator {
   /** Last CPU fault ([pc, op]) since the previous call, if any. */
   takeFault(): [number, number] | null;
 
+  // ── ARM debug-port slice (SWD + JTAG-DP + watchpoints) ────────────────────
+
+  /** True while the core is halted (DHCSR C_HALT / watchpoint / VC). */
+  swdHalted(): boolean;
+  /** External halt request (sets C_DEBUGEN+C_HALT, like a probe). */
+  swdHalt(): void;
+  /** Debugger resume (clears C_HALT; C_DEBUGEN stays, like silicon). */
+  swdResume(): void;
+  /** Single-step the halted core once (returns 0/1 executed). */
+  swdStep(): number;
+  /** Install a data watchpoint (kind 1=write/Z2, 2=read/Z3, 3=access/Z4). Returns slot or -1. */
+  swdAddWatch(kind: number, addr: number, len: number): number;
+  /** Remove a data watchpoint by slot. */
+  swdRemoveWatch(slot: number): void;
+  /** Pending watch trip ([] clean, else [addr, dir 1=write/2=read]). */
+  swdTakeTrip(): number[];
+  /** SWD DP register read/write (0x0 DPIDR, 0x4 CTRL/STAT, 0x8 SELECT, 0xC RDBUFF). */
+  swdDpRead(addr: number): number;
+  swdDpWrite(addr: number, value: number): void;
+  /** MEM-AP register read/write (bank, reg); bank-0 reg 0xC (DRW) moves TAR-width data. */
+  swdApRead(bank: number, reg: number): number;
+  swdApWrite(bank: number, reg: number, value: number): void;
+  /** DCRSR-style core register access (0-12, 13 SP, 14 LR, 15 PC, 16 xPSR, 17 MSP, 18 PSP). */
+  swdRegRead(idx: number): number;
+  swdRegWrite(idx: number, value: number): void;
+  /** Minimal JTAG TAP sharing the DP (probe helper). */
+  jtagReset(): void;
+  jtagIr(ir: number): void;
+  jtagIdcode(): number;
+  jtagDp(addr: number, rnw: boolean, wdata: number): number;
+  jtagAp(bank: number, reg: number, rnw: boolean, wdata: number): number;
+
   // ── Custom peripherals / Interrupt control ────────────────────────────────
 
   /** Register rp2040js-style custom peripheral. */
