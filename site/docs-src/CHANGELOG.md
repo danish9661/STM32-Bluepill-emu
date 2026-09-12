@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] — F105 USB OTG_FS device mode
+## [Unreleased] — F105 USB OTG_FS device/host mode + Maple DFU bootloader
 
 ### Added
 - USB OTG_FS device model (`src/peripherals/otg.rs`, IRQ 67, F105 map
@@ -28,6 +28,14 @@ All notable changes to this project will be documented in this file.
 - `otg_host` demo-page preset (F105 + scripted virtual device +
   live HCD trace; worker defers pre-init attach/feed across the
   `await createEmulator` message interleave)
+- Maple-style USB DFU bootloader demo (`tests/arduino_dfu/`, Arduino
+  sketch on `maple_mini`, ships `site/arduino_dfu.elf`): EP0 DFU class
+  (DNLOAD/UPLOAD/GETSTATUS/GETSTATE/CLRSTATUS/ABORT, SetAddressPointer,
+  manifest) with real flash unlock/program sequence; downloads stage to
+  a RAM buffer resolved from ELF symbols (guest flash stores drop) and
+  verify byte-exact (`tests/test_dfu.mjs` 51/51, CI)
+- `dfu` demo-page preset (Maple Mini + scripted host download of a
+  .bin file or default pattern, live progress + manifest status)
 
 ### Fixed
 - CSFTRST preserves a physically attached device (silicon keeps the

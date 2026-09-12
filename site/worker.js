@@ -198,7 +198,7 @@ break;
       break;
     }
     case 'setSymbols': {
-      if (emu) emu.setSymbols(msg.text);
+      if (emu) emu.setSymbols(msg.symbols || []);
       const regs = emu.getRegisters();
       post('symbolsSet', { pc: regs.PC });
       break;

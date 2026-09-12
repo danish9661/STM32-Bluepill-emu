@@ -532,6 +532,7 @@ footer .foot-tag {
                     <option value="usb_serial">USB Serial, real Arduino stack (enumerate + echo)</option>
                     <option value="otg_cdc">USB OTG CDC on F105 (enumerate + echo)</option>
                     <option value="otg_host">USB OTG host on F105 (HCD + echo)</option>
+                    <option value="dfu">USB DFU bootloader on Maple Mini (download + manifest)</option>
                     <option value="mini_rtos">Mini-RTOS (PendSV preemptive tasks)</option>
                     </optgroup>
                     <optgroup label="Boards">
@@ -632,6 +633,8 @@ footer .foot-tag {
             <button id="usbEnumBtn" class="primary">Enumerate USB device</button>
             <input id="usbEchoInput" placeholder="Type to send bulk OUT on EP1…" disabled>
             <button id="usbEchoBtn" disabled>Send</button>
+            <input type="file" id="dfuFileInput" accept=".bin" hidden>
+            <button id="dfuBtn" hidden>Download image</button>
         </div>
         <div class="ws-count" id="usbStatus">not enumerated</div>
     </div>
@@ -694,7 +697,9 @@ const UI_THROTTLE = 10;
 let workerReady = false;
 let workerQueue = [];
 function initWorker() {
-  if (worker || !('Worker' in window)) return false;
+  if (!('Worker' in window)) return false;
+  if (worker) return true; // reuse the live worker: its init handler
+  // closes the old emulator first (creating one per load would leak)
   try {
     worker = new Worker('./worker.js', { type: 'module' });
   } catch (e) {
@@ -764,6 +769,7 @@ function handleWorkerMsg(e) {
     }
     if (m.usbAck !== null && m.usbAck !== undefined) { lastHostAck = m.usbAck; if (usbAckPending) { usbAckPending = false; usbAckValue = !!m.usbAck; } }
     if (usbEnum || usbEchoWait) usbEnumAdvance();
+    if (usbDfu) usbDfuAdvance();
     if (usbDeviceMode) {
       usbDeviceAdvance();
       // Main-thread path: poll the HCD RAM trace directly (the worker
@@ -853,6 +859,18 @@ function handleWorkerMsg(e) {
 }
 function updateRegsWorker(pc, sp, sym) {
   try { $('statPc').textContent='0x'+pc.toString(16).padStart(8,'0'); $('statSp').textContent='0x'+sp.toString(16).padStart(8,'0'); } catch {}
+  // Worker path has no local emu: resolve PC against the uploaded map here.
+  try {
+    if (symbolsData && symbolsData.length) {
+      const a = pc & ~1;
+      let best = null;
+      for (const s of symbolsData) { if (s.addr <= a && (!best || s.addr > best.addr)) best = s; }
+      if (best && a - best.addr <= 0x20000) {
+        const off = a - best.addr;
+        $('statPc').textContent += ` → ${best.name}` + (off > 0 ? `+0x${off.toString(16)}` : '');
+      }
+    }
+  } catch {}
 }
 // Live chip readout: label + sizes from the chip table, IDCODE read from
 // the model itself (0xE0042000) — GD32 reports 0x2BA01477, F103 0x10016410.
@@ -883,6 +901,9 @@ let usbAckPending = false;  // a USB send awaits its worker ack
 let usbAckValue = null;     // last USB send ack (true = accepted)
 let usbEchoEp = 1;          // bulk-IN endpoint the echo arrives on (EP1 for usb_cdc, EP2 for usb_serial)
 let usbBackend = 'fs';      // 'fs' (0x40005C00 PMA model) or 'otg' (0x50000000 FIFO model)
+let usbDfuMode = false;     // page dfu preset: scripted DFU download instead of CDC enum
+let usbDfu = null;          // active DFU download {step, frames, image, idx}
+let dfuFileBytes = null;    // user-picked .bin image (null = default pattern)
 const USB_S_DEV = [0x80,0x06,0x00,0x01,0x00,0x00,0x12,0x00];
 const USB_S_ADDR = [0x00,0x05,0x05,0x00,0x00,0x00,0x00,0x00];
 const USB_S_CFG = [0x80,0x06,0x00,0x02,0x00,0x00,0xFF,0x00]; // ask 255: device sends min(len, wTotalLength); need comes from the header
@@ -1046,6 +1067,48 @@ function usbEnumAdvance() {
     else if (w.frames > 600) { log('USB: echo timeout.', 't-err'); usbEchoWait = null; }
     else if (usbNaked() || w.frames % 60 === 0) { usbSendOut(1, Array.from(w.text).map(c => c.charCodeAt(0) & 0xFF).slice(0, 64)); }
   }
+}
+// DFU download driver (page dfu preset): the FIRMWARE is the DFU device
+// (Maple-style), the page plays host — bus reset, enumeration, then
+// SetAddressPointer + DNLOAD blocks of dfuImage + manifest. Mirrors the
+// NAK-tolerant shape of usbEnumAdvance but stays a separate machine so
+// the CDC path is untouched.
+const DFU_S_DEV = [0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x12, 0x00];
+const DFU_S_ADDR = [0x00, 0x05, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00];
+const DFU_S_CFG = [0x80, 0x06, 0x00, 0x02, 0x00, 0x00, 0xFF, 0x00];
+const DFU_S_SETCFG = [0x00, 0x09, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00];
+const DFU_GETSTATUS = [0xA1, 0x03, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00];
+const DFU_BASE = 0x08005000;
+function usbDfuAdvance() {
+  const st = usbDfu;
+  if (!st) return;
+  st.frames++;
+  let d;
+  const outStatus = () => usbSendOut(0, []);
+  switch (st.step) {
+    case -1: if (st.frames === 1) { usbSendReset(); } else if (st.frames > 10) { usbSendSetup(DFU_S_DEV); st.step = 0; st.frames = 0; } break;
+    case 0: d = usbTake(0); if (d && d.length === 18 && d[8] === 0xAF && d[9] === 0x1E) { log('DFU: device descriptor (Maple 1EAF:0003).', 't-ok'); outStatus(); st.step = 10; st.frames = 0; } else if (st.frames > 600) { usbSendReset(); st.step = -1; st.frames = 0; } else if (usbNaked()) { usbSendSetup(DFU_S_DEV); } else if (st.frames % 60 === 0) { usbSendSetup(DFU_S_DEV); } break;
+    case 10: if (usbSendMissing()) { outStatus(); st.frames = 0; } else if (!usbAckPending) { st.step = 1; st.frames = 0; } else if (st.frames > 600) { usbSendReset(); st.step = -1; st.frames = 0; } break;
+    case 1: if (st.frames > 3) { usbSendSetup(DFU_S_ADDR); st.step = 2; st.frames = 0; } else if (st.frames % 60 === 0) { usbSendSetup(DFU_S_ADDR); } break;
+    case 2: d = usbTake(0); if (d && d.length === 0) { log('DFU: address 5 assigned.', 't-ok'); usbSendSetup(DFU_S_CFG); st.step = 3; st.frames = 0; st.cfg = []; } else if (usbNaked()) { usbSendSetup(DFU_S_ADDR); } else if (st.frames % 60 === 0) { usbSendSetup(DFU_S_ADDR); } break;
+    case 3: d = usbTake(0); if (d) { st.cfg = st.cfg.concat(d); if (st.cfg.length >= 27 && st.cfg[19] === 0x21) { log('DFU: config + functional descriptor (27B).', 't-ok'); outStatus(); st.step = 11; st.frames = 0; } } else if (st.cfg.length === 0 && usbNaked()) { usbSendSetup(DFU_S_CFG); } else if (st.cfg.length === 0 && st.frames % 60 === 0) { usbSendSetup(DFU_S_CFG); } break;
+    case 11: if (usbSendMissing()) { outStatus(); st.frames = 0; } else if (!usbAckPending) { st.step = 4; st.frames = 0; } else if (st.frames > 600) { usbSendReset(); st.step = -1; st.frames = 0; } break;
+    case 4: if (st.frames > 3) { usbSendSetup(DFU_S_SETCFG); st.step = 5; st.frames = 0; } else if (st.frames % 60 === 0) { usbSendSetup(DFU_S_SETCFG); } break;
+    case 5: d = usbTake(0); if (d) { log('DFU: configured, entering download.', 't-ok'); usbSendSetup(DFU_GETSTATUS); st.step = 12; st.frames = 0; } else if (usbNaked()) { usbSendSetup(DFU_S_SETCFG); } else if (st.frames % 60 === 0) { usbSendSetup(DFU_S_SETCFG); } break;
+    case 12: d = usbTake(0); if (d && d.length === 6 && d[4] === 2) { log('DFU: device idle, setting address pointer.', 't-ok'); usbSendSetup([0x21, 0x01, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00]); st.step = 13; st.frames = 0; } else if (usbNaked()) { usbSendSetup(DFU_GETSTATUS); } else if (st.frames % 60 === 0) { usbSendSetup(DFU_GETSTATUS); } break;
+    case 13: if (st.frames > 3) { const a = DFU_BASE; usbSendOut(0, [0x21, a & 0xFF, (a >> 8) & 0xFF, (a >> 16) & 0xFF, (a >> 24) & 0xFF]); st.step = 14; st.frames = 0; } else if (st.frames % 60 === 0) { usbSendSetup([0x21, 0x01, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00]); } break;
+    case 14: d = usbTake(0); if (d) { log('DFU: address pointer set, downloading.', 't-ok'); st.idx = 0; st.step = 15; st.frames = 0; st.block = 1; } else if (st.frames > 600) { usbSendReset(); st.step = -1; st.frames = 0; } break;
+    case 15: { // DNLOAD one 64B block per pass through 16 (setup, data, status)
+      const img = st.image, off = st.idx;
+      if (off >= img.length) { usbSendSetup([0x21, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]); st.step = 18; st.frames = 0; break; }
+      const sub = st.step2 || 0;
+      if (sub === 0) { usbSendSetup([0x21, 0x01, st.block & 0xFF, (st.block >> 8) & 0xFF, 0x00, 0x00, Math.min(64, img.length - off), 0x00]); st.step2 = 1; st.frames = 0; }
+      else if (sub === 1 && st.frames > 3) { usbSendOut(0, Array.from(img.slice(off, off + 64))); st.step2 = 2; st.frames = 0; }
+      else if (sub === 2) { d = usbTake(0); if (d) { st.idx += 64; st.block++; st.step2 = 0; st.frames = 0; if (st.idx % 256 === 0 || st.idx >= img.length) log(`DFU: ${Math.min(st.idx, img.length)}/${img.length}B downloaded.`, 't-out'); } else if (st.frames > 600) { usbSendReset(); st.step = -1; st.frames = 0; } }
+      break; }
+    case 18: d = usbTake(0); if (d) { log('DFU: manifest complete.', 't-ok'); $('usbStatus').textContent = 'DFU manifest complete'; usbDfu = null; } else if (st.frames > 600) { usbSendReset(); st.step = -1; st.frames = 0; } break;
+  }
+  if (st.frames > 900) { log('DFU: stalled — press Run, then Download again.', 't-err'); usbDfu = null; }
 }
 
 // Timer channels driving GPIO pins, for PWM glow rendering (fade demo).
@@ -1459,6 +1522,9 @@ function pollUart() {
 }
 
 async function initEmulator(data, name, extDevices = {}, needsMainThread = false, opts = {}) {
+    // Reset button re-inits with the stored object; unwrap to raw bytes
+    // (chip comes from the selector below, so it stays correct too).
+    if (data && data.bytes) { name = data.name || name; data = data.bytes; }
     if (emu) { try { emu.close(); } catch {} emu = null; }
     if (worker) { try { worker.postMessage({type:'stop'}); } catch {} }
     cancelAnimationFrame(animId);
@@ -1468,6 +1534,8 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
     usbInbox = []; usbEnum = null; usbEnumerated = false;
     usbDeviceMode = false; hostTxQ = []; hostRxQ = [];
     devLastSetup = null; devBulkOut = null; devLogged = {};
+    usbDfuMode = false; usbDfu = null; dfuFileBytes = null;
+    $('dfuBtn').hidden = true; $('dfuFileInput').value = '';
     i2cSeq = null; lastHostAck = null;
     $('i2cStatus').textContent = 'idle';
     runSteps = 0;
@@ -1523,7 +1591,7 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
         const svdForWorker = (chipSel === 'stm32f103c8' && svdXml) ? svdXml : undefined;
         // autoBytes for periph_test autopilot
         const ab = (name.includes('periph_test') || name.includes('arduino_periph_test')) ? [0x41, 0x42] : [];
-        worker.postMessage({ type: 'init', firmware: data, chip, svd: svdForWorker, ext_devices: extDevices, autoBytes: ab, canFlagAddr, usbListen: !!opts.usbListen, hostTrace: !!opts.hostTrace, uartAddr: opts.uartAddr || 0 });
+        worker.postMessage({ type: 'init', firmware: data, chip, svd: svdForWorker, ext_devices: extDevices, autoBytes: ab, canFlagAddr, usbListen: !!opts.usbListen, hostTrace: !!opts.hostTrace, uartAddr: opts.uartAddr || 0, symbols: symbolsData || undefined });
         // Try OffscreenCanvas transfer for showcase (worker renders directly, no copy)
         try {
           if (typeof OffscreenCanvas !== 'undefined' && $('oledCanvas')?.transferControlToOffscreen) {
@@ -1540,7 +1608,6 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
         return;
     }
     useWorker = false;
-    firmwareData = data;
     setState('Initializing…');
     try {
         const chip = chipSel === 'stm32f105'
@@ -1630,6 +1697,7 @@ function runLoop() {
     }
     pollUart();
     if (usbListenMain) { usbDrainMain(); if (usbEnum || usbEchoWait) usbEnumAdvance(); }
+    if (usbDfu) usbDfuAdvance();
     if (usbDeviceMode) usbDeviceAdvance();
     if (i2cSeq) i2cAdvance();
     if (autopilot) {
@@ -1881,6 +1949,17 @@ $('loadPresetBtn').addEventListener('click', async () => {
             $('usbStatus').textContent = 'virtual device attached';
             otgHostAttach();
             log('Press Run — the page plays the USB device (descriptors + bulk echo); the HCD trace shows live firmware progress.', 't-in');
+        } else if (preset === 'dfu') {
+            $('chipSelect').value = 'maple_mini';
+            const buf = await fetch('arduino_dfu.elf').then(r => r.arrayBuffer());
+            await initEmulator(new Uint8Array(buf), 'arduino_dfu.elf (USB DFU bootloader)', {}, false, { usbListen: true });
+            usbListenMain = true;
+            usbDfuMode = true;
+            usbBackend = 'fs';
+            $('usbCard').hidden = false;
+            $('dfuBtn').hidden = false;
+            $('usbStatus').textContent = 'DFU device ready — pick an image or Download the default pattern';
+            log('Press Run — then Download image: the page plays host (enumerate + DNLOAD blocks + manifest) against the DFU bootloader.', 't-in');
         } else if (preset === 'usb_serial') {
             const buf = await fetch('arduino_usb_serial.elf').then(r => r.arrayBuffer());
             await initEmulator(new Uint8Array(buf), 'arduino_usb_serial.elf (USBSerial, real STM32duino stack)', {}, false, { usbListen: true });
@@ -1954,6 +2033,12 @@ $('loadPresetBtn').addEventListener('click', async () => {
 const btnWidget = $('btn-widget');
 $('usbEnumBtn').addEventListener('click', () => {
     if (!running) { log('Press Run first — the device must be polling.', 't-err'); return; }
+    if (usbDfuMode) {
+        // DFU preset: the Enumerate button starts the download flow too
+        // (same as Download with the default pattern).
+        startDfuDownload();
+        return;
+    }
     if (usbDeviceMode) {
         // Host-firmware preset: re-attach the virtual device and restart
         // the scripted answers; the HCD re-enumerates on the new attach.
@@ -1985,6 +2070,33 @@ const usbEchoSend = () => {
 };
 $('usbEchoBtn').addEventListener('click', usbEchoSend);
 $('usbEchoInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') usbEchoSend(); });
+// DFU download: optional user .bin via the file picker, else a default
+// 128-byte pattern. Starts the scripted host download (enum + blocks +
+// manifest); progress lands in the terminal + usbStatus.
+function dfuDefaultImage() {
+    const img = new Uint8Array(128);
+    for (let i = 0; i < 128; i++) img[i] = (0xC0 + i) & 0xFF;
+    return img;
+}
+function startDfuDownload() {
+    if (!running) { log('Press Run first — the device must be polling.', 't-err'); return; }
+    const file = $('dfuFileInput').files && $('dfuFileInput').files[0];
+    const begin = (bytes) => {
+        if (bytes.length > 2048) { log(`DFU: image too large (${bytes.length}B > 2048B stage).`, 't-err'); return; }
+        usbInbox = [];
+        $('usbStatus').textContent = `downloading ${bytes.length}B…`;
+        usbDfu = { step: -1, frames: 0, cfg: [], image: bytes, idx: 0, block: 1, step2: 0 };
+        log(`USB: DFU download started (${bytes.length}B).`, 't-in');
+    };
+    if (file) {
+        const rd = new FileReader();
+        rd.onload = () => begin(new Uint8Array(rd.result));
+        rd.readAsArrayBuffer(file);
+    } else {
+        begin(dfuDefaultImage());
+    }
+}
+$('dfuBtn').addEventListener('click', startDfuDownload);
 
 // ---- I2C host driver (page i2c_slave preset): single-flight command
 // sequencer over i2cInject* (worker path via message+ack, direct path
@@ -2096,6 +2208,8 @@ $('mapInput').addEventListener('change', async (e) => {
     const syms = parseSymbolMap(await file.text());
     symbolsData = syms;
     if (emu) { emu.setSymbols(syms); updateRegs(); }
+    if (useWorker && worker && workerReady) worker.postMessage({ type: 'setSymbols', symbols: syms });
+    else if (useWorker && worker) workerQueue.push({ type: 'setSymbols', symbols: syms });
     log(`Loaded ${syms.length} symbols from ${file.name}.`, 't-in');
     e.target.value = '';
 });

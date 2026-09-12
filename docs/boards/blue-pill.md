@@ -18,12 +18,12 @@ or [STM32F105](f105.md) where they really exist.
 - `Serial` = **USART1** (PA9/PA10) — the page terminal shows it
 - 8 MHz crystal, NRST + BOOT0 headers, USB device port
 
-## Demos on this chip (28 presets)
+## Demos on this chip (29 presets)
 
 All 24 shared presets (blink, echo, comprehensive, periph37, fade,
 timer_uart, pwm_wave, servo, adc_uart, dac_sine, rtc_clock, stopwatch,
 flash_demo, showcase, ws2812, i2c_scan, i2c_slave, can_chat, sd_logger,
-usb_cdc, usb_serial, otg_cdc, otg_host, mini_rtos) plus the Blue Pill builds:
+usb_cdc, usb_serial, otg_cdc, otg_host, dfu, mini_rtos) plus the Blue Pill builds:
 `board_pill`, `board_pill_echo`, `board_pill_showcase`, `board_pill_rtc`.
 (USB/OTG presets show on every chip but only function where the
 peripheral is mapped — see the matrix.)

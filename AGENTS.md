@@ -639,8 +639,39 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
   `pwr_set_supply_mv` + `rcc_mco_hz` exports.
 - **Verified**: `test_all.mjs` 719/719, `test_otg.mjs` 120/120,
   canary + cli 200M 39/39, coremark 5/5, census + fuzz green, browser
-  32 + 4 + 15 green. Out of scope kept: DFU/ST-Link/printer/GD32
+  32 + 4 + 15 green. Out of scope kept: ST-Link/printer/GD32
   quirks/ETH (hardware/transports), IrDA/TI kept as verified-identical.
+  (DFU left the list this sprint — see §45.)
+
+### 45. Maple-style USB DFU bootloader [this sprint]
+- **Firmware** (`tests/arduino_dfu/arduino_dfu.ino`, Arduino sketch on
+  `maple_mini`, ships `site/arduino_dfu.elf` force-add): register-level
+  FS USB device speaking DFU DNLOAD/UPLOAD/GETSTATUS/GETSTATE/CLRSTATUS/
+  ABORT + SetAddressPointer + manifest, EP0 state machine ported from the
+  proven CDC scaffolding (CTR write-1-no-effect discipline, rest-armed
+  RX). wTransferSize 64, blocks 0=commands/manifest and ≥1=data at
+  pointer+(N-1)*64. Downloads stage to a 2KB RAM buffer resolved from ELF
+  symbols (guest flash stores drop in `FlatMemory::write8_raw_unchecked`
+  — verified in `src/cpu/mem.rs`) while the real unlock/program/BSY
+  sequence runs. MPU off by default so flash stores can't fault.
+- **Real firmware bug found by writing it**: `flash_program`'s BSY poll
+  spins forever — the model asserts BSY while PG is set but guest stores
+  bypass the peripheral, so no completion ever clears it. Dropped the
+  poll (PG set/clear retained); model untouched (BSY-while-PG is correct
+  silicon behavior).
+- **Test bug found by writing it**: `syms.find(includes('dfu_trace'))`
+  matches `dfu_trace_n` first (shifted view: `[5,1,2,3,3]`) — whole-
+  identifier regex now (`dfu_stage` vs `dfu_staged` had the same trap).
+- **Page `dfu` preset** (Maple Mini + scripted host download of a .bin
+  file or default 128B pattern, live progress + manifest status): worker
+  needed NO changes (usbSetup/usbOut/UsbIn paths already exist); new
+  `usbDfu` state machine duplicates the generic enum steps so the CDC
+  path is untouched. Deferred worker `pendingPreInit` pattern re-verified
+  unnecessary here (attach happens at firmware boot, feeds post-ready).
+- **Verified**: `test_dfu.mjs` 51/51 (enum, states, 2 DNLOAD blocks with
+  byte-exact staged readback, UPLOAD readback, manifest trace+state,
+  error→ABORT recovery); browser preset green end-to-end (~5s); CI line
+  added. Maple matrix DFU rows flipped to Full.
 
 
 

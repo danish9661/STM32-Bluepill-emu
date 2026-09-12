@@ -68,6 +68,42 @@ test.describe('New demo presets', () => {
     const term = await page.$eval('#terminal', el => el.innerText);
     expect(term).toContain('config descriptor (75B, 2 packets)');
   });
+  test('dfu downloads and manifests live (Maple DFU bootloader)', async ({ page }) => {
+    page.on('console', msg => { if (msg.type() === 'error') console.log('BROWSER ERR:', msg.text()); });
+    await page.goto('http://localhost:8765/');
+    await page.selectOption('#presetSelect', 'dfu');
+    await page.click('#loadPresetBtn');
+    await page.click('#runBtn');
+    await page.click('#usbEnumBtn');
+    await page.waitForFunction(
+      (n) => (document.querySelector('#terminal')?.innerText || '').includes(n),
+      'DFU: manifest complete.', { timeout: 120000 });
+    const status = await page.$eval('#usbStatus', el => el.innerText);
+    expect(status).toContain('DFU manifest complete');
+  });
+  test('dfu downloads a user .bin file live', async ({ page }) => {
+    const { writeFileSync, rmSync } = await import('fs');
+    const img = Buffer.alloc(100);
+    for (let i = 0; i < 100; i++) img[i] = (0xE0 + i) & 0xFF;
+    writeFileSync('/tmp/dfu-small.bin', img);
+    try {
+      page.on('console', msg => { if (msg.type() === 'error') console.log('BROWSER ERR:', msg.text()); });
+      await page.goto('http://localhost:8765/');
+      await page.selectOption('#presetSelect', 'dfu');
+      await page.click('#loadPresetBtn');
+      await page.click('#runBtn');
+      await page.locator('#dfuFileInput').setInputFiles('/tmp/dfu-small.bin');
+      await page.click('#dfuBtn');
+      await page.waitForFunction(
+        (n) => (document.querySelector('#terminal')?.innerText || '').includes(n),
+        '100/100B downloaded', { timeout: 120000 });
+      await page.waitForFunction(
+        (n) => (document.querySelector('#terminal')?.innerText || '').includes(n),
+        'DFU: manifest complete.', { timeout: 120000 });
+    } finally {
+      rmSync('/tmp/dfu-small.bin', { force: true });
+    }
+  });
   test('otg_host enumerates and echoes live (F105 HCD)', async ({ page }) => {
     page.on('console', msg => { if (msg.type() === 'error') console.log('BROWSER ERR:', msg.text()); });
     await page.goto('http://localhost:8765/');

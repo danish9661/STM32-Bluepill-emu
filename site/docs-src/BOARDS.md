@@ -22,12 +22,12 @@ see `docs/USAGE.md`). Timing stays instruction-budget based on every chip.
 Silicon peripheral set vs emulator coverage, wiring, demos and quirks —
 one page per board:
 
-- [Blue Pill](boards/blue-pill.md) — reference target, 28 presets
-- [GD32F103C8](boards/gd32f103c8.md) — clone contract, 28 presets
-- [Maple Mini](boards/maple-mini.md) — D33 LED, USB-DFU note, 28 presets
-- [Nucleo-F103RB](boards/nucleo-f103rb.md) — USART2 Serial, Arduino headers, 28 presets
-- [Generic F103RC](boards/f103rc.md) — high-density set (DAC/FSMC/ADC3/SDIO/UART4-5/SPI3), 29 presets
-- [STM32F105](boards/f105.md) — CAN2 + OTG notes, SVD map, 25 presets
+- [Blue Pill](boards/blue-pill.md) — reference target, 29 presets
+- [GD32F103C8](boards/gd32f103c8.md) — clone contract, 29 presets
+- [Maple Mini](boards/maple-mini.md) — D33 LED, USB-DFU note, 29 presets
+- [Nucleo-F103RB](boards/nucleo-f103rb.md) — USART2 Serial, Arduino headers, 29 presets
+- [Generic F103RC](boards/f103rc.md) — high-density set (DAC/FSMC/ADC3/SDIO/UART4-5/SPI3), 30 presets
+- [STM32F105](boards/f105.md) — CAN2 + OTG notes, SVD map, 26 presets
 
 The page shows the live chip (`label · ID … · flash/RAM`) in the stats bar
 after every load, and the GPIO grid renders Arduino aliases from

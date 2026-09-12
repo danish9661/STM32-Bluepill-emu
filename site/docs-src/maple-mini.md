@@ -16,13 +16,14 @@ Arduino aliases for this board live in `site/board_pins.json`
 - BUT button: **PB8** (physical; the Arduino variant leaves `USER_BTN`
   undefined)
 - `Serial` = **USART1** — the page terminal shows it
-- Native USB port (Maple's USB DFU uploader is *not* emulated — flashing
-  transports are out of scope; our [bootloader](../USAGE.md#system-memory-bootloader-an3155-usart-flow-no-hardware)
+- Native USB port (Maple-style DFU download works end to end — see the
+  `dfu` preset; the factory ROM binary itself is not emulated, and our
+  [bootloader](../USAGE.md#system-memory-bootloader-an3155-usart-flow-no-hardware)
   speaks the USART AN3155 flow instead)
 
-## Demos on this chip (28 presets)
+## Demos on this chip (29 presets)
 
-All 24 shared presets plus the Maple builds: `board_maple`,
+All 25 shared presets plus the Maple builds: `board_maple`,
 `board_maple_echo`, `board_maple_showcase`, `board_maple_rtc`.
 (USB/OTG presets show on every chip but only function where the
 peripheral is mapped — see the matrix.)
@@ -56,7 +57,7 @@ as marked. Depth: [PERIPHERALS](../PERIPHERALS.md).
 | DWT CYCCNT | Yes | Partial | CYCCNT +1/latency from FLASH ACR; ITM/ETM/TPIU absent |
 | ITM stimulus port 0 | Yes | Full | TER+TCR-gated printf bytes as `ItmByte` events |
 | Debug (SWD/JTAG, ETM trace) | Yes | IDCODE only | DBGMCU `0x10016410`; use the GDB stub instead |
-| USB DFU uploader (factory bootloader) | Yes (ROM) | Out of scope | flashing transports not emulated; offset-vector boot covers DFU layouts; USART AN3155 bootloader IS modeled |
+| USB DFU uploader (factory bootloader) | Yes (ROM) | Full workflow | the ROM binary itself isn't emulated, but the DFU download ritual is real end-to-end: `arduino_dfu` firmware speaks DFU DNLOAD/manifest over EP0 with true flash unlock/program sequencing (`tests/test_dfu.mjs` 51/51), and the page plays host (file or pattern → manifest). Offset-vector boot covers DFU layouts; USART AN3155 bootloader IS modeled |
 | RCC (HSI/HSE/PLL ×2–16, prescalers, CSS) | Yes | Full | clocks queryable (`rcc_clocks_hz`); MCO selection queryable (`rcc_mco_hz`, pin wave out of scope) |
 | FLASH 128K (program/erase, WRPRTERR) | Yes | Full | OBR USER settable; WDG_SW clear runs IWDG from reset |
 | PWR (PVD, Sleep/Stop/Standby) | Yes | Full | PVD PLS thresholds vs settable supply (`pwr_set_supply_mv`) →EXTI16; SLEEPDEEP freezes timers (RTC+IWDG keep running); standby wakes on WKUP/RTC only |
@@ -96,4 +97,4 @@ as marked. Depth: [PERIPHERALS](../PERIPHERALS.md).
 | FSMC (NOR/NAND/PC-card) | No (HD 100-pin+) | Full | superset (needs image); MBKEN/WREN + ECC accum |
 | SDIO (+MMC, DMA2) | No (HD only) | Full | superset (needs image); SDHC block + SDSC byte addressing (CSD v1) |
 | LED / button / Serial | PB1=D33 / PB8 / USART1 | Full | aliases in `board_pins.json` (`maple_mini` key) |
-| Native USB port (DFU) | Yes | Out of scope | see DFU-uploader row above |
+| Native USB port (DFU) | Yes | Full | `dfu` preset: page downloads firmware images into the bootloader live |

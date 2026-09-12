@@ -326,11 +326,11 @@ timing, interrupts and electrical behaviour, all in one WebAssembly module.</p>
 <h2>At a glance</h2>
 <div class="stat-grid">
     <div class="stat"><b>~70 MIPS</b><span>headless (200M/~2.9s)</span></div>
-    <div class="stat"><b>591/591</b><span>unit test asserts</span></div>
+    <div class="stat"><b>719/719</b><span>unit test asserts</span></div>
     <div class="stat"><b>39/39</b><span>integration checks</span></div>
     <div class="stat"><b>8</b><span>chip variants</span></div>
-    <div class="stat"><b>39</b><span>browser demo presets</span></div>
-    <div class="stat"><b>40</b><span>Full-coverage peripherals</span></div>
+    <div class="stat"><b>43</b><span>browser demo presets</span></div>
+    <div class="stat"><b>41</b><span>Full-coverage peripherals</span></div>
 </div>
 
 <h2>How it works</h2>
@@ -469,10 +469,10 @@ timing, interrupts and electrical behaviour, all in one WebAssembly module.</p>
 <tr><td class="n">GPIO</td><td>A &ndash; D</td>
     <td>Electrical model: pull-up/down, floating, open-drain, push-pull output, slew transitions. BSRR/BRR atomics. EXTI edge generation.</td>
     <td><span class="tag">Full</span></td></tr>
-<tr><td class="n">USART</td><td>1 &ndash; 3</td>
+<tr><td class="n">USART</td><td>1 &ndash; 5</td>
     <td>TXE/TC/RXNE flags, baud-rate byte-time pacing, overrun, TX/RX DMA. External probe for bidirectional data.</td>
     <td><span class="tag">Full</span></td></tr>
-<tr><td class="n">SPI</td><td>1, 2</td>
+<tr><td class="n">SPI</td><td>1 &ndash; 3</td>
     <td>Master mode, 8/16-bit, CPOL/CPHA, NSS software control. External device bus (flash, touchscreen, LCD).</td>
     <td><span class="tag">Full</span></td></tr>
 <tr><td class="n">I2C</td><td>1, 2</td>
@@ -481,7 +481,7 @@ timing, interrupts and electrical behaviour, all in one WebAssembly module.</p>
 <tr><td class="n">TIM</td><td>1, 2 &ndash; 14</td>
     <td>Up/down/center-aligned counting, PWM output, input capture, output compare, TRGO triggers (ADC, DMA), ARR/CCR registers, prescaler.</td>
     <td><span class="tag">Full</span></td></tr>
-<tr><td class="n">ADC</td><td>1, 2</td>
+<tr><td class="n">ADC</td><td>1 &ndash; 3</td>
     <td>Real conversion state machine (Tconv = SMP + 12.5 cycles), per-sequence channels (SQ1-16), EOC/EOCS, AWD, CONT, SWSTART. External triggers from TIM/EXTI. DAC loopback.</td>
     <td><span class="tag">Full</span></td></tr>
 <tr><td class="n">DAC</td><td>1, 2</td>
@@ -548,7 +548,13 @@ timing, interrupts and electrical behaviour, all in one WebAssembly module.</p>
     <td>Window watchdog: window size, counter, early interrupt.</td>
     <td><span class="tag">Full</span></td></tr>
 <tr><td class="n">USB</td><td>FS device</td>
-    <td>EP0&ndash;7 toggle semantics, 512&nbsp;B PMA, RESET, SETUP/OUT injection, IN completion events, SOF engine + suspend/resume, double-buffered bulk, isochronous. CDC-ACM demo + page USB host.</td>
+    <td>EP0&ndash;7 toggle semantics, 1024&nbsp;B PMA, RESET, SETUP/OUT injection, IN completion events, SOF engine + suspend/resume, double-buffered bulk, isochronous, detach + ESOF. CDC-ACM + DFU bootloader demos + page USB host.</td>
+    <td><span class="tag">Full</span></td></tr>
+<tr><td class="n">OTG_FS</td><td>host + device</td>
+    <td>Synopsys core: 8 host channels, device EP0&ndash;3, GRXSTSP queue, shared DFIFOs, SOF engine. Bare-metal HCD + CDC demos with scripted virtual peers.</td>
+    <td><span class="tag">Full</span></td></tr>
+<tr><td class="n">ITM</td><td>stimulus port 0</td>
+    <td>Firmware <code>printf</code> channel draining as host-side events.</td>
     <td><span class="tag">Full</span></td></tr>
 </tbody>
 </table>
@@ -632,8 +638,8 @@ emu.<span class="n">close</span>();                        <span class="c">// fr
 The live demo (<a href="index.html">index.html</a>) runs entirely in the browser with no server needed &mdash; just open the page or serve it with <code>python3 -m http.server -d site</code>. Worker off-thread + OffscreenCanvas + adaptive batch + <code>batch_size</code> option (<code>site/worker.js:1</code>, <code>pkg/emulator.js</code>) — see <code>docs/USAGE.md</code>.
 </p>
 
-<h3>26 built-in presets</h3>
-<p style="font-size:13px; color:#54678a; margin-bottom:8px;">Starter ten below — plus TIM DMA-burst PWM, servo, RTC clock, DAC sine, I2C scanner/slave, CAN chat, dual-CAN, USB CDC, Mini-RTOS, SD logger and per-board builds (Blue Pill, Maple Mini, Nucleo, F103RC).</p>
+<h3>43 built-in presets</h3>
+<p style="font-size:13px; color:#54678a; margin-bottom:8px;">Starter ten below — plus TIM DMA-burst PWM, servo, RTC clock, DAC sine, I2C scanner/slave, CAN chat, dual-CAN, USB CDC/serial, OTG CDC/host, DFU bootloader, Mini-RTOS, SD logger and per-board builds (Blue Pill, Maple Mini, Nucleo, F103RC).</p>
 <table class="ptable">
 <thead>
 <tr><th>Preset</th><th>Description</th></tr>
@@ -659,7 +665,7 @@ The live demo (<a href="index.html">index.html</a>) runs entirely in the browser
     <li><strong>GPIO panel</strong> &mdash; live readout of all 32 pins across ports A&ndash;D with colour-coded modes (output high, output low, input).</li>
     <li><strong>UART terminal</strong> &mdash; real-time serial output with a text input for RX injection.</li>
     <li><strong>Showcase peripherals</strong> &mdash; live OLED/LCD canvas, 7-segment display, RGB bar, buzzer indicator, button widget with EXTI13 interrupt.</li>
-    <li><strong>Chip selector</strong> &mdash; switch between built-in STM32F103C8 and SVD-based STM32F105 (with CAN2) at load time.</li>
+    <li><strong>Chip selector</strong> &mdash; switch between six chips (Blue Pill C8/CB, Maple Mini, Nucleo, F103RC, GD32, SVD-based F105 with CAN2 + OTG) at load time; the preset menu filters to the selected chip.</li>
 </ul>
 </div>
 
@@ -667,7 +673,7 @@ The live demo (<a href="index.html">index.html</a>) runs entirely in the browser
 <div class="card">
 <p>Beyond the built-in STM32F103C8 map, the emulator supports any STM32F1-series chip via CMSIS System View Description (SVD) files:</p>
 <ul>
-    <li><strong>Built-in map</strong> &mdash; STM32F103C8 with hardcoded register addresses, always works, no external files needed.</li>
+    <li><strong>Built-in map</strong> &mdash; STM32F103C8 with hardcoded register addresses, always works, no external files needed. A chip table adds C8/CB, Maple Mini, Nucleo-F103RB, F103RC and GD32F103C8/CB/RB variants (flash/RAM sizes + DBGMCU IDCODE) on the same map.</li>
     <li><strong>SVD-based map</strong> &mdash; parse any STM32F1xx SVD file to generate a peripheral map at runtime. Ships with <code>STM32F103.svd</code> and <code>STM32F105xx.svd</code> (connectivity line, CAN2).</li>
     <li><strong>Auto-registration</strong> &mdash; if an SVD omits ARM core peripherals (NVIC, SysTick, SCB at <code>0xE000Exxx</code>), the emulator registers them automatically. This fixed <code>millis()</code>/PendSV silently breaking on the F105 SVD.</li>
     <li><strong>Last-wins overlap</strong> &mdash; custom or SVD peripherals can shadow built-in entries, enabling per-chip overrides.</li>
@@ -707,7 +713,7 @@ The emulator has a three-tier test suite that runs in CI on every push:
 
 <h3>Unit tests &mdash; <code>node tests/test_all.mjs</code></h3>
 <div class="card">
-<p><strong>565 asserts</strong> covering every peripheral in isolation: GPIO electrical model, pin events, USART TX/RX (incl. HDSEL loopback, LIN, IrDA/smartcard registers), ADC conversion timing, RC sample-and-hold, DAC&rarr;ADC loopback, external triggers (TIM/EXTI), RCC, SysTick, all timer modes, NVIC priority dispatch, CRC, SPI (incl. TI frame format), I2C state machine (incl. slave mode, 10-bit, PEC, SMBus ALERT), RTC alarm, PWR/FLASH, CAN mailboxes + filters, DMA pump, AFIO, EXTI, BKP, DAC, TIM6, FSMC, SDIO, USB, deep-sleep gating and fault escalation.</p>
+<p><strong>719 asserts</strong> covering every peripheral in isolation: GPIO electrical model, pin events, USART TX/RX (incl. HDSEL loopback, LIN, IrDA/smartcard registers), ADC conversion timing, RC sample-and-hold, DAC&rarr;ADC loopback, external triggers (TIM/EXTI), RCC, SysTick, all timer modes, NVIC priority dispatch, CRC, SPI (incl. TI frame format), I2C state machine (incl. slave mode, 10-bit, PEC, SMBus ALERT), RTC alarm, PWR/FLASH, CAN mailboxes + filters, DMA pump, AFIO, EXTI, BKP, DAC, TIM6, FSMC, SDIO, USB, deep-sleep gating and fault escalation, plus DMA circular mode, GPIO LCKR, AFIO SWJ pin reservation, UID, MCO/RCC clock tree, PVD levels, WKUP/standby gating, SPI NSS output, CAN silent modes, TIM dead-time, ADC discontinuous/JAUTO, SDSC cards, ITM stimulus, ESOF and the HD/CL superset (UART4/5, TIM5, ADC3, CAN2, OTG) on the builtin map.</p>
 </div>
 
 <h3>Firmware integration &mdash; <code>node tests/canary.mjs</code></h3>
@@ -724,7 +730,7 @@ The emulator has a three-tier test suite that runs in CI on every push:
 <div class="card">
 <ul>
     <li><code>cargo check</code> &mdash; Rust compilation sanity</li>
-    <li><code>tests/test_all.mjs</code> &mdash; 565 unit asserts</li>
+    <li><code>tests/test_all.mjs</code> &mdash; 719 unit asserts</li>
     <li><code>tests/canary.mjs</code> &mdash; 39/39 firmware checks</li>
     <li>200M full run &mdash; <code>echo -n "AB" | node pkg/cli.mjs --config=... --max=200000000</code></li>
     <li><code>tests/test_emulator_js.mjs</code> &mdash; browser run-loop path (createEmulator + run)</li>

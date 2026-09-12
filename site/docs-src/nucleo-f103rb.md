@@ -15,9 +15,9 @@ live in `site/board_pins.json` (`nucleo_f103rb` key).
 - ST-Link USB (debug probe hardware is out of scope — use the
   [GDB stub](../GDB.md) instead)
 
-## Demos on this chip (28 presets)
+## Demos on this chip (29 presets)
 
-All 24 shared presets plus the Nucleo builds: `board_nucleo`,
+All 25 shared presets plus the Nucleo builds: `board_nucleo`,
 `board_nucleo_echo`, `board_nucleo_showcase`, `board_nucleo_rtc`.
 (USB/OTG presets show on every chip but only function where the
 peripheral is mapped — see the matrix.)

@@ -24,6 +24,7 @@ tests/arduino_i2c_scan/build/
 tests/arduino_can_chat/build/
 tests/arduino_stopwatch/build/
 tests/arduino_usb_cdc/build/
+tests/arduino_dfu/build/
 tests/arduino_pwm_wave/build/
 tests/arduino_i2c_slave/build/
 tests/arduino_mini_rtos/build/
