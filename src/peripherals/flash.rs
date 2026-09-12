@@ -42,12 +42,13 @@ impl Flash {
 
 impl Default for Flash {
     fn default() -> Self {
-        Self { acr: 0, keyr: 0, optkeyr: 0, sr: 0, cr: 0x80, ar: 0, obr: 0, wrpr: 0, key_step: 0 }
+        Self { acr: 0, keyr: 0, optkeyr: 0, sr: 0, cr: 0x80, ar: 0, obr: 0x03FF_FFFF, wrpr: 0, key_step: 0 }
     }
 }
 
 impl Peripheral for Flash {
     fn flash_latency(&self) -> u32 { self.acr & 7 }
+    fn flash_wdg_hw(&self) -> bool { (self.obr >> 2) & 1 == 0 }
     fn read(&mut self, _sys: &System, offset: u32) -> u32 {
         match offset {
             0x00 => self.acr,
@@ -112,7 +113,13 @@ impl Peripheral for Flash {
             }
             0x10 => self.ar = value,
             0x14 => self.optkeyr = value,
-            0x1C => self.obr |= value,
+            0x1C => {
+                // USER option byte [9:2] (WDG_SW=2, nRST_STOP=3,
+                // nRST_STDBY=4): directly settable under the lenient
+                // option-programming model; other status bits accumulate.
+                // Default erased state (all set) = software watchdog.
+                self.obr = ((self.obr | value) & !0x3FC) | (value & 0x3FC);
+            }
             0x20 => self.wrpr = value,
             _ => {}
         }

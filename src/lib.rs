@@ -415,6 +415,9 @@ pub fn gpio_take_pin_events() -> Vec<u32> {
 ///  17 FsmcAccess    [17, bank, offset, write, size, value]
 ///  18 UsbIn         [18, ep, len, bytes...]   (device->host IN completion)
 ///  19 I2cAlert      [19, channel, asserted] (SMBus SMBA drive edge)
+///  20 HostTx        [20, ch, ep, setup, len, bytes...] (host OUT/SETUP done)
+///  21 HostRx        [21, ch, ep, len]       (host IN token: feed an answer)
+///  22 ItmByte       [22, port, byte]        (ITM stimulus printf channel)
 #[wasm_bindgen]
 pub fn drain_events() -> Vec<i32> {
     match try_sys() {
@@ -479,6 +482,11 @@ pub fn drain_events() -> Vec<i32> {
                         out.push(*ch as i32);
                         out.push(*ep as i32);
                         out.push(*len as i32);
+                    }
+                    VmEvent::ItmByte { port, byte } => {
+                        out.push(22);
+                        out.push(*port as i32);
+                        out.push(*byte as i32);
                     }
                 }
             }
@@ -694,6 +702,15 @@ pub fn rcc_clocks_hz() -> Vec<u32> {
     }
 }
 
+/// MCO pin output in Hz from CFGR[26:24] (0 = no clock output).
+#[wasm_bindgen]
+pub fn rcc_mco_hz() -> u32 {
+    match try_sys() {
+        Some(sys) => sys.p.rcc_mco(),
+        None => 0,
+    }
+}
+
 /// Current PWM duty (0-100) of a timer channel; 0 if addr is not a timer.
 #[wasm_bindgen]
 pub fn pwm_duty(addr: u32, channel: u32) -> u32 {
@@ -739,6 +756,13 @@ pub fn can_inject_message(addr: u32, tir: u32, tdtr: u32, tdlr: u32, tdhr: u32) 
 #[wasm_bindgen]
 pub fn rcc_fail_hse() -> bool {
     sys().p.rcc_fail_hse(&*sys())
+}
+
+/// Set the modeled PWR supply in mV (test entry point for PVD ramps
+/// across the PLS thresholds, default 3300). Returns the new PVDO level.
+#[wasm_bindgen]
+pub fn pwr_set_supply_mv(mv: u32) -> bool {
+    sys().p.pwr_set_supply(&*sys(), mv)
 }
 
 /// Enable/disable the system-memory bootloader responder (AN3155 USART

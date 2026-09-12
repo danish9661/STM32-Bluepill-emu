@@ -46,7 +46,7 @@ Full-system emulation of an STM32F103C8 (Bluepill) microcontroller running real 
 ## Current Status (all work below is committed; see git log)
 
 > Last updated: 2026-09-12. The emulator is **feature-complete and stable**:
-> 629 unit tests, 39/39 firmware checks, ~70M IPS headless (shared-box noise ±30%). Recent work:
+> 719 unit tests, 39/39 firmware checks, ~70M IPS headless (shared-box noise ±30%). Recent work:
 > `--help`/`--verbose` CLI + better errors, comprehensive About page, **removed all
 > `panic!` from user-input paths** (bad pin names / empty bus ranges now degrade
 > gracefully instead of aborting the WASM module), and an audit document
@@ -237,7 +237,7 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
   `uart_rx`/`gpio_set`/`can_inject` commands from clients. Flags: `--port`, `--max`.
   Idle when no clients connected. Rebuild requires `npm install ws` (runtime dep).
 - **`site/ws-viewer.html`**: Standalone browser page that auto-connects to the WS
-  server. Decodes all 21 event types (SPI/I2C/USART/EXTI/ADC/TIM/DAC/CRC/RTC/
+  server. Decodes all 22 event types (SPI/I2C/USART/EXTI/ADC/TIM/DAC/CRC/RTC/
   WDG/CAN/FSMC/USB/Alert/host). Renders: UART terminal, GPIO pin grid (click to toggle input),
   event log, FPS/instruction counter. Reconnects on disconnect.
 - **Usage**: `node pkg/ws-server.mjs <firmware.elf> [--port=8080]`, then open
@@ -607,6 +607,40 @@ arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino
 - **Verified**: `test_otg.mjs` 119/119, `test_otg_host.mjs` 5/5,
   `test_all.mjs` 629/629, wasm rebuilt pinned + `site/` synced;
   full gate re-run at commit.
+
+### 44. Gap sweep: builtin-map HD/CL superset + 18 peripheral gaps [this sprint]
+- **Map extension** (`src/peripherals/mod.rs`): UART4/5, TIM5, ADC3, CAN2,
+  OTG_FS join the builtin F103 map (superset rule like DAC/FSMC/SDIO) +
+  RCC clock-gate entries (dormant `clock_enabled`, as before). Verified:
+  periph39 still 39/39 (new windows collide with nothing); 17 new unit
+  asserts (UART4 event, TIM5 count/UIF, ADC3 convert, CAN2 mailbox, OTG
+  attach/detach). Side catch: `tests/test_all.mjs` JS-peripheral scratch
+  base moved `0x40006800` → `0x40008000` (CAN2 claimed it).
+- **DMA circular + HTIF** (`dma.rs`): CNDTR latched at EN rising edge;
+  CIRC completions set TCIF+HTIF, reload NDTR, keep EN (continuous).
+- **Small batch**: GPIO LCKR sequence + nibble freeze; AFIO SWJ_CFG
+  debug-pin reservation (PA13–15/PB3–4 per mode); 96-bit UID constant
+  (Peripherals-routed, writes ignored); `rcc_mco_hz()` export (100/101/
+  110/111 = SYSCLK/HSI/HSE/PLL/2); FLASH OBR USER settable + WDG_SW
+  hardware-watchdog effect; PVD PLS thresholds vs `pwr_set_supply_mv`;
+  standby (PDDS) wake gating (WKUP/RTC only) + WKUP/PA0→WUF fan-out;
+  SPI NSS hardware output (SSOE); CAN silent + silent-loopback;
+  TIM1 DTG dead-time narrowing; ADC discontinuous chunks + JAUTO (also
+  fixed a real pre-existing bug: SQR1 length read [19:16] instead of
+  [23:20], so multi-channel regular sequences always ran as length-1).
+- **Medium batch**: ITM stimulus port 0 (`itm.rs`, `ItmByte` disc 22,
+  TER+TCR gated, all JS tables + docs); SDSC byte addressing (HCS=0 →
+  ARG/blocklen, CSD v1, CCS-clear OCR); USB ESOF on detach (mask-gated);
+  TI/IrDA/smartcard/sync verified byte-identical (covered by
+  construction) + transfer tests; PVD/PWR test rewrite to threshold
+  semantics.
+- **Docs**: per-board feature matrices updated (new rows Full, no Gap
+  cells left); PERIPHERALS one-clause notes; `rcc_clocks_hz` +
+  `pwr_set_supply_mv` + `rcc_mco_hz` exports.
+- **Verified**: `test_all.mjs` 719/719, `test_otg.mjs` 120/120,
+  canary + cli 200M 39/39, coremark 5/5, census + fuzz green, browser
+  32 + 4 + 15 green. Out of scope kept: DFU/ST-Link/printer/GD32
+  quirks/ETH (hardware/transports), IrDA/TI kept as verified-identical.
 
 
 

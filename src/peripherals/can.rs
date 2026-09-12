@@ -329,10 +329,15 @@ impl Peripheral for Can {
                     let mb = self.tx[i];
                     let (id, len, data) = msg_fields(mb.tir, mb.tdtr, mb.tdlr, mb.tdhr);
                     sys.push_event(crate::system::VmEvent::CanTx { can: self.can_num(), id, len, data });
-                    // Loopback mode (LBKM, BTR.30, without SILM.31): the
-                    // transmitted frame is received into our own FIFOs
-                    // (through the filters, like silicon).
-                    if self.btr & (1 << 30) != 0 && self.btr & (1u32 << 31) == 0 {
+                    // Loopback mode (LBKM, BTR.30, with or without SILM.31):
+                    // the transmitted frame is received into our own FIFOs
+                    // (through the filters, like silicon). LBKM+SILM is the
+                    // silent self-test mode (self-reception, nothing driven
+                    // on the wire); pure silent (SILM, no LBKM) transmits
+                    // nothing, so nothing loops back — completion flags and
+                    // IRQs behave identically either way (no error counters
+                    // in the model).
+                    if self.btr & (1 << 30) != 0 {
                         self.inject_message(sys, mb.tir, mb.tdtr, mb.tdlr, mb.tdhr);
                     }
                     // TX completion edge: pend the TX IRQ once if TMEIE is

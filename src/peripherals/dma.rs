@@ -63,6 +63,9 @@ struct Channel {
     ndtr: u32,
     par: u32,
     mar: u32,
+    /// CNDTR latched at EN rising edge: circular mode reloads it on every
+    /// completion instead of stopping (silicon auto-reload).
+    ndtr_init: u32,
 }
 
 impl Channel {
@@ -130,9 +133,18 @@ impl Peripheral for Dma {
             // [base, base+nc).
             for ch in 0..nc {
                 if bits & (1 << (base + ch)) != 0 {
-                    self.isr |= 1 << (ch * 4 + 1); // TCIF
-                    self.channels[ch].cr &= !1;
-                    self.channels[ch].ndtr = 0;
+                    // Circular mode (CCR.5): the transfer passed halfway AND
+                    // completed in the same pump (whole buffer moves at once),
+                    // so both HTIF and TCIF set; NDTR reloads and EN stays
+                    // set for the next cycle instead of stopping.
+                    if self.channels[ch].cr & (1 << 5) != 0 {
+                        self.isr |= (1 << (ch * 4 + 1)) | (1 << (ch * 4 + 2));
+                        self.channels[ch].ndtr = self.channels[ch].ndtr_init;
+                    } else {
+                        self.isr |= 1 << (ch * 4 + 1); // TCIF
+                        self.channels[ch].cr &= !1;
+                        self.channels[ch].ndtr = 0;
+                    }
                 }
             }
         }
@@ -181,8 +193,14 @@ impl Peripheral for Dma {
                     if ch < nc {
                         match reg {
                             0x00 => {
+                                let was_en = self.channels[ch].cr & 1;
                                 self.channels[ch].cr = value & 0x7FFF;
                                 if value & 1 != 0 {
+                                    // Latch the reload count on EN rising edge
+                                    // (firmware programs CNDTR first, silicon order).
+                                    if was_en == 0 {
+                                        self.channels[ch].ndtr_init = self.channels[ch].ndtr;
+                                    }
                                     self.channels[ch].do_xfer(&self.name, sys, ch);
                                     let irq = self.channel_irq(ch);
                                     let cr = self.channels[ch].cr;

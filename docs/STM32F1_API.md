@@ -255,6 +255,18 @@ mcu.onHostRx = (ch, ep, len) => ...;         // IN token: peer must answer with 
   (`HostTx`: `[ch, ep, setup, len, bytes...]`) and 21 (`HostRx`:
   `[ch, ep, len]`).
 
+## ITM stimulus events
+
+```js
+mcu.onItmByte = (port, byte) => ...; // stimulus port 0 printf byte
+```
+
+- `onItmByte(port, byte)` fires when firmware writes stimulus port 0
+  (`0xE0000000`) with the port enabled (TER[0]) and the ITM on
+  (TCR.ITMENA) — the standard `ITM_SendChar` retarget path
+  (`dwt.rs`/`itm.rs`). Encoded as flat discriminant 22 (`ItmByte`:
+  `[port, byte]`). ATB/TPIU/timestamps/ports 1–31 are out of scope.
+
 ## Complete worked examples
 
 ### Virtual I2C EEPROM (write-back store)
@@ -421,7 +433,7 @@ await mcu.execute(2_000_000);
 
 ### WebSocket bridge (headless Node + browser viewer)
 
-`pkg/ws-server.mjs` runs the emulator headlessly and streams all 21 event
+`pkg/ws-server.mjs` runs the emulator headlessly and streams all 22 event
 types to connected browser clients over WebSocket. `site/ws-viewer.html`
 provides a ready-made viewer with UART terminal, GPIO pin grid, event log,
 and FPS counter. Any WebSocket client can connect and exchange JSON messages.

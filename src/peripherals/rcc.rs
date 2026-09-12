@@ -102,6 +102,29 @@ impl Rcc {
         let hclk = sys / self.ahb_div();
         (sys, hclk, hclk / self.apb_div(8), hclk / self.apb_div(11))
     }
+
+    /// MCO pin output in Hz from CFGR[26:24] (0xx = no clock output):
+    /// 100 SYSCLK, 101 HSI, 110 HSE, 111 PLL/2. The pin-level square wave
+    /// is out of scope (MHz toggling is invisible to instruction stepping);
+    /// the selection itself is modeled and queryable like the clock tree.
+    pub fn mco_hz(&self) -> u32 {
+        match (self.cfgr >> 24) & 7 {
+            4 => self.sysclk_hz(),
+            5 => HSI_HZ,
+            6 => HSE_HZ,
+            7 => {
+                let fin = if self.cfgr & (1 << 16) != 0 {
+                    if self.cfgr & (1 << 17) != 0 { HSE_HZ / 2 } else { HSE_HZ }
+                } else {
+                    HSI_HZ / 2
+                };
+                let bits = (self.cfgr >> 18) & 0xF;
+                let mul = if bits >= 14 { 16 } else { bits + 2 };
+                fin.saturating_mul(mul) / 2
+            }
+            _ => 0,
+        }
+    }
 }
 
 impl Default for Rcc {
@@ -112,6 +135,7 @@ impl Default for Rcc {
 
 impl Peripheral for Rcc {
     fn rcc_clocks(&self) -> Option<(u32, u32, u32, u32)> { Some(self.clocks_hz()) }
+    fn rcc_mco(&self) -> Option<u32> { Some(self.mco_hz()) }
     fn rcc_fail_hse(&mut self, sys: &crate::system::System) -> bool {
         self.fail_hse(sys)
     }

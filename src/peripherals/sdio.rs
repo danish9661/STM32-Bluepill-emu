@@ -75,6 +75,9 @@ pub struct Sdio {
     erase_start: u32,
     erase_end: u32,
     blocklen: u32,
+    /// Byte addressing (SDSC, ACMD41 HCS clear): command ARGs are byte
+    /// addresses divided by blocklen. Default false = SDHC block addressing.
+    byte_addr: bool,
     selected: bool,
     xfer: DataXfer,
 }
@@ -164,7 +167,8 @@ impl Sdio {
     }
 
     /// Start a read transfer: stage DLEN bytes from the card image.
-    fn start_read(&mut self, sys: &System, lba: u32) {
+    fn start_read(&mut self, sys: &System, arg: u32) {
+        let lba = self.blk(arg);
         let mut payload = vec![0u8; self.dlen as usize];
         if let Some(card) = self.find_card() {
             card.borrow().read_block(lba, &mut payload);
@@ -184,10 +188,20 @@ impl Sdio {
         }
     }
 
+    /// Command ARG to block address: SDSC byte addresses are divided by
+    /// the CMD16 block length; SDHC/MMC-sector addresses pass through.
+    fn blk(&self, arg: u32) -> u32 {
+        if self.byte_addr {
+            arg / self.blocklen.max(1)
+        } else {
+            arg
+        }
+    }
+
     /// Arm a write transfer; completion lands in push_bytes at DLEN.
     fn start_write(&mut self, sys: &System) {
         let dlen = self.dlen as usize;
-        let lba = self.arg;
+        let lba = self.blk(self.arg);
         self.xfer = DataXfer { active: true, write: true, lba, rx: Vec::new(), rx_pos: 0, tx: Vec::with_capacity(dlen) };
         if self.dctrl & (1 << 3) != 0 {
             sys.p.dma_request(sys, SDIO_DMA_CHANNEL);
@@ -224,6 +238,7 @@ impl Sdio {
             0 => { // GO_IDLE_STATE: no response.
                 self.acmd41_polls = 0;
                 self.cmd1_polls = 0;
+                self.byte_addr = false;
                 self.card_mode = MODE_UNKNOWN;
                 self.selected = false;
                 self.raise(sys, F_CMDSENT);
@@ -271,14 +286,18 @@ impl Sdio {
                     self.raise(sys, F_CMDREND);
                 }
             }
-            9 => { // SEND_CSD: R2.
-                let csd = card.borrow().csd();
+            9 => { // SEND_CSD: R2 (v1 layout for byte-addressed SDSC).
+                let csd = if self.byte_addr && self.card_mode == MODE_SD {
+                    card.borrow().csd_v1()
+                } else {
+                    card.borrow().csd()
+                };
                 self.resp = csd;
                 self.raise(sys, F_CMDREND);
             }
             16 => { // SET_BLOCKLEN.
-                if self.arg == 512 {
-                    self.blocklen = 512;
+                if (1..=512).contains(&self.arg) {
+                    self.blocklen = self.arg;
                 }
                 self.resp[0] = R1_READY_TRAN;
                 self.raise(sys, F_CMDREND);
@@ -295,9 +314,9 @@ impl Sdio {
             }
             38 => { // ERASE: fill the latched range with erased (0xFF) state.
                 let (lo, hi) = if self.erase_start <= self.erase_end {
-                    (self.erase_start, self.erase_end)
+                    (self.blk(self.erase_start), self.blk(self.erase_end))
                 } else {
-                    (self.erase_end, self.erase_start)
+                    (self.blk(self.erase_end), self.blk(self.erase_start))
                 };
                 if let Some(card) = self.find_card() {
                     let mut c = card.borrow_mut();
@@ -328,7 +347,10 @@ impl Sdio {
             41 if self.app_cmd => { // ACMD41: R3 OCR, busy for the first polls.
                 self.acmd41_polls += 1;
                 let ready = self.acmd41_polls >= 3;
-                self.resp[0] = card.borrow().ocr(ready);
+                // HCS (ARG.30) clear = standard-capacity card: byte
+                // addressing from here on, CCS clear in the OCR.
+                self.byte_addr = (self.arg & (1 << 30)) == 0;
+                self.resp[0] = card.borrow().ocr(ready, !self.byte_addr);
                 if ready {
                     self.card_mode = MODE_SD;
                 }

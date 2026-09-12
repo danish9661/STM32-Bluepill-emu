@@ -112,6 +112,7 @@ impl Default for Adc {
             jconv: None,
             dma_channel: 0,
             cap_voltage: 0,
+            disc_next: 0,
         }
     }
 }
@@ -138,6 +139,9 @@ pub struct Adc {
     /// Sampling-capacitor voltage (12-bit) held between conversions — the
     /// first sample after reset charges from 0 toward the source voltage.
     cap_voltage: u32,
+    /// Discontinuous-mode resume index: next sequence position a trigger
+    /// converts from (0 when idle/complete).
+    disc_next: usize,
 }
 
 impl Adc {
@@ -274,13 +278,21 @@ impl Adc {
 
     fn start_regular(&mut self, sys: &System) {
         if !self.adc_on() || self.conv.is_some() { return; }
-        let len = ((self.sqr1 >> 16) & 0xF) as usize + 1;
-        let ch = self.regular_channel(0);
+        let len = ((self.sqr1 >> 20) & 0xF) as usize + 1;
+        // Discontinuous mode (CR1 DISCEN, CONT clear): each trigger converts
+        // DISCNUM+1 channels, resuming where the previous chunk stopped.
+        let start = if self.cr1 & (1 << 11) != 0 && self.cr2 & (1 << 16) == 0 {
+            self.disc_next.min(len.saturating_sub(1))
+        } else {
+            self.disc_next = 0;
+            0
+        };
+        let ch = self.regular_channel(start);
         let cycles = self.sample_time(ch);
         let _ = self.channel_voltage(sys, ch); // source resolved at completion
         self.conv = Some(Conv {
             end_at: instruction_count() + cycles as u64,
-            pos: 0,
+            pos: start,
             len,
             cycles,
             cap_start: self.cap_voltage,
@@ -354,9 +366,19 @@ impl Adc {
         }
         if last {
             self.conv = None;
+            self.disc_next = 0;
             if self.cr2 & (1 << 16) != 0 {
                 self.start_regular(sys); // CONT: restart the sequence
+            } else if self.cr1 & (1 << 10) != 0 {
+                self.start_injected(sys); // JAUTO: injected follows regular
             }
+        } else if self.cr1 & (1 << 11) != 0 && self.cr2 & (1 << 16) == 0
+            && (c.pos + 1) % (((self.cr1 >> 13) & 7) as usize + 1) == 0
+        {
+            // Discontinuous chunk of DISCNUM+1 complete: suspend until the
+            // next trigger (CONT clear; CONT restarts the whole sequence).
+            self.conv = None;
+            self.disc_next = c.pos + 1;
         } else {
             let ch = self.regular_channel(c.pos + 1);
             let cycles = self.sample_time(ch);
@@ -510,7 +532,14 @@ impl Peripheral for Adc {
             0x04 => { self.cr1 = value; self.fire_interrupts(sys); }
             0x08 => {
                 // CAL (bit 2) and RSTCAL (bit 3) self-clear on real hardware
+                let was_on = self.cr2 & 1 != 0;
                 self.cr2 = value & !((1 << 2) | (1 << 3));
+                // Powering down aborts any in-flight conversion and resets
+                // the discontinuous sequencer.
+                if was_on && value & 1 == 0 {
+                    self.conv = None;
+                    self.disc_next = 0;
+                }
                 if value & (1 << 22) != 0 {
                     self.start_regular(sys); // SWSTART
                 }

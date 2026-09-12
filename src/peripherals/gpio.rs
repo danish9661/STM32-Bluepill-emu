@@ -233,6 +233,12 @@ impl GpioPorts {
             if port == 2 && pin == 13 {
                 sys.p.bkp_tamper(sys, rising);
             }
+            // PA0 doubles as the WKUP pin: rising edges latch WUF when EWUP
+            // is set (PWR decides); EXTI0 delivery itself is standby-gated
+            // in fire_line, so no mode check is needed here.
+            if port == 0 && pin == 0 {
+                sys.p.pwr_wkup_edge(sys, rising);
+            }
         }
     }
 
@@ -270,6 +276,11 @@ pub struct Gpio {
     bsrr: u32,
     brr: u32,
     lckr: u32,
+    /// LCKR lock-sequence progress (0-2) + last written key. The lock
+    /// itself lives in `lckr` (LCKK bit 16 + frozen LCK bits) and only a
+    /// reset clears it; sequence writes never touch locked state.
+    lck_seq: u8,
+    lck_last: u32,
 }
 
 impl Gpio {
@@ -296,6 +307,88 @@ impl Gpio {
             ((self.crl >> (pin * 4 + 2)) & 0b11) as u8
         } else {
             ((self.crh >> ((pin - 8) * 4 + 2)) & 0b11) as u8
+        }
+    }
+
+    /// Nibble mask of LCKR-locked pins for CRL (pins 0-7).
+    fn lock_mask_lo(&self) -> u32 {
+        let mut m = 0u32;
+        for pin in 0..8 {
+            if self.lckr & (1 << pin) != 0 {
+                m |= 0xF << (pin * 4);
+            }
+        }
+        m
+    }
+
+    /// Nibble mask of LCKR-locked pins for CRH (pins 8-15).
+    fn lock_mask_hi(&self) -> u32 {
+        let mut m = 0u32;
+        for pin in 8..16 {
+            if self.lckr & (1 << pin) != 0 {
+                m |= 0xF << ((pin - 8) * 4);
+            }
+        }
+        m
+    }
+
+    /// Debug-port reservation (AFIO MAPR SWJ_CFG): with the debug port
+    /// enabled these pins belong to SWJ/JTAG, and GPIO configuration
+    /// writes to them are ignored (real HW behavior).
+    /// 000 full SWJ: PA13/14/15 + PB3/4 reserved. 001 (no NJTRST): PB4
+    /// free. 010 (JTAG off, SW on): PA15/PB3/PB4 free, PA13/14 stay SWD.
+    /// 100 (all off): all five free. Other codes behave like 000.
+    fn dbg_reserved(port: u8, pin: u8, sys: &System) -> bool {
+        let swj = sys.p.afio_swj_cfg();
+        match (port, pin) {
+            (0, 13) | (0, 14) => swj != 0b100,
+            (0, 15) | (1, 3) => swj != 0b010 && swj != 0b100,
+            (1, 4) => swj != 0b001 && swj != 0b010 && swj != 0b100,
+            _ => false,
+        }
+    }
+
+    /// Nibble mask of debug-reserved pins for CRL (pins 0-7).
+    fn swj_mask_lo(&self, sys: &System) -> u32 {
+        let mut m = 0u32;
+        for pin in 0..8 {
+            if Self::dbg_reserved(self.port, pin, sys) {
+                m |= 0xF << (pin * 4);
+            }
+        }
+        m
+    }
+
+    /// Nibble mask of debug-reserved pins for CRH (pins 8-15).
+    fn swj_mask_hi(&self, sys: &System) -> u32 {
+        let mut m = 0u32;
+        for pin in 8..16 {
+            if Self::dbg_reserved(self.port, pin, sys) {
+                m |= 0xF << ((pin - 8) * 4);
+            }
+        }
+        m
+    }
+
+    /// LCKR lock sequence (RM0008): write LCKK+LCK, then LCK alone, then
+    /// LCKK+LCK again with the same key. Completion freezes those pins'
+    /// CRL/CRH nibbles until reset; anything else just restarts tracking.
+    fn write_lckr(&mut self, value: u32) {
+        let key = value & 0xFFFF;
+        let kk = value & 0x1_0000 != 0;
+        if kk && self.lck_seq != 1 {
+            if self.lck_seq == 2 && key == self.lck_last {
+                self.lckr = key | 0x1_0000;
+                self.lck_seq = 0;
+            } else {
+                self.lck_seq = 1;
+                self.lck_last = key;
+            }
+        } else if !kk && self.lck_seq == 1 && key == self.lck_last {
+            self.lck_seq = 2;
+        } else {
+            self.lck_seq = 0;
+            self.lck_last = key;
         }
     }
 
@@ -382,12 +475,16 @@ impl Peripheral for Gpio {
         match offset {
             0x00 => {
                 let old = self.crl;
-                self.crl = value;
+                // Locked pins keep their configuration nibbles (LCKR);
+                // debug-reserved pins ignore GPIO config (SWJ owns them).
+                let locked = self.lock_mask_lo() | self.swj_mask_lo(sys);
+                let new = (value & !locked) | (old & locked);
+                self.crl = new;
                 let mut gpio = sys.p.gpio.borrow_mut();
                 // Mode change re-drives pins now in output mode with their ODR
                 // level (real HW behavior); write_port records pin events only
                 // when the driven level actually changes.
-                Self::iter_port_reg_changes(old, value, 4, |pin, _| {
+                Self::iter_port_reg_changes(old, new, 4, |pin, _| {
                     if self.pin_is_output(pin) {
                         gpio.write_port(sys, self.port, pin, ((self.odr >> pin) & 1) != 0, !self.pin_is_af(pin));
                     }
@@ -395,9 +492,11 @@ impl Peripheral for Gpio {
             }
             0x04 => {
                 let old = self.crh;
-                self.crh = value;
+                let locked = self.lock_mask_hi() | self.swj_mask_hi(sys);
+                let new = (value & !locked) | (old & locked);
+                self.crh = new;
                 let mut gpio = sys.p.gpio.borrow_mut();
-                Self::iter_port_reg_changes(old, value, 4, |pin, _| {
+                Self::iter_port_reg_changes(old, new, 4, |pin, _| {
                     let pin = pin + 8;
                     if self.pin_is_output(pin) {
                         gpio.write_port(sys, self.port, pin, ((self.odr >> pin) & 1) != 0, !self.pin_is_af(pin));
@@ -447,7 +546,7 @@ impl Peripheral for Gpio {
                 self.odr &= !value;
                 self.brr = value;
             }
-            0x18 => self.lckr = value,
+            0x18 => self.write_lckr(value),
             _ => {}
         }
     }

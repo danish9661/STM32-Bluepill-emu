@@ -27,6 +27,7 @@ pub mod usb;
 pub mod otg;
 pub mod sdio;
 pub mod dwt;
+pub mod itm;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -128,12 +129,23 @@ pub trait Peripheral {
     fn pwr_standby_selected(&self) -> bool { false }
     /// PWR low-power regulator selection (CR LPDS bit) for STOP current.
     fn pwr_regulator_low_power(&self) -> bool { false }
+    /// PWR EWUP bit (CSR.8): WKUP pin armed. Only PWR implements meaningfully.
+    fn pwr_ewup(&self) -> bool { false }
+    /// PWR WKUP-pin edge (latches WUF when EWUP is set). Only PWR implements.
+    fn pwr_wkup_edge(&mut self, _sys: &System, _rising: bool) {}
     /// Configured (sysclk, hclk, pclk1, pclk2) in Hz, if this is RCC.
     fn rcc_clocks(&self) -> Option<(u32, u32, u32, u32)> { None }
+    /// MCO pin output in Hz, if this is RCC.
+    fn rcc_mco(&self) -> Option<u32> { None }
     /// Returns AFIO MAPR remap bits for this peripheral, if applicable.
     fn periph_remap(&self, _sys: &System) -> Option<u32> { None }
     /// Returns the MAPR remap bits for a named peripheral (only AFIO implements meaningfully).
     fn remap_status(&self, _name: &str) -> Option<u32> { None }
+    /// AFIO MAPR SWJ_CFG debug-port mode (only AFIO implements meaningfully).
+    fn swj_cfg(&self) -> u32 { 0 }
+    /// FLASH option USER.WDG_SW clear = hardware watchdog (auto-started).
+    /// Only FLASH implements meaningfully.
+    fn flash_wdg_hw(&self) -> bool { false }
     /// Returns the current PWM duty (0-100) of a timer channel, if this is a timer.
     fn pwm_duty(&self, _channel: u32) -> Option<u32> { None }
     /// Peripheral DMA request (e.g. ADC end-of-conversion): triggers a configured
@@ -151,6 +163,9 @@ pub trait Peripheral {
     fn adc_dual_slave_complete(&mut self, _sys: &System) {}
     /// HSE clock failure injection (CSS path): true when CSS fired.
     fn rcc_fail_hse(&mut self, _sys: &System) -> bool { false }
+    /// Set the modeled supply voltage in mV (PVD entry point). Returns the
+    /// new PVDO level; only PWR implements meaningfully.
+    fn pwr_set_supply(&mut self, _sys: &System, _mv: u32) -> bool { false }
     /// FLASH ACR wait-state setting (ACR LATENCY bits) for the DWT cycle
     /// counter. Default 0 (no wait states).
     fn flash_latency(&self) -> u32 { 0 }    /// STOP-mode exit: fall back to HSI (SWS=00, SW kept).
@@ -270,6 +285,12 @@ impl Peripherals {
     /// 0x2BA01477). Routed here so both maps answer without a bus window.
     pub const DBG_IDCODE_ADDR: u32 = 0xE004_2000;
 
+    /// 96-bit device UID words @ 0x1FFFF7E8 (system memory, read-only).
+    /// Fixed constant serial (GD32's layout differs; noted, not modeled).
+    /// Routed here so both maps answer without a bus window.
+    pub const UID_ADDR: u32 = 0x1FFF_F7E8;
+    pub const UID_WORDS: [u32; 3] = [0x0031_0033, 0x3231_3034, 0x3837_3635];
+
     pub const MEMORY_MAPS: [(u32, u32); 2] = [
         (0x4000_0000, 0xB000_0000),
         (0xE000_0000, 0xE100_0000),
@@ -343,6 +364,7 @@ impl Peripherals {
             ("SysTick", 0xE000_E010u32, 0x20u32),
             ("SCB", 0xE000_ED00u32, 0x100u32),
             ("DWT", 0xE000_1000u32, 0x1000u32),
+            ("ITM", 0xE000_0000u32, 0x1000u32),
         ] {
             if peripherals.bus.get_mut().get(base).is_none() {
                 if let Some(p) = Self::build_peripheral(name, ext_devices, &mut peripherals.gpio.borrow_mut()) {
@@ -387,6 +409,7 @@ impl Peripherals {
             .or_else(|| Dac::new(name))
             .or_else(|| Sdio::new(name))
             .or_else(|| Dwt::new(name))
+            .or_else(|| Itm::new(name))
     }
 
     pub fn new_wasm(gpio: GpioPorts, ext_devices: &ExtDevices) -> Self {
@@ -401,14 +424,15 @@ impl Peripherals {
 
         let mut regs: Vec<(u32, &str)> = vec![
             (0x4000_0000, "TIM2"),  (0x4000_0400, "TIM3"),  (0x4000_0800, "TIM4"),
-            (0x4000_1000, "TIM6"),  (0x4000_1400, "TIM7"),
+            (0x4000_0C00, "TIM5"),  (0x4000_1000, "TIM6"),  (0x4000_1400, "TIM7"),
             (0x4000_2800, "RTC"),  (0x4000_2C00, "WWDG"),  (0x4000_3000, "IWDG"),
             (0x4000_3800, "SPI2"),
             (0x4000_3C00, "SPI3"),
             (0x4000_4400, "USART2"), (0x4000_4800, "USART3"),
+            (0x4000_4C00, "UART4"), (0x4000_5000, "UART5"),
             (0x4000_5400, "I2C1"), (0x4000_5800, "I2C2"),
             (0x4000_5C00, "USB"),
-            (0x4000_6400, "CAN1"),
+            (0x4000_6400, "CAN1"), (0x4000_6800, "CAN2"),
             (0x4000_6C00, "BKP"),
             (0x4000_7000, "PWR"),
             (0x4000_7400, "DAC"),
@@ -419,12 +443,13 @@ impl Peripherals {
             (0x4001_2400, "ADC1"), (0x4001_2800, "ADC2"),
             (0x4001_2C00, "TIM1"),
             (0x4001_3000, "SPI1"),
-            (0x4001_3800, "USART1"),
+            (0x4001_3800, "USART1"), (0x4001_3C00, "ADC3"),
             (0x4001_8000, "SDIO"),
             (0x4002_0000, "DMA1"), (0x4002_0400, "DMA2"),
             (0x4002_1000, "RCC"),  (0x4002_2000, "FLASH"),
             (0x4002_3000, "CRC"),
             (0xE000_1000, "DWT"),
+            (0xE000_0000, "ITM"),
             (0xE000_E000, "NVIC"), (0xE000_E010, "SysTick"), (0xE000_ED00, "SCB"),
         ];
         regs.sort_by_key(|k| k.0);
@@ -435,6 +460,8 @@ impl Peripherals {
                 .unwrap_or(0x100);
             // USB needs registers + 1024 B packet-memory window (ends at CAN1 start).
             let size = if name == "USB" { 0x800 } else { size };
+            // ITM needs the full 4K stimulus block (TER/TPR/TCR live above +0xE00).
+            let size = if name == "ITM" { 0x1000 } else { size };
 
             let p: Option<Box<dyn Peripheral>> =
                 Self::build_peripheral(name, ext_devices, &mut peripherals.gpio.borrow_mut());
@@ -446,6 +473,12 @@ impl Peripherals {
 
         if let Some(p) = Fsmc::new("FSMC", ext_devices) {
             peripherals.bus.get_mut().register(0x6000_0000, 0xA000_1000, false, p);
+        }
+        // OTG_FS shares the F105 register/DFIFO window. It is HD/CL-only
+        // silicon, but rides the harmless-superset rule like DAC/FSMC/SDIO
+        // so high-density firmware runs on the builtin map too.
+        if let Some(p) = Self::build_peripheral("USB_OTG", ext_devices, &mut peripherals.gpio.borrow_mut()) {
+            peripherals.bus.get_mut().register(0x5000_0000, 0x5000_5000, name_has_tick("USB_OTG"), p);
         }
 
         peripherals.bus.get_mut().finish_assert_no_overlap();
@@ -533,6 +566,7 @@ impl Peripherals {
             0x4001_1400 => (apb2enr & (1 << 5)) != 0,
             0x4001_2400 => (apb2enr & (1 << 9)) != 0,
             0x4001_2800 => (apb2enr & (1 << 10)) != 0,
+            0x4001_3C00 => (apb2enr & (1 << 15)) != 0,
             0x4001_2C00 => (apb2enr & (1 << 11)) != 0,
             0x4001_3000 => (apb2enr & (1 << 12)) != 0,
             0x4001_3800 => (apb2enr & (1 << 14)) != 0,
@@ -540,6 +574,7 @@ impl Peripherals {
             0x4000_0000 => (apb1enr & 1) != 0,
             0x4000_0400 => (apb1enr & (1 << 1)) != 0,
             0x4000_0800 => (apb1enr & (1 << 2)) != 0,
+            0x4000_0C00 => (apb1enr & (1 << 3)) != 0,
             0x4000_1000 | 0x4000_1400 => true,
             0x4000_2800 => (apb1enr & (1 << 9)) != 0,
             0x4000_2C00 => (apb1enr & (1 << 11)) != 0,
@@ -547,9 +582,12 @@ impl Peripherals {
             0x4000_3800 => (apb1enr & (1 << 14)) != 0,
             0x4000_4400 => (apb1enr & (1 << 17)) != 0,
             0x4000_4800 => (apb1enr & (1 << 18)) != 0,
+            0x4000_4C00 => (apb1enr & (1 << 19)) != 0,
+            0x4000_5000 => (apb1enr & (1 << 20)) != 0,
             0x4000_5400 => (apb1enr & (1 << 21)) != 0,
             0x4000_5800 => (apb1enr & (1 << 22)) != 0,
             0x4000_6400 => (apb1enr & (1 << 25)) != 0,
+            0x4000_6800 => (apb1enr & (1 << 26)) != 0,
             0x4000_6C00 => (apb1enr & (1 << 27)) != 0,
             0x4000_7000 => (apb1enr & (1 << 28)) != 0,
             0x4000_7400 => (apb1enr & (1 << 29)) != 0,
@@ -589,6 +627,9 @@ impl Peripherals {
         }
         if addr == Self::DBG_IDCODE_ADDR {
             return crate::dbg_idcode();
+        }
+        if (Self::UID_ADDR..Self::UID_ADDR + 12).contains(&addr) && addr % 4 == 0 {
+            return Self::UID_WORDS[((addr - Self::UID_ADDR) / 4) as usize];
         }
         // NVIC priority registers are byte-addressable, bypass alignment
         if Self::nvic_priority_check(addr) {
@@ -722,6 +763,15 @@ impl Peripherals {
             return slot.peripheral.borrow().remap_status(name);
         }
         None
+    }
+
+    /// AFIO MAPR SWJ_CFG debug-port mode (0 when AFIO is unavailable =
+    /// full SWJ, everything reserved — the reset state).
+    pub fn afio_swj_cfg(&self) -> u32 {
+        if let Some(slot) = self.bus.borrow().get(0x4001_0000) {
+            return slot.peripheral.borrow().swj_cfg();
+        }
+        0
     }
 
     /// FLASH wait states (ACR LATENCY) for wait-state-aware cycle counting.
@@ -938,6 +988,16 @@ impl Peripherals {
         (8_000_000, 8_000_000, 8_000_000, 8_000_000)
     }
 
+    /// MCO pin output in Hz (0 = no clock output).
+    pub fn rcc_mco(&self) -> u32 {
+        if let Some(slot) = self.bus.borrow().get(0x4002_1000) {
+            if let Some(m) = slot.peripheral.borrow().rcc_mco() {
+                return m;
+            }
+        }
+        0
+    }
+
     /// Peripheral DMA request: fires the enabled DMA channel if configured.
     /// Channels 1-7 go to DMA1; channels 8-12 go to DMA2 (ch = channel - 8).
     pub fn dma_request(&self, sys: &System, channel: u32) {
@@ -999,6 +1059,15 @@ impl Peripherals {
         false
     }
 
+    /// Set the modeled PWR supply in mV (test/firmware entry point for PVD
+    /// ramps). Returns the new PVDO level.
+    pub fn pwr_set_supply(&self, sys: &System, mv: u32) -> bool {
+        if let Some(slot) = self.bus.borrow().get(0x4000_7000) {
+            return slot.peripheral.borrow_mut().pwr_set_supply(sys, mv);
+        }
+        false
+    }
+
     /// STOP-mode exit hook (called on wake from deep sleep): HSI fallback.
     pub fn rcc_wake_from_stop(&self, _sys: &System) {
         if let Some(slot) = self.bus.borrow().get(0x4002_1000) {
@@ -1030,6 +1099,50 @@ impl Peripherals {
         if let Some(p) = self.bus.borrow().get(0xE000_ED00) {
             if let Ok(s) = p.peripheral.try_borrow() {
                 return s.in_deep_sleep();
+            }
+        }
+        false
+    }
+
+    /// Standby (vs Stop): deep sleep with PWR PDDS (CR.1) selected. Wake
+    /// sources narrow to WKUP (PA0 + EWUP), the RTC alarm and IWDG/NRST;
+    /// EXTI dispatch consults this (see exti.rs fire_line). SRAM/registers
+    /// are kept (no reset sequencing is modeled — documented).
+    pub fn in_standby(&self) -> bool {
+        if !self.in_deep_sleep() {
+            return false;
+        }
+        if let Some(slot) = self.bus.borrow().get(0x4000_7000) {
+            if let Ok(p) = slot.peripheral.try_borrow() {
+                return p.pwr_standby_selected();
+            }
+        }
+        false
+    }
+
+    /// EWUP (PWR CSR.8): WKUP pin armed as a standby wakeup source.
+    pub fn pwr_wkup_armed(&self) -> bool {
+        if let Some(slot) = self.bus.borrow().get(0x4000_7000) {
+            if let Ok(p) = slot.peripheral.try_borrow() {
+                return p.pwr_ewup();
+            }
+        }
+        false
+    }
+
+    /// WKUP-pin (PA0) edge into PWR (latches WUF when EWUP is set).
+    pub fn pwr_wkup_edge(&self, sys: &System, rising: bool) {
+        if let Some(slot) = self.bus.borrow().get(0x4000_7000) {
+            slot.peripheral.borrow_mut().pwr_wkup_edge(sys, rising);
+        }
+    }
+
+    /// Hardware-watchdog option (FLASH OBR USER.WDG_SW clear): the IWDG
+    /// runs from reset without a KR start.
+    pub fn flash_wdg_hw(&self) -> bool {
+        if let Some(slot) = self.bus.borrow().get(0x4002_2000) {
+            if let Ok(p) = slot.peripheral.try_borrow() {
+                return p.flash_wdg_hw();
             }
         }
         false
@@ -1072,6 +1185,7 @@ use otg::OtgFs;
 use usb::Usb;
 use sdio::Sdio;
 use dwt::Dwt;
+use itm::Itm;
 
 #[cfg(test)]
 mod tests {

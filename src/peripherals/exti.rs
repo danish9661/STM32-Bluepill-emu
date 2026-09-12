@@ -30,10 +30,18 @@ impl Exti {
     fn fire_line(&mut self, sys: &System, line: u32, rising: bool) -> bool {
         let mask = 1 << line;
         self.pr |= mask;
-        sys.p.nvic.borrow_mut().set_intr_pending(exti_irq(line));
+        // Standby (SLEEPDEEP + PDDS) wakes only on WKUP (EXTI0 with EWUP
+        // armed), the RTC alarm (line 17) and IWDG/NRST (no EXTI path):
+        // other lines record PR but must not pend while asleep.
+        let wake_ok =
+            !sys.p.in_standby() || line == 17 || (line == 0 && sys.p.pwr_wkup_armed());
+        if wake_ok {
+            sys.p.nvic.borrow_mut().set_intr_pending(exti_irq(line));
+        }
         sys.push_event(crate::system::VmEvent::ExtiEdge { line: line as u8 });
-        // Lines 11/15 are the ADC external trigger inputs (regular/injected)
-        if rising {
+        // Lines 11/15 are the ADC external trigger inputs (regular/injected).
+        // The ADC clock is off in standby, so triggers then are ignored.
+        if rising && !sys.p.in_standby() {
             sys.p.adc_exti_trigger(sys, line);
         }
         true

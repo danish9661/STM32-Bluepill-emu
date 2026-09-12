@@ -263,6 +263,7 @@ function loop() {
           case 19: return 3; // I2cAlert [ch, asserted]
           case 20: return 5 + (flat[j+4]||0);
           case 21: return 4;
+          case 22: return 3; // ItmByte [port, byte]
           case 2: case 3: case 6: case 8: case 10: return 3;
           default: return 2; // 4,5,7,9,11,12,13: single-arg events
         }

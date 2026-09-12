@@ -21,9 +21,14 @@ impl Afio {
 
     /// Returns the MAPR register value.
     pub fn mapr_value(&self) -> u32 { self.mapr }
+
+    /// SWJ_CFG debug-port mode (MAPR[26:24]): 000 full SWJ, 001 full SWJ
+    /// without NJTRST, 010 JTAG-DP off + SW-DP on, 100 everything off.
+    pub fn swj_cfg(&self) -> u32 { (self.mapr >> 24) & 7 }
 }
 
 impl Peripheral for Afio {
+    fn swj_cfg(&self) -> u32 { self.swj_cfg() }
     fn remap_status(&self, name: &str) -> Option<u32> {
         let bits = match name {
             "SPI1" => (self.mapr >> 0) & 0x1,

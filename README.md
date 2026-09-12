@@ -235,6 +235,7 @@ These callbacks fire on specific hardware events:
 | `onI2cAlert` | `(channel, asserted) => void` | SMBus SMBA drive edge (firmware CR1 ALERT) |
 | `onHostTx` | `(ch, ep, setup, data) => void` | OTG host OUT/SETUP completion (MCU → wire) |
 | `onHostRx` | `(ch, ep, len) => void` | OTG host IN token (answer via `otgHostFeedIn`) |
+| `onItmByte` | `(port, byte) => void` | ITM stimulus port 0 printf byte |
 
 ### Display Framebuffers
 

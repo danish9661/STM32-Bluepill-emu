@@ -26,6 +26,9 @@ pub struct Spi {
     /// DMA channel: 0=none, 2/3=SPI1_RX/TX, 4/5=SPI2_RX/TX
     dma_channel_tx: u8,
     dma_channel_rx: u8,
+    /// Last driven NSS-output level (master, SSOE). Idle high; only
+    /// transitions emit pin events.
+    nss_level: bool,
 }
 
 impl Spi {
@@ -65,6 +68,7 @@ impl Spi {
                     "SPI3" => 11, // DMA2 ch3
                     _ => 0
                 },
+                nss_level: true, // NSS output idles high
                 ..Default::default()
             }))
         } else { None }
@@ -84,6 +88,33 @@ impl Spi {
     /// mode — decoded here so the mode is explicit and pinned by test.
     fn is_ti_mode(&self) -> bool { self.cr2 & (1 << 4) != 0 }
     fn is_i2s(&self) -> bool { self.i2scfgr & 1 != 0 } // I2SMOD
+
+    /// Default NSS-output pin (master, SSOE): SPI1→PA4, SPI2→PB12,
+    /// SPI3→PA15. (SPI3 AFIO-remapped NSS on PA4 is not tracked.)
+    fn nss_pin(&self) -> Option<(u8, u8)> {
+        match self.name.as_str() {
+            "SPI1" => Some((0, 4)),
+            "SPI2" => Some((1, 12)),
+            "SPI3" => Some((0, 15)),
+            _ => None,
+        }
+    }
+
+    /// NSS hardware output (CR2 SSOE, bit 2): driven low while the
+    /// peripheral is enabled, released high otherwise. Only transitions
+    /// emit pin events. Slave-mode NSS input (SSI/MODF, multimaster only)
+    /// is not modeled.
+    fn update_nss(&mut self, sys: &System) {
+        let want_high = !((self.cr2 & (1 << 2)) != 0 && (self.cr1 & (1 << 6)) != 0);
+        if want_high == self.nss_level {
+            return;
+        }
+        self.nss_level = want_high;
+        if let Some((port, pin)) = self.nss_pin() {
+            sys.p.gpio.borrow_mut().write_port(sys, port, pin, want_high, true);
+            sys.p.gpio_exti_trigger(sys, port, pin, want_high);
+        }
+    }
 
     fn active_device(&self, sys: &System) -> Option<Rc<RefCell<dyn ExtDevice<(), u8>>>> {
         let mut gpio = sys.p.gpio.borrow_mut();
@@ -190,9 +221,11 @@ impl Peripheral for Spi {
                     self.crcerr = false;
                 }
                 self.cr1 = value;
+                self.update_nss(sys);
             }
             0x0004 => {
                 self.cr2 = value;
+                self.update_nss(sys);
                 self.fire_interrupts(sys);
             }
             0x000C => {

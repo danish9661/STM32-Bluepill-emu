@@ -204,6 +204,8 @@ export class STM32F1 {
         this.onHostTx = null;
         /** OTG host IN token request: onHostRx(ch, ep, len) */
         this.onHostRx = null;
+        /** ITM stimulus port 0 byte: onItmByte(port, byte) (firmware printf) */
+        this.onItmByte = null;
         this._pinUnsub = null;
         this._wire();
     }
@@ -300,6 +302,9 @@ export class STM32F1 {
             } else if (type === 21) { // HostRx [ch, ep, len]
                 const ch = flat[i++]; const ep = flat[i++]; const len = flat[i++];
                 if (this.onHostRx) this.onHostRx(ch, ep, len);
+            } else if (type === 22) { // ItmByte [port, byte]
+                const port = flat[i++]; const byte = flat[i++];
+                if (this.onItmByte) this.onItmByte(port, byte);
             } else {
                 console.warn('STM32F1: unknown event discriminant', type, 'at index', i - 1);
                 break; // unknown length: stop to avoid desync

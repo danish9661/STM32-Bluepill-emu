@@ -39,6 +39,7 @@ SPI3, GPIOE-G) are harmless supersets, marked *(S)* below.
 | NVIC / STK / SCB | 0xE000Exxx | Full | Priority dispatch, SysTick debt, SHPR/SHCSR, faults, deep sleep |
 | SCB_ACTRL | 0xE000E008 | Full | RW store (DISMCYCINT/DISFOLD mask 0x7, reset 0); no timing effect — cycle counts are instruction-exact by construction |
 | NVIC_STIR | 0xE000EF00 | Full | Software-triggered IRQs (WO, INTID 9 bits, routed to pending) |
+| ITM_STIM | 0xE0000000 | Full | Stimulus port 0 printf bytes as `ItmByte` events (TER+TCR gated); ports 1–31 / ATB / timestamps out of scope |
 | MPU | 0xE000ED90 | Full | 8 regions, RNR/VALID/aliases, priority, subregions, AP/XN, background, PPB rules, MMFSR/MMFAR, MemManage/HardFault escalation (see docs/CPU.md) |
 | DBG / DBGMCU | 0xE0042000 | Missing | Intentional: debug/trace has no headless meaning |
 | ETHERNET_MAC/MMC/PTP/DMA | 0x40028xxx | Skipped | Correct: no F1 silicon has Ethernet (ST SVD quirk) |
@@ -152,13 +153,19 @@ every real Blue Pill storage project uses SD.
 
 ## 5. Test coverage of the above
 
-- `tests/test_all.mjs` (629): SDIO init/R/W/IRQ/DMA/no-card/SVD; DMA global
-  streams; WWDG EWI; PVD edges; RTC second/overflow + flags; RCC clock decode
-  (SYSCLK + full-tree prescaler/multiplier audit via `rcc_clocks_hz`);
-  tamper; USB toggles/RESET/control/bulk/IRQ/SOF/suspend/double-buffer; TIM
-  DMA-burst window; CAN TX edge-trigger (no-re-pend); ACTRL store; ADC temp/
-  VREFINT nominals; OTG attach-survives-CSFTRST; everything in §1 marked
-  Full has a group.
+- `tests/test_all.mjs` (719): SDIO init/R/W/IRQ/DMA/no-card/SVD (+ SDSC byte
+  addressing, CSD v1); DMA global streams + circular reload/HTIF; WWDG EWI;
+  PVD PLS thresholds vs settable supply; WKUP/WUF + standby wake gating;
+  RTC second/overflow + flags; RCC clock decode (SYSCLK + full-tree
+  prescaler/multiplier audit via `rcc_clocks_hz`, MCO query); GPIO LCKR +
+  AFIO SWJ reservation; tamper; USB toggles/RESET/control/bulk/IRQ/SOF/
+  suspend/double-buffer/ESOF; OTG attach-survives-CSFTRST + DONE-BCNT0;
+  UART4/5 + TIM5 + ADC3 + CAN2 + OTG on the builtin map; TIM DMA-burst
+  window + DTG dead-time; CAN TX edge-trigger (no-re-pend) + silent modes;
+  SPI NSS output + TI transfers; USART sync/IrDA transfers; ACTRL store;
+  ADC temp/VREFINT nominals + discontinuous chunks + JAUTO (SQR length
+  fixed); ITM stimulus + UID + FLASH option USER/WDG_SW; everything in
+  §1 marked Full has a group.
 - `tests/canary.mjs` + 200M runs (both paths): 39/39 real-firmware checks.
 - `tests/test_pwm_wave.mjs` pins the millis() rate end to end (8 exact wave
   steps in a fixed 70M budget — catches SysTick under-delivery).

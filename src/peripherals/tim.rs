@@ -296,12 +296,32 @@ impl Timer {
         // Update PWM duty based on CCR/ARR
         for ch in 0..4 {
             if self.ccer & (1 << (ch * 4)) != 0 && self.arr != u32::MAX {
-                self.pwm_duty[ch] = self.ccr[ch] * 100 / (self.arr + 1);
+                // Dead-time insertion (BDTR DTG, advanced timers, channels
+                // with complementary outputs): the rising edge slips by DT
+                // timer clocks, narrowing the effective high time.
+                let mut high = self.ccr[ch];
+                if ch < 3 && (self.name == "TIM1" || self.name == "TIM8") {
+                    high = high.saturating_sub(self.deadtime_ticks());
+                }
+                self.pwm_duty[ch] = high * 100 / (self.arr + 1);
             }
         }
 
         self.sample_break(sys);
         self.update_interrupt(sys);
+    }
+
+    /// Dead-time generator count in timer clocks, decoded from BDTR DTG
+    /// (RM0008): 0xx → DTG[6:0]×T, 10x → (64+DTG[5:0])×2T,
+    /// 110 → (32+DTG[4:0])×8T, 111 → (32+DTG[4:0])×16T.
+    fn deadtime_ticks(&self) -> u32 {
+        let dtg = (self.bdtr & 0xFF) as u64;
+        (match (dtg >> 5) & 7 {
+            0..=3 => dtg & 0x7F,
+            4..=5 => (64 + (dtg & 0x3F)) * 2,
+            6 => (32 + (dtg & 0x1F)) * 8,
+            _ => (32 + (dtg & 0x1F)) * 16,
+        }) as u32
     }
 
     /// Break input (advanced timers only): TIM1 BKIN defaults to PB12.

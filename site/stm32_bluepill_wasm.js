@@ -319,6 +319,9 @@ export function dma_take_absorbed(offset, len) {
  *  17 FsmcAccess    [17, bank, offset, write, size, value]
  *  18 UsbIn         [18, ep, len, bytes...]   (device->host IN completion)
  *  19 I2cAlert      [19, channel, asserted] (SMBus SMBA drive edge)
+ *  20 HostTx        [20, ch, ep, setup, len, bytes...] (host OUT/SETUP done)
+ *  21 HostRx        [21, ch, ep, len]       (host IN token: feed an answer)
+ *  22 ItmByte       [22, port, byte]        (ITM stimulus printf channel)
  * @returns {Int32Array}
  */
 export function drain_events() {
@@ -761,6 +764,17 @@ export function pwr_mode() {
 }
 
 /**
+ * Set the modeled PWR supply in mV (test entry point for PVD ramps
+ * across the PLS thresholds, default 3300). Returns the new PVDO level.
+ * @param {number} mv
+ * @returns {boolean}
+ */
+export function pwr_set_supply_mv(mv) {
+    const ret = wasm.pwr_set_supply_mv(mv);
+    return ret !== 0;
+}
+
+/**
  * Raise a fault (kind: 0=fetch, 1=data read, 2=data write, 3=undef instruction).
  * Sets SCB CFSR/HFSR/BFAR and pends the fault exception (with SHCSR escalation
  * to HardFault when the specific fault handler is disabled).
@@ -793,6 +807,15 @@ export function rcc_clocks_hz() {
 export function rcc_fail_hse() {
     const ret = wasm.rcc_fail_hse();
     return ret !== 0;
+}
+
+/**
+ * MCO pin output in Hz from CFGR[26:24] (0 = no clock output).
+ * @returns {number}
+ */
+export function rcc_mco_hz() {
+    const ret = wasm.rcc_mco_hz();
+    return ret >>> 0;
 }
 
 /**

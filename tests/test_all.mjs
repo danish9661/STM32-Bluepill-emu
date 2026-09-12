@@ -7,8 +7,10 @@ const { init, init_svd, periph_read, periph_write, tick, step_batch, has_pending
         gpio_read_input, get_uart_output, uart_rx_byte, uart_inject_break, adc_set_sim_value,
         is_watchdog_reset_requested, can_inject_message, gpio_set_slew, raise_fault,
         add_fsmc_bank, gpio_set_analog, adc_set_rc_tau, register_js_peripheral,
-        add_sd_card, reset_ext_devices, rcc_sysclk_hz, rcc_clocks_hz, rcc_fail_hse, add_i2c_eeprom,
+        add_sd_card, reset_ext_devices, rcc_sysclk_hz, rcc_clocks_hz, rcc_mco_hz,
+        rcc_fail_hse, pwr_set_supply_mv, add_i2c_eeprom,
         drain_events, usb_inject_setup, usb_inject_out, usb_bus_reset, usb_detach, pwm_duty,
+        otg_host_attach,
         i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop, i2c_inject_alert,
         add_lcd, lcd_fb, adc_set_internal, pwr_mode,
         gpio_take_pin_events } = periph;
@@ -717,7 +719,8 @@ step_batch(2000);
 assert_eq(pwm_duty(TIM1, 0), 0, 'TIM1 PWM dead with MOE=0');
 periph_write(TIM1 + 0x44, 4, 0x35 | (1 << 15)); // MOE=1
 step_batch(2000);
-assert_eq(pwm_duty(TIM1, 0), 50, 'TIM1 PWM 50% with MOE=1');
+// Dead time narrows the output: (500-53)*100/1000 = 44 (DTG=0x35 -> 53 ticks)
+assert_eq(pwm_duty(TIM1, 0), 44, 'TIM1 PWM dead-time narrowed with MOE=1');
 // Break: BKE=1, drive BKIN (PB12) low (active-low default) -> MOE clears + BIF
 periph_write(TIM1 + 0x44, 4, 0x35 | (1 << 15) | (1 << 12)); // BKE
 gpio_set_input(1, 12, false); // PB12 low = break active
@@ -1253,6 +1256,33 @@ for (let i = 0; i < 3; i++) periph.tick();
 assert_eq(periph_read(DMA1 + 0x08 + 1*4, 4), 0, 'DMA1 CNDTR 0 after transfer completes');
 let dma_en = periph_read(DMA1 + 0x08 + 0*0x14, 4) & 1;
 assert_eq(dma_en, 0, 'DMA1 EN cleared after transfer completes');
+
+// ============================================================
+// DMA circular mode (CIRC reload + HTIF, EN stays set)
+// ============================================================
+group('DMA circular');
+
+reset();
+const DMA1C = 0x40020000;
+periph_write(0x40021014, 4, 1 << 0); // DMA1EN
+periph_write(DMA1C + 0x08 + 2*4, 4, 0x20000000); // CPAR = source
+periph_write(DMA1C + 0x08 + 3*4, 4, 0x20001000); // CMAR = dest
+periph_write(DMA1C + 0x08 + 1*4, 4, 8); // CNDTR = 8
+// M2M + CIRC + MINC + PINC + EN
+periph_write(DMA1C + 0x08, 4, (1 << 14) | (1 << 5) | (1 << 7) | (1 << 6) | 1);
+periph.dma_set_completed_many(1 << 0);
+for (let i = 0; i < 3; i++) periph.tick();
+assert_eq(periph_read(DMA1C + 0x00, 4) & (1 << 1), 1 << 1, 'CIRC TCIF set on completion');
+assert_eq(periph_read(DMA1C + 0x00, 4) & (1 << 2), 1 << 2, 'CIRC HTIF set on completion');
+assert_eq(periph_read(DMA1C + 0x08, 4) & 1, 1, 'CIRC EN stays set after completion');
+assert_eq(periph_read(DMA1C + 0x08 + 1*4, 4), 8, 'CIRC CNDTR reloaded to init count');
+// W1C clear both flags, run a second cycle: continuous, not one-shot.
+periph_write(DMA1C + 0x04, 4, (1 << 1) | (1 << 2));
+assert_eq(periph_read(DMA1C + 0x00, 4) & 0x6, 0, 'CIRC flags clear via IFCR');
+periph.dma_set_completed_many(1 << 0);
+for (let i = 0; i < 3; i++) periph.tick();
+assert_eq(periph_read(DMA1C + 0x00, 4) & 0x6, 0x6, 'CIRC second cycle sets TCIF+HTIF again');
+assert_eq(periph_read(DMA1C + 0x08, 4) & 1, 1, 'CIRC EN still set after second cycle');
 
 // ============================================================
 // DMA pump exports (Rust-side periph byte movement, replaces
@@ -2028,7 +2058,8 @@ assert_eq(periph_read(0xE000ED20, 4) & 0xFF, 0, 'SHPR3 SVCall prio routed throug
 group('JS Peripheral');
 
 reset();
-const JS_BASE = 0x40006800; // gap between CAN1 and BKP on F103 — 4-aligned
+const JS_BASE = 0x40008000; // gap between DAC and AFIO on F103 — 4-aligned
+// (was 0x40006800 until CAN2 joined the builtin map)
 let jsWrites = [];
 let jsReads = 0;
 const regOk = register_js_peripheral(JS_BASE, 0x400,
@@ -2065,7 +2096,7 @@ group('Chip: STM32F105 (SVD)');
   const svd = readFileSync(new URL('../svd/STM32F105xx.svd', import.meta.url), 'utf8');
   init_svd(svd);
 
-  // CAN2 (0x40006800) is F105-only — SVD path registers it
+  // CAN2 (0x40006800) — SVD path registers it (also on the builtin map now)
   periph_write(0x40006800, 4, 0x00000041); // INRQ + ABOM(6) + TTCM(7)? ABOM is bit 6 on F1 bxCAN
   const can2mcr = periph_read(0x40006800, 4);
   assert_eq(can2mcr & 1, 1, 'F105 CAN2 MCR INRQ bit set');
@@ -2371,7 +2402,7 @@ assert_eq(periph_read(WWDG_BASE + 0x08, 4) & 1, 1, 'WWDG EWIF sets without EWI')
 assert_eq(has_pending_interrupt(), false, 'WWDG no IRQ without EWI enable');
 
 // ============================================================
-// PVD voltage detector (fixed 3.3 V supply -> EXTI line 16)
+// PVD voltage detector (PLS thresholds vs supply -> EXTI line 16)
 // ============================================================
 group('PVD');
 
@@ -2381,22 +2412,39 @@ periph_write(0x40010400, 4, 1 << 16); // EXTI IMR line 16
 periph_write(0x40010408, 4, 1 << 16); // EXTI RTSR line 16
 periph_write(0xE000E100, 4, 1 << 1);  // ISER0: enable IRQ 1 (PVD)
 assert_eq(periph_read(PWR_BASE + 0x04, 4) & 0x4, 0, 'PVD PVDO=0 with PVDE off');
-periph_write(PWR_BASE + 0x00, 4, 1 << 4);  // CR: PVDE -> rising edge (supply above threshold)
-assert_eq(periph_read(PWR_BASE + 0x04, 4) & 0x4, 0x4, 'PVD PVDO=1 with PVDE on');
+// Silicon truth: the default 3.3 V supply sits above every PLS threshold,
+// so enabling PVDE asserts nothing (no brownout, no edge).
+periph_write(PWR_BASE + 0x00, 4, 1 << 4);  // CR: PVDE on
+assert_eq(periph_read(PWR_BASE + 0x04, 4) & 0x4, 0, 'PVD PVDO=0 with PVDE on at 3.3V');
+assert_eq(has_pending_interrupt(), false, 'PVD no IRQ when supply above threshold');
+// Brownout: drop below the reset PLS threshold (CR reset 0x20 -> PLS=001 = 2.3V).
+assert_eq(pwr_set_supply_mv(2000), true, 'PVD supply API reports PVDO=1 below threshold');
+assert_eq(periph_read(PWR_BASE + 0x04, 4) & 0x4, 0x4, 'PVD PVDO=1 in brownout');
 assert(has_pending_interrupt() && get_next_pending_interrupt() === 1,
     'PVD rising edge pends IRQ 1');
 clear_current_interrupt();
 // PVDO is read-only: writes cannot force it
 periph_write(PWR_BASE + 0x04, 4, 0);
 assert_eq(periph_read(PWR_BASE + 0x04, 4) & 0x4, 0x4, 'PVD PVDO read-only, write ignored');
-// Falling edge via PVDE off (FTSR armed)
+// Recovery: raise above threshold -> falling edge (FTSR armed)
 periph_write(0x40010408, 4, 0);             // RTSR clear
 periph_write(0x4001040C, 4, 1 << 16);       // EXTI FTSR line 16
-periph_write(PWR_BASE + 0x00, 4, 0);             // CR: PVDE off -> falling edge
-assert_eq(periph_read(PWR_BASE + 0x04, 4) & 0x4, 0, 'PVD PVDO=0 after PVDE off');
+assert_eq(pwr_set_supply_mv(3300), false, 'PVD supply API reports PVDO=0 on recovery');
+assert_eq(periph_read(PWR_BASE + 0x04, 4) & 0x4, 0, 'PVD PVDO=0 after recovery');
 assert(has_pending_interrupt() && get_next_pending_interrupt() === 1,
     'PVD falling edge pends IRQ 1');
 clear_current_interrupt();
+// PLS select: threshold 2.9 V (111); 2.8 V trips, 2.95 V clears.
+periph_write(PWR_BASE + 0x00, 4, (1 << 4) | (7 << 5)); // PVDE + PLS=7
+assert_eq(pwr_set_supply_mv(2800), true, 'PVD PLS=7 trips at 2.8V');
+assert_eq(pwr_set_supply_mv(2950), false, 'PVD PLS=7 clears at 2.95V');
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 1,
+    'PVD PLS falling edge pends IRQ 1');
+clear_current_interrupt();
+// PVDE off while already clear: silent.
+periph_write(PWR_BASE + 0x00, 4, 0);
+assert_eq(periph_read(PWR_BASE + 0x04, 4) & 0x4, 0, 'PVD PVDO=0 after PVDE off');
+assert_eq(has_pending_interrupt(), false, 'PVD no IRQ when already clear');
 
 // ============================================================
 // RCC clock tree decode (CFGR -> SYSCLK; HSE assumed 8 MHz)
@@ -2825,6 +2873,430 @@ assert_eq(usb[0][2], 0x77, 'USB DB IN buffer A byte');
 // ============================================================
 // Summary
 // ============================================================
+// ============================================================
+// HD/CL superset on the builtin F103 map (UART4/5, TIM5, ADC3, CAN2, OTG)
+// ============================================================
+group('HD/CL superset');
+
+// --- UART4 TX (APB1.19 clock, UE|TE, UartTx event usart=4) ---
+reset();
+const UART4 = 0x40004C00;
+periph_write(0x4002101C, 4, 1 << 19); // RCC APB1ENR UART4EN
+periph_write(UART4 + 0x08, 4, 0x341); // BRR
+periph_write(UART4 + 0x0C, 4, (1 << 13) | (1 << 3)); // CR1 UE|TE
+assert_eq(periph_read(UART4 + 0x00, 4) & (1 << 7), 1 << 7, 'UART4 SR TXE after init');
+periph_write(UART4 + 0x04, 4, 0x5A); // DR = 'Z' (TXE stays set: model drains at instruction rate)
+step_batch(100000);
+assert_eq(periph_read(UART4 + 0x00, 4) & (1 << 7), 1 << 7, 'UART4 TXE set after byte time');
+let uart4ev = drain_events(), uart4seen = false;
+for (let i = 0; i < uart4ev.length;) {
+  const t = uart4ev[i++];
+  if (t === 6) { const u = uart4ev[i++], b = uart4ev[i++]; if (u === 4 && b === 0x5A) uart4seen = true; }
+  else break;
+}
+assert_eq(uart4seen, true, 'UART4 UartTx event (usart=4, 0x5A) drained');
+// UART5 instantiates with TXE set (APB1.20 clock).
+const UART5 = 0x40005000;
+periph_write(0x4002101C, 4, (1 << 19) | (1 << 20));
+periph_write(UART5 + 0x0C, 4, (1 << 13) | (1 << 3));
+assert_eq(periph_read(UART5 + 0x00, 4) & (1 << 7), 1 << 7, 'UART5 SR TXE after init');
+
+// --- TIM5 count + update (APB1.3 clock) ---
+reset();
+const TIM5 = 0x40000C00;
+periph_write(0x4002101C, 4, 1 << 3); // RCC APB1ENR TIM5EN
+periph_write(TIM5 + 0x28, 4, 0); // PSC
+periph_write(TIM5 + 0x2C, 4, 100); // ARR
+periph_write(TIM5 + 0x00, 4, 1); // CR1 CEN
+step_batch(50);
+assert_eq(periph_read(TIM5 + 0x24, 4), 50, 'TIM5 CNT advances with CEN');
+step_batch(100);
+assert_eq(periph_read(TIM5 + 0x10, 4) & 1, 1, 'TIM5 UIF on wrap past ARR');
+periph_write(TIM5 + 0x10, 4, 0); // W0C clear
+assert_eq(periph_read(TIM5 + 0x10, 4) & 1, 0, 'TIM5 UIF clears');
+
+// --- ADC3 conversion (APB2.15 clock) ---
+reset();
+const ADC3 = 0x40013C00;
+periph_write(0x40021018, 4, 1 << 15); // RCC APB2ENR ADC3EN
+adc_set_sim_value(0x2AA);
+periph_write(ADC3 + 0x08, 4, (1 << 0) | (1 << 22)); // ADON + SWSTART
+assert_eq(periph_read(ADC3 + 0x00, 4) & (1 << 1), 0, 'ADC3 EOC not set before conversion');
+step_batch(14);
+assert_eq(periph_read(ADC3 + 0x00, 4) & (1 << 1), 1 << 1, 'ADC3 EOC after SWSTART');
+assert_eq(periph_read(ADC3 + 0x4C, 4) & 0xFFF, 0x2AA, 'ADC3 DR matches sim value');
+
+// --- CAN2 mailbox TX completion (APB1.25+26 clocks) ---
+reset();
+const CAN2 = 0x40006800;
+periph_write(0x4002101C, 4, (1 << 25) | (1 << 26)); // CAN1EN + CAN2EN
+periph_write(CAN2 + 0x00, 4, 1); // MCR INRQ
+assert_eq(periph_read(CAN2 + 0x00, 4) & 1, 1, 'CAN2 MCR INRQ');
+periph_write(CAN2 + 0x1C, 4, (1 << 30) | 0x001C0033); // BTR LBKM + timing
+periph_write(CAN2 + 0x00, 4, 0); // leave init
+periph_write(CAN2 + 0x180, 4, 0x1230001); // TI0R TXRQ
+periph_write(CAN2 + 0x184, 4, 2); // DLC=2
+assert_eq(periph_read(CAN2 + 0x08, 4) & 1, 1, 'CAN2 TSR RQCP0 (request completed)');
+assert_eq(periph_read(CAN2 + 0x08, 4) & (1 << 16), 1 << 16, 'CAN2 TSR TXOK0');
+
+// --- OTG_FS on the builtin map (attach → HPRT PCSTS) ---
+reset();
+assert_eq(otg_host_attach(true), true, 'builtin OTG attach accepted');
+assert_eq(periph_read(0x50000440, 4) & 1, 1, 'builtin OTG HPRT PCSTS on attach');
+assert_eq(otg_host_attach(false), true, 'builtin OTG detach accepted');
+assert_eq(periph_read(0x50000440, 4) & 1, 0, 'builtin OTG HPRT PCSTS clears on detach');
+
+// ============================================================
+// GPIO LCKR (lock sequence + frozen config)
+// ============================================================
+group('LCKR');
+
+reset();
+const GPIOA_L = 0x40010800;
+// PA5 push-pull output, PA6 input: baseline config
+periph_write(GPIOA_L + 0x00, 4, (0x3 << 20) | (0x4 << 24)); // PA5 out, PA6 in
+// Wrong order (no LCKK first): no lock
+periph_write(GPIOA_L + 0x18, 4, 1 << 5);
+assert_eq(periph_read(GPIOA_L + 0x18, 4) & (1 << 16), 0, 'LCKR no lock without sequence start');
+periph_write(GPIOA_L + 0x00, 4, 0); // PA5 back to input: allowed (unlocked)
+assert_eq(periph_read(GPIOA_L + 0x00, 4) & (0xF << 20), 0, 'LCKR unlocked pin reconfigures');
+// Correct sequence for PA5: LCKK+LCK, LCK, LCKK+LCK
+periph_write(GPIOA_L + 0x00, 4, (0x3 << 20) | (0x4 << 24)); // PA5 out again
+periph_write(GPIOA_L + 0x18, 4, (1 << 16) | (1 << 5));
+periph_write(GPIOA_L + 0x18, 4, 1 << 5);
+periph_write(GPIOA_L + 0x18, 4, (1 << 16) | (1 << 5));
+assert_eq(periph_read(GPIOA_L + 0x18, 4) & (1 << 16), 1 << 16, 'LCKR LCKK set after sequence');
+periph_write(GPIOA_L + 0x00, 4, 0); // try to reconfigure locked PA5
+assert_eq(periph_read(GPIOA_L + 0x00, 4) & (0xF << 20), 0x3 << 20, 'LCKR locked nibble frozen');
+periph_write(GPIOA_L + 0x00, 4, 0xFFFFFFFF); // unlocked nibbles still move
+assert_eq(periph_read(GPIOA_L + 0x00, 4) & (0xF << 24), 0xF << 24, 'LCKR unlocked nibble writes through');
+assert_eq(periph_read(GPIOA_L + 0x00, 4) & (0xF << 20), 0x3 << 20, 'LCKR lock survives other writes');
+
+// ============================================================
+// AFIO SWJ_CFG (debug-pin reservation)
+// ============================================================
+group('SWJ');
+
+reset();
+const AFIO = 0x40010000;
+// Default SWJ=000 (full SWJ): PA13 config writes are ignored (stays reset 0x0)...
+periph_write(GPIOA_L + 0x04, 4, 0x3 << 20); // try PA13 output
+assert_eq(periph_read(GPIOA_L + 0x04, 4) & (0xF << 20), 0, 'SWJ PA13 write ignored while reserved');
+// ...while ordinary pins move (control).
+periph_write(GPIOA_L + 0x04, 4, (0x3 << 20) | (0x3 << 16)); // PA13 + PA12 output
+assert_eq(periph_read(GPIOA_L + 0x04, 4) & (0xF << 16), 0x3 << 16, 'SWJ PA12 (free) writes through');
+assert_eq(periph_read(GPIOA_L + 0x04, 4) & (0xF << 20), 0, 'SWJ PA13 still ignored');
+periph_write(AFIO + 0x04, 4, 0x02000000); // MAPR SWJ=010 (JTAG off, SW on)
+periph_write(0x40010C00 + 0x00, 4, 0x3 << 12); // PB3 output: now allowed
+assert_eq(periph_read(0x40010C00 + 0x00, 4) & (0xF << 12), 0x3 << 12, 'SWJ PB3 freed by JTAG-off');
+periph_write(GPIOA_L + 0x04, 4, 0x3 << 20); // PA13 still SWD: ignored
+assert_eq(periph_read(GPIOA_L + 0x04, 4) & (0xF << 20), 0, 'SWJ PA13 reserved under SW-DP');
+periph_write(AFIO + 0x04, 4, 0x04000000); // MAPR SWJ=100 (all off)
+periph_write(GPIOA_L + 0x04, 4, 0x3 << 20); // PA13 output: allowed now
+assert_eq(periph_read(GPIOA_L + 0x04, 4) & (0xF << 20), 0x3 << 20, 'SWJ PA13 freed when all off');
+
+// ============================================================
+// RCC MCO + option-byte watchdog
+// ============================================================
+group('MCO/WDGOPT');
+
+reset();
+const RCC_M = 0x40021000;
+assert_eq(rcc_mco_hz(), 0, 'MCO off by default');
+periph_write(RCC_M + 0x04, 4, 4 << 24); // CFGR MCO=SYSCLK (HSI 8M)
+assert_eq(rcc_mco_hz(), 8000000, 'MCO SYSCLK -> 8 MHz');
+periph_write(RCC_M + 0x04, 4, (1 << 16) | (7 << 18) | 2 | (7 << 24)); // PLL x9 + MCO=PLL/2
+assert_eq(rcc_mco_hz(), 36000000, 'MCO PLL/2 -> 36 MHz');
+// OBR USER erased state = software watchdog
+assert_eq(periph_read(0x4002201C, 4) & 0x3FC, 0x3FC, 'FLASH OBR USER erased (software WDG)');
+// Select hardware watchdog: clear WDG_SW (OBR bit 2)
+periph_write(0x4002201C, 4, 0x3FC & ~(1 << 2));
+assert_eq(periph_read(0x4002201C, 4) & 0x3FC, 0x3F8, 'FLASH OBR WDG_SW clears');
+// WDG_SW=0 runs the IWDG without a KR start: tiny reload, no feed -> reset
+const IWDG_O = 0x40003000;
+is_watchdog_reset_requested(); // clear any stale request first
+periph_write(IWDG_O + 0x00, 4, 0x5555); // unlock PR/RLR (no start)
+periph_write(IWDG_O + 0x04, 4, 0); // prescaler /4
+periph_write(IWDG_O + 0x08, 4, 1); // RLR=1 (shortest fuse)
+periph_write(IWDG_O + 0x00, 4, 0xAAAA); // refresh loads the counter (still no start)
+step_batch(1000);
+periph_read(IWDG_O + 0x04); // IWDG advances on register access: pump it
+step_batch(1000);
+periph_read(IWDG_O + 0x04);
+assert_eq(is_watchdog_reset_requested(), true, 'IWDG hardware mode resets without KR start');
+
+// ============================================================
+// WKUP pin + standby wake gating
+// ============================================================
+group('WKUP/standby');
+
+reset();
+const PWR_W = 0x40007000, SCR_W = 0xE000ED10;
+// EWUP + PA0 rise latches WUF even outside standby
+periph_write(PWR_W + 0x04, 4, 1 << 8); // CSR EWUP
+gpio_set_input(0, 0, false);
+gpio_set_input(0, 0, true); // PA0 rising
+assert_eq(periph_read(PWR_W + 0x04, 4) & 1, 1, 'WKUP rising latches WUF with EWUP');
+periph_write(PWR_W + 0x04, 4, 1 << 8); // clear WUF, keep EWUP
+assert_eq(periph_read(PWR_W + 0x04, 4) & 1, 0, 'WUF clears');
+// Enter standby: SLEEPDEEP + PDDS
+periph_write(SCR_W, 4, 1 << 2);
+periph_write(PWR_W + 0x00, 4, 1 << 1); // CR PDDS
+// EXTI1 (PA1, IMR+RTSR, IRQ7 enabled) must NOT pend in standby...
+periph_write(0xE000E100, 4, (1 << 7) | (1 << 6)); // ISER0: IRQ6 (EXTI0) + IRQ7 (EXTI1)
+periph_write(0x40010400, 4, (1 << 0) | (1 << 1)); // IMR lines 0+1
+periph_write(0x40010408, 4, (1 << 0) | (1 << 1)); // RTSR lines 0+1
+gpio_set_input(0, 1, false);
+gpio_set_input(0, 1, true); // PA1 rising
+assert_eq(periph_read(0x40010414, 4) & (1 << 1), 1 << 1, 'standby: EXTI1 PR still records');
+assert_eq(has_pending_interrupt(), false, 'standby: EXTI1 does not pend');
+// ...but WKUP (EXTI0 + EWUP) does.
+gpio_set_input(0, 0, false);
+gpio_set_input(0, 0, true); // PA0 rising
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 6,
+    'standby: WKUP pends EXTI0');
+clear_current_interrupt();
+// Back to Stop (PDDS clear): EXTI1 pends again.
+periph_write(PWR_W + 0x00, 4, 0);
+gpio_set_input(0, 1, false);
+gpio_set_input(0, 1, true);
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 7,
+    'stop: EXTI1 pends');
+clear_current_interrupt();
+periph_write(SCR_W, 4, 0); // leave deep sleep
+
+// ============================================================
+// SPI NSS hardware output (SSOE) + TI frame transfers
+// ============================================================
+group('NSS/TI');
+
+reset();
+const SPI1N = 0x40013000;
+periph_write(0x40021018, 4, 1 << 12); // SPI1EN
+gpio_take_pin_events(); // drain pre-existing pin events
+// PA4 as GPIO output so the NSS drive level is observable
+periph_write(0x40010800, 4, 0x3 << 16); // CRL PA4 push-pull out
+// SSOE without SPE: NSS stays released (idle high, no event yet)
+periph_write(SPI1N + 0x04, 4, 1 << 2); // CR2 SSOE
+assert_eq(gpio_read_output(0, 4), false, 'SPI1 NSS undriven while SPE=0');
+assert_eq(gpio_take_pin_events().length, 0, 'no NSS event before SPE');
+// SPE with SSOE: NSS asserts low (driven level; the first assert from
+// cold reset emits no pin event since the driven register was already 0)
+periph_write(SPI1N + 0x00, 4, (1 << 2) | (1 << 6)); // MSTR + SPE
+assert_eq(gpio_read_output(0, 4), false, 'SPI1 NSS driven low (SSOE+SPE)');
+// SPE off: NSS releases high + pin event
+periph_write(SPI1N + 0x00, 4, 1 << 2); // MSTR, SPE=0
+assert_eq(gpio_read_output(0, 4), true, 'SPI1 NSS released high (SPE=0)');
+assert_eq(gpio_take_pin_events().length > 0, true, 'NSS release emits pin event');
+// Second assert cycle: now both edges emit (driven HIGH->LOW change)
+periph_write(SPI1N + 0x00, 4, (1 << 2) | (1 << 6)); // MSTR + SPE
+assert_eq(gpio_read_output(0, 4), false, 'SPI1 NSS re-asserts low');
+assert_eq(gpio_take_pin_events().length > 0, true, 'NSS re-assert emits pin event');
+// TI frame format (FRF): transfers complete identically (NSS phasing only)
+periph_write(SPI1N + 0x04, 4, (1 << 2) | (1 << 4)); // SSOE + FRF
+periph_write(SPI1N + 0x00, 4, (1 << 2) | (1 << 6)); // MSTR + SPE
+periph_write(SPI1N + 0x0C, 4, 0xA5);
+assert_eq(periph_read(SPI1N + 0x08, 4) & 1, 1, 'SPI1 TI mode RXNE after transfer');
+assert_eq(periph_read(SPI1N + 0x0C, 4), 0xFF, 'SPI1 TI mode DR reads 0xFF (no device)');
+
+// ============================================================
+// USART sync + IrDA modes (byte-identical transfers)
+// ============================================================
+group('Sync/IrDA');
+
+reset();
+const USART1S = 0x40013800;
+periph_write(0x40021018, 4, (1 << 14) | (1 << 2));
+periph_write(USART1S + 0x08, 4, 0x341);
+periph_write(USART1S + 0x0C, 4, (1 << 13) | (1 << 3)); // UE|TE
+periph_write(USART1S + 0x10, 4, 1 << 11); // CR2 CLKEN (synchronous)
+periph_write(USART1S + 0x04, 4, 0x51); // 'Q'
+let syncEv = drain_events(), syncSeen = false;
+for (let i = 0; i < syncEv.length;) {
+  const t = syncEv[i++];
+  if (t === 6) { const u = syncEv[i++], b = syncEv[i++]; if (u === 1 && b === 0x51) syncSeen = true; }
+  else break;
+}
+assert_eq(syncSeen, true, 'USART sync-mode byte transmits');
+periph_write(USART1S + 0x10, 4, 0); // CLKEN off
+periph_write(USART1S + 0x14, 4, 1 << 1); // CR3 IREN (IrDA)
+periph_write(USART1S + 0x04, 4, 0x52); // 'R'
+let irEv = drain_events(), irSeen = false;
+for (let i = 0; i < irEv.length;) {
+  const t = irEv[i++];
+  if (t === 6) { const u = irEv[i++], b = irEv[i++]; if (u === 1 && b === 0x52) irSeen = true; }
+  else break;
+}
+assert_eq(irSeen, true, 'USART IrDA-mode byte transmits');
+
+// ============================================================
+// CAN silent modes (SILM, silent loopback)
+// ============================================================
+group('CAN silent');
+
+reset();
+const CAN1S = 0x40006400;
+periph_write(0x4002101C, 4, 1 << 25); // CAN1EN
+periph_write(CAN1S + 0x00, 4, 1);
+periph_write(CAN1S + 0x1C, 4, (1 << 31) | 0x001C0033); // BTR SILM, no LBKM
+periph_write(CAN1S + 0x00, 4, 0);
+periph_write(CAN1S + 0x180, 4, 0x2220001); // TXRQ
+assert_eq(periph_read(CAN1S + 0x08, 4) & 1, 1, 'CAN silent TX completes (RQCP0)');
+assert_eq(periph_read(CAN1S + 0x0C, 4) & 3, 0, 'CAN silent TX loops back nothing (RF0R empty)');
+// Silent loopback (SILM+LBKM): self-test reception works, bus undisturbed
+periph_write(CAN1S + 0x1C, 4, (1 << 31) | (1 << 30) | 0x001C0033);
+periph_write(CAN1S + 0x180, 4, 0x2220001);
+assert_eq(periph_read(CAN1S + 0x08, 4) & 1, 1, 'CAN silent-loopback TX completes');
+// (RX self-reception needs a matching filter; completion path is what changed)
+
+// ============================================================
+// TIM1 dead-time narrowing (DTG)
+// ============================================================
+group('DTG');
+
+reset();
+const TIM1D = 0x40012C00;
+periph_write(0x40021018, 4, 1 << 11);
+periph_write(TIM1D + 0x28, 4, 0);
+periph_write(TIM1D + 0x2C, 4, 999);
+periph_write(TIM1D + 0x18, 4, 0b110 << 4);
+periph_write(TIM1D + 0x20, 4, 1);
+periph_write(TIM1D + 0x34, 4, 500);
+periph_write(TIM1D + 0x00, 4, 1);      // CEN
+periph_write(TIM1D + 0x44, 4, 1 << 15); // MOE, DTG=0
+step_batch(2000);
+assert_eq(pwm_duty(TIM1D, 0), 50, 'TIM1 PWM 50% with DTG=0');
+periph_write(TIM1D + 0x44, 4, (1 << 15) | 0x10); // DTG=16 ticks
+step_batch(2000);
+assert_eq(pwm_duty(TIM1D, 0), 48, 'TIM1 PWM narrowed to 48% by DTG=16');
+
+// ============================================================
+// ADC discontinuous + JAUTO
+// ============================================================
+group('ADC-DISC');
+
+reset();
+const ADC1D = 0x40012400;
+periph_write(0x40021018, 4, 1 << 9);
+adc_set_sim_value(0x100);
+// Sequence of 3 (SQR1 L=2), DISCEN + DISCNUM=0 (1 channel per trigger)
+periph_write(ADC1D + 0x2C, 4, 2 << 20); // SQR1 L=2
+periph_write(ADC1D + 0x34, 4, (2 << 20) | (1 << 10) | 0); // SQR3: SQ1=0, SQ2=1, SQ3=2
+periph_write(ADC1D + 0x04, 4, 1 << 11); // CR1 DISCEN
+periph_write(ADC1D + 0x08, 4, (1 << 0) | (1 << 22)); // ADON + SWSTART
+step_batch(100);
+let devD = drain_events(), dchans = [];
+for (let i = 0; i < devD.length;) {
+  const t = devD[i++];
+  if (t === 8) { const a = devD[i++], c = devD[i++]; if (a === 1) dchans.push(c); }
+  else break;
+}
+assert_eq(dchans.join(','), '0', 'ADC discontinuous first trigger converts ch0 only');
+periph_write(ADC1D + 0x08, 4, (1 << 0) | (1 << 22)); // second trigger
+step_batch(100);
+devD = drain_events(); dchans = [];
+for (let i = 0; i < devD.length;) {
+  const t = devD[i++];
+  if (t === 8) { const a = devD[i++], c = devD[i++]; if (a === 1) dchans.push(c); }
+  else break;
+}
+assert_eq(dchans.join(','), '1', 'ADC discontinuous second trigger converts ch1 only');
+periph_write(ADC1D + 0x08, 4, (1 << 0) | (1 << 22)); // third trigger
+step_batch(100);
+assert_eq(periph_read(ADC1D + 0x00, 4) & (1 << 1), 1 << 1, 'ADC discontinuous final EOC');
+// JAUTO: injected follows the regular sequence end
+reset();
+periph_write(0x40021018, 4, 1 << 9);
+periph_write(ADC1D + 0x04, 4, 1 << 10); // CR1 JAUTO
+periph_write(ADC1D + 0x08, 4, (1 << 0) | (1 << 22)); // ADON + SWSTART (1-ch seq)
+step_batch(100); // regular completes, injected arms
+step_batch(100); // injected completes
+assert_eq(periph_read(ADC1D + 0x00, 4) & (1 << 2), 1 << 2, 'ADC JAUTO sets JEOC after regular');
+
+// ============================================================
+// SDSC byte-addressed cards (HCS=0)
+// ============================================================
+group('SDSC');
+
+reset();
+reset_ext_devices(); // drop the earlier SDIO test card (find_card takes the first)
+const SDIO_S = 0x40018000;
+const S2_ARG = 0x08, S2_CMD = 0x0C, S2_RESP1 = 0x14, S2_DLEN = 0x28, S2_DCTRL = 0x2C;
+const S2_STA = 0x34, S2_ICR = 0x38, S2_FIFO = 0x80;
+const sdImg2 = new Uint8Array(2048 * 512);
+for (let i = 0; i < sdImg2.length; i++) sdImg2[i] = (i >> 9) & 0xFF;
+add_sd_card('SDIO', sdImg2);
+const sdCmd2 = (idx, arg, rsp = 1 << 6) => {
+    periph_write(SDIO_S + S2_ARG, 4, arg);
+    periph_write(SDIO_S + S2_CMD, 4, (idx & 0x3F) | rsp | (1 << 10));
+};
+periph_write(SDIO_S + 0x00, 4, 0x03);
+periph_write(SDIO_S + 0x04, 4, 0x100 | 0x76);
+sdCmd2(0, 0, 0);
+periph_write(SDIO_S + S2_ICR, 4, 0xFFFFFFFF);
+// ACMD41 with HCS=0 -> SDSC: OCR busy then ready WITHOUT CCS
+let ocr2 = 0;
+for (let i = 0; i < 10 && !(ocr2 & 0x80000000); i++) {
+    sdCmd2(55, 0);
+    sdCmd2(41, 0); // HCS clear
+    ocr2 = periph_read(SDIO_S + S2_RESP1, 4);
+    periph_write(SDIO_S + S2_ICR, 4, 0xFFFFFFFF);
+}
+assert_eq(ocr2 & 0x80000000, 1 << 31, 'SDSC ACMD41 OCR ready');
+assert_eq(ocr2 & 0x40000000, 0, 'SDSC ACMD41 OCR CCS clear (byte addressing)');
+// CMD9: v1 CSD (STRUCTURE=0 in RESP1 bits 31:30)
+sdCmd2(9, 0x12340000);
+assert_eq((periph_read(SDIO_S + S2_RESP1, 4) >>> 30) & 3, 0, 'SDSC CSD v1 STRUCTURE=0');
+// CMD17 with a BYTE address (block 3 = bytes 1536..2047, fill 3)
+periph_write(SDIO_S + S2_DLEN, 4, 512);
+periph_write(SDIO_S + S2_DCTRL, 4, 0x1);
+sdCmd2(17, 3 * 512);
+assert_eq(periph_read(SDIO_S + S_FIFO, 4), 0x03030303, 'SDSC byte-address read lands on block 3');
+for (let i = 1; i < 128; i++) periph_read(SDIO_S + S_FIFO, 4);
+periph_write(SDIO_S + S2_ICR, 4, 0xFFFFFFFF);
+
+// ============================================================
+// ITM stimulus (printf channel) + UID + ESOF
+// ============================================================
+group('ITM/UID/ESOF');
+
+reset();
+// STIM0 gated by TER[0] + TCR.ITMENA
+periph_write(0xE0000E00, 4, 1); // TER port 0
+periph_write(0xE0000E80, 4, 1); // TCR ITMENA
+periph_write(0xE0000000, 4, 0x43); // STIM0 = 'C'
+let itmEv = drain_events(), itmSeen = false;
+for (let i = 0; i < itmEv.length;) {
+  const t = itmEv[i++];
+  if (t === 22) { const p = itmEv[i++], b = itmEv[i++]; if (p === 0 && b === 0x43) itmSeen = true; }
+  else break;
+}
+assert_eq(itmSeen, true, 'ITM STIM0 byte drains as ItmByte event');
+periph_write(0xE0000E00, 4, 0); // TER clear: gated off
+periph_write(0xE0000000, 4, 0x44);
+itmEv = drain_events(); itmSeen = false;
+for (let i = 0; i < itmEv.length;) {
+  const t = itmEv[i++];
+  if (t === 22) itmSeen = true;
+  else break;
+}
+assert_eq(itmSeen, false, 'ITM gated off without TER');
+// 96-bit UID constant, read-only
+assert_eq(periph_read(0x1FFFF7E8, 4) >>> 0, 0x00310033, 'UID word0 constant');
+assert_eq(periph_read(0x1FFFF7EC, 4) >>> 0, 0x32313034, 'UID word1 constant');
+assert_eq(periph_read(0x1FFFF7F0, 4) >>> 0, 0x38373635, 'UID word2 constant');
+periph_write(0x1FFFF7E8, 4, 0xDEADBEEF);
+assert_eq(periph_read(0x1FFFF7E8, 4) >>> 0, 0x00310033, 'UID writes ignored');
+// ESOF on detach (missed host SOFs), mask-gated like other ISTR flags
+reset();
+periph_write(USB + U_CNTR, 4, 1 << 8); // CNTR ESOFM
+periph_write(0xE000E100, 4, 1 << 20); // ISER0: USB LP IRQ20
+assert_eq(usb_detach(), true, 'USB detach accepted (ESOF test)');
+assert_eq(periph_read(USB + U_ISTR, 4) & (1 << 8), 1 << 8, 'USB ISTR ESOF on detach');
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 20,
+    'USB detach ESOF pends IRQ 20');
+clear_current_interrupt();
+
 console.log(`\n${'='.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed, ${passed+failed} total`);
 if (failed === 0) console.log('ALL TESTS PASSED');

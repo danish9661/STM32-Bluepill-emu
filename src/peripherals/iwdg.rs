@@ -22,7 +22,10 @@ impl Iwdg {
     fn decrement_counter(&mut self, sys: &System) {
         let now = INSTRUCTION_COUNT.load(Ordering::Relaxed);
         if self.sr != 0 && now.saturating_sub(self.sr_tick) >= self.tick_instructions() { self.sr = 0; }
-        if !self.enabled { return; }
+        // Hardware-watchdog option (OBR USER.WDG_SW clear) runs the IWDG
+        // from reset without waiting for the KR start sequence.
+        let running = self.enabled || sys.p.flash_wdg_hw();
+        if !running { return; }
         let elapsed = now.saturating_sub(self.last_tick);
         let ticks = elapsed / self.tick_instructions();
         if ticks == 0 { return; }

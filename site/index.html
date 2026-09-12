@@ -996,6 +996,7 @@ function usbDrainMain() {
         hostTxQ.push([flat[i+1], flat[i+2], flat[i+3], Array.from(flat.slice(i+5, i+5+(flat[i+4]||0)))]);
       } else if (t === 21) { adv = 4; // HostRx request: device-mode inbox below
         hostRxQ.push([flat[i+1], flat[i+2], flat[i+3] || 0]);
+      } else if (t === 22) { adv = 3; // ItmByte: firmware printf (no page inbox yet)
       } else if (t === 2 || t === 3 || t === 6 || t === 8 || t === 10) adv = 3;
       if (adv <= 0) break;
       i += adv;

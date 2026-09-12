@@ -23,9 +23,8 @@
 //! 4-byte stride per 16-bit word (only the even halfword of each 32-bit
 //! APB slot is wired, like `USB_WritePMA`/`USB_ReadPMA`).
 //!
-//! Deliberately absent: ESOF generation (host never misses in emulation),
-//! isochronous CTR, PDWN gating (stored only), remote-wakeup electricals
-//! beyond the WKUP flag.
+//! Deliberately absent: isochronous CTR, PDWN gating (stored only),
+//! remote-wakeup electricals beyond the WKUP flag.
 
 use crate::system::{System, VmEvent};
 use super::Peripheral;
@@ -55,12 +54,14 @@ const STAT_VALID: u32 = 0x3;
 const ISTR_CTR: u32 = 1 << 15;
 const ISTR_DIR: u32 = 1 << 4;
 const ISTR_SOF: u32 = 1 << 9;
+const ISTR_ESOF: u32 = 1 << 8;
 const ISTR_SUSP: u32 = 1 << 11;
 const ISTR_WKUP: u32 = 1 << 12;
 // CNTR interrupt-enable bits.
 const CNTR_CTRM: u32 = 1 << 15;
 const CNTR_RESETM: u32 = 1 << 10;
 const CNTR_SOFM: u32 = 1 << 9;
+const CNTR_ESOFM: u32 = 1 << 8;
 const CNTR_SUSPM: u32 = 1 << 11;
 const CNTR_WKUPM: u32 = 1 << 12;
 /// Low-priority USB vector (all CTR/RESET events; no isochronous traffic).
@@ -331,6 +332,11 @@ impl Usb {
         self.suspended = true;
         self.istr |= ISTR_SUSP as u16;
         self.irq(sys, CNTR_SUSPM);
+        // The detached host stops sending SOFs: after the missed frames the
+        // core raises ESOF (expected-SOF). Immediate here (no frame counter
+        // runs while detached); mask-gated like every ISTR flag.
+        self.istr |= ISTR_ESOF as u16;
+        self.irq(sys, CNTR_ESOFM);
     }
 
     /// Device->host IN completion for endpoint n (called on a 0/1/2->VALID
@@ -493,8 +499,8 @@ impl Usb {
             0x40 => self.cntr as u32,
             0x44 => self.istr_read(),
             // FNR: frame number + RXDP (D+ line: 1 while attached).
-            // LSOF/LCK read 0: the host never misses in emulation (no ESOF
-            // generation while attached; detached freezes SOF outright).
+            // LSOF/LCK read 0; ESOF raises on detach (missed host SOFs),
+            // never while attached (SOFs always arrive).
             0x48 => {
                 (self.frame as u32)
                     | (if self.detached { 0 } else { 1 << 15 })

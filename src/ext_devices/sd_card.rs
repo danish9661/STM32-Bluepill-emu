@@ -37,9 +37,10 @@ impl SdCard {
     pub fn sectors(&self) -> u32 { (self.image.len() / 512).max(1) as u32 }
 
     /// R3 OCR value: voltage window + power-up/busy bit + (once ready) CCS.
-    pub fn ocr(&self, ready: bool) -> u32 {
+    /// `ccs` false = standard-capacity card (byte addressing, SDSC).
+    pub fn ocr(&self, ready: bool, ccs: bool) -> u32 {
         // 3.2-3.3V + 3.3-3.4V window, busy bit when still powering up.
-        0x00FF_8000 | if ready { 0xC000_0000 } else { 0 }
+        0x00FF_8000 | if ready { 0x8000_0000 | if ccs { 0x4000_0000 } else { 0 } } else { 0 }
     }
 
     /// R3 OCR for the MMC path (CMD1): same busy polarity, sector-access
@@ -83,6 +84,29 @@ impl SdCard {
         v |= 0x5B5 << 84;                    // CCC
         v |= 9 << 80;                        // READ_BL_LEN = 512 B
         v |= (csize as u128) << 48;          // C_SIZE [69:48]
+        v |= 1;                              // trailing 1 bit
+        [
+            (v >> 96) as u32,
+            (v >> 64) as u32,
+            (v >> 32) as u32,
+            v as u32,
+        ]
+    }
+
+    /// 128-bit CSD v1.0 (R2 order) for byte-addressed SDSC cards:
+    /// C_SIZE is 12 bits with a C_SIZE_MULT multiplier (MULT=7 → 512-block
+    /// units). Small images round UP to a whole unit; out-of-range reads
+    /// zero-fill like the SDHC path.
+    pub fn csd_v1(&self) -> [u32; 4] {
+        let units = (self.sectors() + 511) / 512;
+        let csize = units.saturating_sub(1).min(0xFFF);
+        let mut v: u128 = 0;
+        v |= 0b00 << 126;                    // CSD_STRUCTURE = 1.0
+        v |= 0x32 << 104;                    // TRAN_SPEED
+        v |= 0x5B5 << 92;                    // CCC (12 bits [103:92])
+        v |= 9 << 80;                        // READ_BL_LEN = 512 B
+        v |= (csize as u128) << 62;          // C_SIZE [73:62]
+        v |= 7 << 47;                        // C_SIZE_MULT = 7 (x512 blocks)
         v |= 1;                              // trailing 1 bit
         [
             (v >> 96) as u32,

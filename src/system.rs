@@ -120,6 +120,8 @@ pub enum VmEvent {
     /// OTG_FS host-mode IN token request (device -> host): feed with
     /// otg_host_feed_in.
     HostRx { ch: u8, ep: u8, len: u32 },
+    /// ARM ITM stimulus port 0 byte (firmware printf channel).
+    ItmByte { port: u8, byte: u8 },
 }
 
 /// ARMv7-M MPU region (RBAR + RASR shadows). Plain Copy data behind one
