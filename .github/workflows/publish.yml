@@ -72,9 +72,17 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          npm version ${{ inputs.version }} --no-git-tag-version
-          git add package.json
-          git commit -m "v${{ inputs.version }}"
+          CURRENT=$(node -p "require('./package.json').version")
+          # The version may already be bumped in the tree (e.g. 3.1.0 was
+          # committed with its CHANGELOG entry); npm errors on a no-op
+          # `npm version`, so only bump when it actually differs.
+          if [ "$CURRENT" != "${{ inputs.version }}" ]; then
+            npm version ${{ inputs.version }} --no-git-tag-version
+            git add package.json
+            git commit -m "v${{ inputs.version }}"
+          else
+            echo "package.json already at ${{ inputs.version }}, skipping version bump"
+          fi
 
       - name: Run test suite
         run: npm test
