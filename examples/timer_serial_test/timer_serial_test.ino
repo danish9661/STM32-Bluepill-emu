@@ -7,8 +7,8 @@
  *
  * Tests: serial TX, serial RX, timer interrupt accuracy, custom firmware load
  *
- * NOTE: avoid `new`/String (malloc) — STM32duino's _sbrk uses `mrs msp`,
- * which this WASM emulator's Unicorn CPU cannot decode.
+ * NOTE: `new`/String (malloc) is fine — the native Rust core decodes
+ * STM32duino's _sbrk (`mrs msp`) directly.
  */
 #include <Arduino.h>
 #include <HardwareTimer.h>

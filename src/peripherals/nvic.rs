@@ -242,11 +242,6 @@ impl Nvic {
 
     pub fn clear_current_interrupt(&mut self) {
         self.active_prio_stack.pop();
-        // A fresh boot (NRST path) must not inherit a stale fairness hint:
-        // last_popped survives in the model while everything else resets,
-        // and a same-IRQ re-pend then misfires the yield branch. Cleared
-        // here (every exception return) so it only ever spans one batch.
-        self.last_popped = None;
     }
 
     /// Clear the IABR active bit for a returned exception (external IRQs
@@ -382,19 +377,10 @@ impl Peripheral for Nvic {
                     }
                 }
             }
-            // ICPR alias at 0x280 (ARMv7-M: NVIC_ICPR0 starts at 0xE000E280;
-            // the dispatch read arm at 0x280 above is the ACTIVE alias, the
-            // write arm here is CLEAR-pending — same address, R/CW split).
-            0x280..=0x29C if offset < 0x280 + 4 * REG_WORDS as u32 => {
-                let i = ((offset - 0x280) / 4) as usize;
-                let cleared = self.pending_reg[i] & value;
-                self.pending_reg[i] &= !value;
-                for b in 0..32 {
-                    if cleared & (1 << b) != 0 {
-                        self.pending &= !(1u128 << (IRQ_OFFSET as u32 + i as u32 * 32 + b) as u128);
-                    }
-                }
-            }
+            // 0x280 reads ACTIVE (IABR alias, above); 0x280 WRITES are
+            // RESERVED on ARMv7-M (ICPR lives at 0x180) — ignore, do not
+            // clear pending (an earlier build aliased them and silently
+            // dropped guest ICPR writes to the wrong bank).
             // IABR is read-only by software
             0x200..=0x21C if offset < 0x200 + 4 * REG_WORDS as u32 => {}
             // Byte-level priority access (backward compat, via priority path addr 0xE000E300+)

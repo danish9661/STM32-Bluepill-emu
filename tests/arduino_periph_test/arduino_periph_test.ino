@@ -9,8 +9,8 @@
  * Every test prints a machine-parseable line:
  *     [name] PASS   or   [name] FAIL: <detail>
  *
- * NOTE: no String/new/malloc — STM32duino's _sbrk uses `mrs msp`, which the
- * WASM emulator's Unicorn CPU cannot decode.
+ * NOTE: no String/new/malloc — keeps the sketch within the small-heap
+ * Blue Pill config (and historically dodged an `mrs msp` decode gap).
  *
  * Run with:
  *   echo "AB" | node pkg/cli.mjs --config=tests/arduino_periph_test/config.yaml

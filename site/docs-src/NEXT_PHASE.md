@@ -52,16 +52,12 @@ semantics). Any new peripheral feature is cheaper here than in a merged build.
   the xPSR-restore bug was cli-only), with Rust as the single source of policy.
   Both JS files also unified on restore-from-stacked-frame (a handler that edits the
   saved context is honored).
-- What remains: RAM→RAM moves still need Unicorn (`uc.mem_read`/`mem_write` — Rust has
-  no CPU memory visibility without a shared-linear-memory map, which was retired as
-  moot; DMA RAM traffic is per-transfer, not per-instruction).
-- **Registers/vector fetch stay in JS** — bounded by the architecture: Unicorn owns the
-  CPU state (SP/registers/vector fetch), so the R0-R3/R12/LR/PC/xPSR transport and the
-  handler `emu_start` cannot move into Rust without a `uc_intr`-style injection API
-  (not exposed by this Unicorn build) or stop+re-exec (which is what emulator.js
-  already does, one `emu_start` per IRQ). The Rust side already owns all the policy:
-  pending/active sets, priority dispatch, SysTick debt accounting, batch budget, SVC
-  mirror.
+- **OBSOLETE bullets (pre-native-CPU; kept for history, do not act on):**
+  "What remains: RAM→RAM moves still need Unicorn" and "Registers/vector
+  fetch stay in JS — Unicorn owns the CPU state" described the old dual
+  backend. The native Rust core (`src/cpu/` + `src/native.rs`) owns CPU
+  state and guest RAM in-Rust now: DMA pumps and IRQ dispatch run fully
+  in Rust against Rust RAM with zero JS crossings per instruction.
 
 ### 3. Evaluate a pure-Rust Cortex-M3 emulator (`cargo-cortex-m` / `mdl`)
 Replace Unicorn entirely: no C build, no `unicorn_arm` binary addon, coherent memory

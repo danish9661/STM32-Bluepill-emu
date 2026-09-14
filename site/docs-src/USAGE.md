@@ -244,9 +244,9 @@ fs.writeFileSync('tests/arduino_periph_test/build/spi_flash2.bin', Buffer.alloc(
 ```
 
 > **Staging rule**: always `git add -A` or stage BOTH `pkg/` and `site/` together —
-> CI compares `pkg/emulator.js` against `site/emulator.js`. `scripts/sync-site.sh`
-> copies fresh artifacts (`pkg/*.js`, `pkg/*.wasm`, `pkg/emulator.js`, `pkg/index.html`,
-> `pkg/*.cjs`) into `site/`.
+> CI compares `pkg/emulator.js` against `site/emulator.js`. `site/sync-docs.mjs`
+> copies fresh artifacts (`pkg/*.js`, `pkg/*.wasm`, `pkg/emulator.js`, `pkg/index.html`)
+> into `site/`.
 
 Disassembly for ISR debugging (Windows PowerShell):
 `arm-none-eabi-objdump -d tests/arduino_periph_test/build/arduino_periph_test.ino.elf > isr.asm`

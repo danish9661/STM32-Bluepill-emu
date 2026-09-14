@@ -859,6 +859,7 @@ pub fn board_nrst() -> u32 {
         let mut nvic = sys.p.nvic.borrow_mut();
         *nvic = crate::peripherals::nvic::Nvic::default();
         sys.pending_dma.borrow_mut().clear();
+        sys.absorb_buf.borrow_mut().clear();
         sys.event_queue.borrow_mut().clear();
         sys.i2c_dr_hook.set(false);
     }

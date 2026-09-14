@@ -3,11 +3,9 @@ node_modules/
 examples/blink_arduino/build/
 examples/blink_standalone/build/
 examples/blink_test/
-third_party/unicorn/
 *.bin
 *.o
 *.elf
-third_party/alexaltea-unicorn-js-*.tgz
 examples/serial_echo_test/build/
 examples/timer_serial_test/build/
 tests/arduino_periph_test/build/core/
