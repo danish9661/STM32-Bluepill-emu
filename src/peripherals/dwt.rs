@@ -67,6 +67,12 @@ impl Peripheral for Dwt {
         self.last_count = Self::count_now();
     }
 
+    fn rebase_clock(&mut self, _sys: &System, now: u64) {
+        // NRST zeroes the count: re-anchor without retiring (same shape as
+        // tick_frozen — cycles are computed from the live count anyway).
+        self.last_count = now;
+    }
+
     fn read(&mut self, sys: &System, offset: u32) -> u32 {
         match offset {
             0x00 => self.ctrl,

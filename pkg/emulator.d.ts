@@ -283,6 +283,17 @@ export interface BluepillEmulator {
   /** Last CPU fault ([pc, op]) since the previous call, if any. */
   takeFault(): [number, number] | null;
 
+  // ── Board hardware: NRST / BOOT0 / LED identity ──────────────────────────
+
+  /** NRST press: model reset + CPU/RAM reloaded, counters zeroed. Returns true when BOOT0 claims the bootloader path. */
+  reset(): boolean;
+  /** Strap the BOOT0 jumper (true = boot system memory / bootloader). */
+  setBoot0(high: boolean): void;
+  /** Read back the BOOT0 strap level. */
+  getBoot0(): boolean;
+  /** Wiring facts for the current chip: LED, user button (null when the board has none), BOOT0/NRST presence, clocks. */
+  boardInfo(): { led: { port: number; pin: number; name: string }; button: { port: number; pin: number; level: string; name: string } | null; boot0: boolean; nrst: boolean; crystalHz: number; maxSysclkMhz: number };
+
   // ── ARM debug-port slice (SWD + JTAG-DP + watchpoints) ────────────────────
 
   /** True while the core is halted (DHCSR C_HALT / watchpoint / VC). */

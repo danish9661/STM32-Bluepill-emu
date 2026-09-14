@@ -87,7 +87,10 @@ impl Usart {
         if self.cr1 & (1 << 6) != 0 && self.sr & (1 << 6) != 0 { pending = true; } // TCIE + TC
         // TXEIE + TXE: the ISR drains the core's software TX ring; the
         // 16-IRQ-per-batch cap bounds re-pending, and the core ISR clears
-        // TXEIE once the ring empties, so no storm is possible.
+        // TXEIE once the ring empties, so no storm is possible. (Do NOT
+        // remove this arm: STM32duino's first print uses
+        // HAL_UART_Transmit_IT, which stalls forever without the TXE IRQ —
+        // removing it wedged every firmware boot with zero UART output.)
         if self.cr1 & (1 << 7) != 0 && self.sr & (1 << 7) != 0 { pending = true; }
         if self.cr1 & (1 << 5) != 0 && self.sr & (1 << 5) != 0 { pending = true; } // RXNEIE + RXNE
         if self.cr2 & (1 << 6) != 0 && self.sr & (1 << 8) != 0 { pending = true; } // LBDIE + LBD
@@ -211,6 +214,15 @@ impl Usart {
 }
 
 impl Peripheral for Usart {
+    fn rebase_clock(&mut self, _sys: &System, now: u64) {
+        // A TX byte "in flight" (TXE held clear until its byte-time
+        // elapses) must not outlive the reset: re-anchor the deadline to
+        // now so the post-reset firmware sees a clean transmitter.
+        if self.txe_clear_until != 0 {
+            self.txe_clear_until = now;
+        }
+    }
+
     fn tick(&mut self, sys: &System) {
         if self.sr & 0x80 == 0 && self.txe_ready() {
             self.sr |= 0x80;

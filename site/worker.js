@@ -90,7 +90,9 @@ async function handleMessage(e) {
         const regs = emu.getRegisters();
         let idcode = null;
         try { idcode = emu.periphRead(0xE0042000, 4) >>> 0; } catch {}
-        post('ready', { pc: regs.PC, sp: regs.SP, idcode });
+        let board = null;
+        try { board = emu.boardInfo(); } catch {}
+        post('ready', { pc: regs.PC, sp: regs.SP, idcode, board });
       } catch (err) {
         try { self.postMessage({ type: 'debug', msg: 'createEmulator err: '+(err.message||String(err)) }); } catch {}
         post('error', { message: err.message || String(err) });
@@ -120,6 +122,21 @@ async function handleMessage(e) {
     }
     case 'gpioSetInput': {
       if (emu) emu.gpioSetInput(msg.port, msg.pin, !!msg.value);
+      break;
+    }
+    case 'boardReset': {
+      // NRST press in the WASM (model reset + CPU/RAM reload, zeroed
+      // counters — same path as the main-thread Reset). Replies 'resetDone'.
+      if (emu) {
+        const tookBoot = emu.reset();
+        running = false;
+        try { totalInst = 0; } catch {}
+        post('resetDone', { bootloader: !!tookBoot });
+      }
+      break;
+    }
+    case 'boardBoot0': {
+      if (emu) emu.setBoot0(!!msg.high);
       break;
     }
     case 'usbSetup': {

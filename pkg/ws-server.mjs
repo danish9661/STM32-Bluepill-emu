@@ -68,6 +68,8 @@ wss.on('connection', (ws) => {
             if (cmd.type === 'uart_rx')       emu.uartRxAddr(cmd.addr || 0x40013800, cmd.byte);
             else if (cmd.type === 'gpio_set')  emu.gpioSetInput(cmd.port, cmd.pin, cmd.high);
             else if (cmd.type === 'can_inject') emu.canInjectMessage(cmd.addr, cmd.tir, cmd.tdtr, cmd.tdlr, cmd.tdhr);
+            else if (cmd.type === 'board_reset') { const b = emu.reset(); ws.send(JSON.stringify({ type: 'resetDone', bootloader: !!b })); }
+            else if (cmd.type === 'board_boot0')  emu.setBoot0(!!cmd.high);
         } catch (e) { /* ignore bad commands */ }
     });
     // Send a welcome frame so the client knows it's connected

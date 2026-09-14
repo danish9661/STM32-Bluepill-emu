@@ -235,7 +235,8 @@ export async function createEmulator(opts = {}) {
     gpio_set_input, gpio_read_input,
     can_inject_message, adc_set_sim_value, gpio_set_analog, adc_set_rc_tau,
     touchscreen_set_touch, pwm_duty, raise_fault,
-     i2c_oled_fb, lcd_fb, gpio_take_pin_events,     drain_events, spi_inject_miso, i2c_inject_rx, i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop, i2c_inject_alert, bootloader_enable, bootloader_go_addr, pwr_mode, pwr_estimate, adc_set_internal, usb_bus_reset, usb_detach, usb_inject_setup, usb_inject_out, otg_inject_setup, otg_inject_out, otg_bus_reset, otg_detach, otg_host_feed_in, otg_host_attach,
+     i2c_oled_fb, lcd_fb, gpio_take_pin_events,     drain_events, spi_inject_miso, i2c_inject_rx, i2c_inject_start, i2c_inject_write, i2c_inject_read, i2c_inject_stop, i2c_inject_alert,     bootloader_enable, bootloader_go_addr, pwr_mode, pwr_estimate, adc_set_internal, usb_bus_reset, usb_detach, usb_inject_setup, usb_inject_out, otg_inject_setup, otg_inject_out, otg_bus_reset, otg_detach, otg_host_feed_in, otg_host_attach,
+    board_info, board_boot0, board_boot0_get, board_nrst,
     rustcpu_init, rustcpu_load, rustcpu_run, rustcpu_fault, rustcpu_fault_clear, rustcpu_dispatch,
     rustcpu_regs, rustcpu_set_pc, rustcpu_set_reg, rustcpu_mem_read, rustcpu_mem_write, rustcpu_mem_write_raw, rustcpu_dma_pump, rustcpu_i2c_hook_fired,
     rustcpu_write_tap, rustcpu_take_writes, set_dbg_idcode,
@@ -349,6 +350,33 @@ export async function createEmulator(opts = {}) {
         if (verbose) console.log(`ELF: ${wrote} load segments written`);
     }
     if (fwBytes.length > 0) rustcpu_load(fwBytes, fwAddr >>> 0);
+    // Reloadable image (NRST path below): re-init CPU + reload bytes.
+    const bootCpu = () => {
+        const vecAt = (off) => {
+            const a = vector_table + off;
+            if (elfRegions) {
+                for (const reg of elfRegions) {
+                    if (a >= reg.start && a + 4 <= reg.start + reg.data.length) {
+                        const o = a - reg.start;
+                        return (reg.data[o] | (reg.data[o + 1] << 8) | (reg.data[o + 2] << 16) | (reg.data[o + 3] << 24)) >>> 0;
+                    }
+                }
+                return 0;
+            }
+            const o = a - fwAddr;
+            if (!fwBytes.length || o < 0 || o + 4 > fwBytes.length) return 0;
+            return (fwBytes[o] | (fwBytes[o + 1] << 8) | (fwBytes[o + 2] << 16) | (fwBytes[o + 3] << 24)) >>> 0;
+        };
+        rustcpu_init(vecAt(0), vecAt(4), flash_size, ram_size);
+        if (elfRegions) {
+            for (const reg of elfRegions) {
+                const inFlash = reg.start >= flash_addr && reg.start < flash_addr + flash_size;
+                const inRam = reg.start >= 0x20000000 && reg.start < 0x20000000 + ram_size;
+                if (inFlash || inRam) rustcpu_load(reg.data, reg.start >>> 0);
+            }
+        }
+        if (fwBytes.length > 0) rustcpu_load(fwBytes, fwAddr >>> 0);
+    };
 
     const read32 = (addr) => {
         const b = rustcpu_mem_read(addr >>> 0, 4);
@@ -547,6 +575,46 @@ export async function createEmulator(opts = {}) {
 
         stop() {
             stopRequested = true;
+        },
+
+        // ---- Board hardware: NRST / BOOT0 / LED identity ----
+        // All three live in the WASM itself (`board_*` exports), so any
+        // driver (page, worker, ws-server, GDB) calls the same path:
+        // - `reset()` = NRST press: model state reset + CPU/RAM reloaded
+        //   from the boot image, counters back to zero (like power-on, the
+        //   page's old Reset which re-created the whole emulator).
+        // - `setBoot0(high)` = strap the BOOT0 jumper; read back with
+        //   `getBoot0()`. A reset with BOOT0 high claims the USART1
+        //   bootloader path (AN3155 responder) instead of main flash.
+        // - `boardInfo()` = wiring facts for the current `chip` opt:
+        //   { led:{port,pin,name}, button:{port,pin,level,name}|null,
+        //     boot0:true, nrst:true, crystalHz, maxSysclkMhz }.
+        reset() {
+            const tookBoot = board_nrst();
+            bootCpu();
+            instCount = 0;
+            batchInstCount = 0;
+            lastFault = null;
+            stopRequested = false;
+            // Drain the UART tap so pre-reset output (echo banner, prior
+            // traffic) can't leak into the fresh boot's getUartOutput().
+            try { get_uart_output(); } catch {}
+            return tookBoot === 1;
+        },
+        setBoot0(high) { board_boot0(!!high); },
+        getBoot0() { return board_boot0_get(); },
+        boardInfo() {
+            const chipIdx = { stm32f103c8: 0, stm32f103cb: 0, maple_mini: 1, nucleo_f103rb: 2, stm32f103rc: 3, stm32f105: 4, gd32f103c8: 5, gd32f103cb: 5, gd32f103rb: 5 }[(typeof chip === 'string') ? chip : ''] ?? 0;
+            const v = board_info(chipIdx);
+            const pname = (p) => p === 0 ? 'A' : p === 1 ? 'B' : 'C';
+            return {
+                led: { port: v[0], pin: v[1], name: `P${pname(v[0])}${v[1]}` },
+                button: v[2] > 2 ? null : { port: v[2], pin: v[3], level: v[4] ? 'HIGH' : 'LOW', name: chipIdx === 1 ? 'BUT (PB8)' : 'B1 (PC13)' },
+                boot0: !!v[5],
+                nrst: !!v[6],
+                crystalHz: v[7],
+                maxSysclkMhz: v[8],
+            };
         },
 
         getRegisters() {

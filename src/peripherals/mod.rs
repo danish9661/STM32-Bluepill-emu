@@ -181,6 +181,11 @@ pub trait Peripheral {
     /// Instruction-delta peripherals must advance their delta base here without
     /// processing state, so they don't catch up when the CPU wakes.
     fn tick_frozen(&mut self, _sys: &System) {}
+    /// Rebase the instruction-delta clock to `now` (NRST path): move the
+    /// delta base without processing state — same shape as tick_frozen,
+    /// but for count jumps rather than sleep. Default no-op (peripherals
+    /// without a delta clock need nothing).
+    fn rebase_clock(&mut self, _sys: &System, _now: u64) {}
     /// Whether the peripheral is currently enabled/running (e.g. TIM CEN bit).
     fn is_enabled(&self) -> bool { false }
     /// Raise a fault (kind: 0=fetch, 1=read, 2=write, 3=undef instruction), setting
@@ -604,6 +609,32 @@ impl Peripherals {
             0x1C => { enrs.2 = value; }
             _ => {},
         }
+    }
+
+    /// Rebase every instruction-delta clock in the model to `now`
+    /// (INSTRUCTION_COUNT): call after the global count jumps (NRST reset
+    /// zeroes it) so no peripheral sees a wrapped/huge delta and tries to
+    /// "catch up" thousands of ticks at once. NRST-shaped: free (no guest
+    /// state changes — CEN/CNT/SR untouched, only the delta bases move).
+    pub fn rebase_clocks(&self, sys: &System, now: u64) {
+        // NOTE: no bus RefCell or peripheral RefCell may be held across a
+        // rebase_clock call — TIM's rebase reads sibling state
+        // (afio_remap_status → bus.get + peripheral.borrow on AFIO), and
+        // nesting borrows panics with "RefCell already borrowed" (the bus
+        // borrow AND the slot's own peripheral borrow must both drop
+        // first; borrow_mut on the slot while rebase re-borrows AFIO is
+        // the exact panic seen in board_nrst).
+        let n = self.bus.borrow().len();
+        for i in 0..n {
+            let raw: *const RefCell<Box<dyn Peripheral>> = {
+                let bus = self.bus.borrow();
+                &bus.slot_at(i).peripheral as *const _
+            };
+            unsafe { (*raw).borrow_mut() }.rebase_clock(sys, now);
+        }
+        let mut nvic = self.nvic.borrow_mut();
+        nvic.last_systick_trigger = now;
+        nvic.systick_debt = 0;
     }
 
     /// PWM duty (0-100) of a timer channel, 0 if the address is not a timer.

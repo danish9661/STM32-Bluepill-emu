@@ -72,6 +72,8 @@ When a browser sends a JSON message, the server dispatches it to the emulator:
 | `uart_rx` | `byte` (0–255), `addr` (optional, default `0x40013800` = USART1) | `emu.uartRxAddr(addr, byte)` |
 | `gpio_set` | `port` (0=A, 1=B, 2=C), `pin` (0–15), `high` (bool) | `emu.gpioSetInput(port, pin, high)` |
 | `can_inject` | `addr`, `tir`, `tdtr`, `tdlr`, `tdhr` | `emu.canInjectMessage(addr, tir, tdtr, tdlr, tdhr)` |
+| `board_reset` | — | `emu.reset()` (NRST: model + CPU reload, counters zero; replies `{type:'resetDone', bootloader}`) |
+| `board_boot0` | `high` (bool) | `emu.setBoot0(high)` (BOOT0 strap; reset with high takes the bootloader path) |
 
 ## Viewer — `site/ws-viewer.html`
 

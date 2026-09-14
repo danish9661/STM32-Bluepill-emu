@@ -781,6 +781,99 @@ pub fn bootloader_go_addr() -> i32 {
     peripherals::bootloader::go_addr().map(|a| a as i32).unwrap_or(-1)
 }
 
+/// Board identity block (BOOT/RST buttons + LED + clock note). One call
+/// replaces per-board docs lookups for drivers: the model only knows
+/// reset/boot *semantics* (BOOT0 held at reset → bootloader on USART1;
+/// NRST → AIRCR SYSRESETREQ), but a widget layer needs the hardware
+/// facts too (which LED lights, which user button exists per board).
+///
+/// `chip`: 0=f103c8/cb pill, 1=maple_mini, 2=nucleo_f103rb,
+/// 3=f103rc, 4=f105, 5=gd32 pills. Returns
+/// [led_port, led_pin, btn_port, btn_pin, btn_level, boot_present,
+///  nrst_present, crystal_hz, max_sysclk_mhz]:
+/// - LED: (port 0=A/1=B/2=C, pin) driven by firmware.
+/// - BTN: user button (port, pin, active level); Maple BUT=PB8/LOW,
+///   Nucleo B1=PC13/HIGH, pills have NO user button (port = 0xFF).
+/// - boot_present/nrst_present: every board in the table has both.
+/// - crystal/fonts: 8 MHz HSE everywhere modeled; max SYSCLK 72 MHz
+///   (instruction-budget timing — see `rcc_clocks_hz`).
+#[wasm_bindgen]
+pub fn board_info(chip: u32) -> Vec<u32> {
+    match chip {
+        1 => vec![1, 1, 1, 8, 0, 1, 1, 8_000_000, 72], // PB1 LED, PB8 BUT
+        2 => vec![0, 5, 2, 13, 1, 1, 1, 8_000_000, 72], // PA5 LD2, PC13 B1
+        _ => vec![2, 13, 0xFF, 0xFF, 0, 1, 1, 8_000_000, 72], // PC13 LED, no BTN
+    }
+}
+
+/// BOOT0 strap state (false = BOOT0 low = boot main flash, the power-on
+/// default; true = BOOT0 high = boot system memory / bootloader path).
+/// Read by `board_nrst()` at reset. JS drives the page BOOT0 jumper.
+static BOOT_PIN_HIGH: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Set the BOOT0 strap level (page BOOT0 jumper / host-driven probe).
+#[wasm_bindgen]
+pub fn board_boot0(high: bool) {
+    BOOT_PIN_HIGH.store(high, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Read back the BOOT0 strap level.
+#[wasm_bindgen]
+pub fn board_boot0_get() -> bool {
+    BOOT_PIN_HIGH.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// NRST press: full model reset — INSTRUCTION_COUNT to zero (all
+/// instruction-delta peripherals rebase; without this a post-reset tick
+/// sees now=0 against stale last_tick≈200K and every peripheral tries to
+/// "catch up" 200K ticks at once — the USART TXE storm wedged Node in
+/// process_batch), model-wide NVIC/DMA/event state cleared, pins,
+/// bootloader claim, debug mirrors.
+/// NOTE: the *native CPU + guest RAM* live in the driver (emulator.js
+/// recreates them via its own `reset()` path + firmware reload; this
+/// export only resets the map-independent model state). Returns 1 when
+/// the bootloader path is taken, else 0.
+#[wasm_bindgen]
+pub fn board_nrst() -> u32 {
+    let boot = BOOT_PIN_HIGH.load(std::sync::atomic::Ordering::Relaxed);
+    // Fresh model state (mirrors init(): counters, pins, bootloader).
+    system::INSTRUCTION_COUNT.store(0, std::sync::atomic::Ordering::Relaxed);
+    peripherals::gpio::clear_pin_events();
+    peripherals::bootloader::reset();
+    peripherals::bootloader::set_enabled(boot);
+    system::reset_debug_mirrors();
+    // Model-wide NVIC state (the old SYS is dropped on the floor — its
+    // NVIC keeps pending/active/priority/debt/SysTick phase from the
+    // pre-reset run, and the next tick/dispatch wedges on it: USART1 TXE
+    // (IRQ37, ISER-kept-enabled + SR-kept-set) re-pends forever into a
+    // raised active-priority ceiling, so process_batch never returns).
+    // NVIC/SysTick have no guest-visible reset hook, so clear here.
+    {
+        let sys = crate::sys();
+        // Rebase FIRST (borrows each peripheral slot one at a time; the
+        // NVIC borrow below must not be held across it — rebase itself
+        // touches sys.p.nvic for the SysTick phase, nesting borrow_mut on
+        // the same RefCell panics "already borrowed").
+        sys.p.rebase_clocks(sys, 0);
+        let mut nvic = sys.p.nvic.borrow_mut();
+        *nvic = crate::peripherals::nvic::Nvic::default();
+        sys.pending_dma.borrow_mut().clear();
+        sys.event_queue.borrow_mut().clear();
+        sys.i2c_dr_hook.set(false);
+    }
+    // NOTE: the native CPU + guest RAM are NOT touched here — they belong
+    // to the driver (emulator.js re-inits + reloads firmware in its own
+    // `reset()` right after this call). Clearing NATIVE here orphaned the
+    // CPU mid-session: the next rustcpu_run panicked ("backend not
+    // initialized") and the wasm `expect` unwind wedged Node (bisect27).
+    // NOTE: the peripheral map itself is NOT rebuilt here (the active map —
+    // hardcoded F103 vs F105 SVD — is chosen at init; rebuilding the wrong
+    // one would silently switch an F105 board to F103). The driver reloads
+    // firmware + CPU around this call anyway.
+    if boot { 1 } else { 0 }
+}
+
 /// Power-state mapping (pure, unit-tested): 0=RUN, 1=SLEEP (WFI, no deep),
 /// 2=STOP (WFI + SLEEPDEEP), 3=STANDBY (WFI + SLEEPDEEP + PWR PDDS).
 pub fn pwr_mode_of(sleeping: bool, deep: bool, standby_sel: bool) -> u32 {

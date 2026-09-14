@@ -205,6 +205,10 @@ header a.nav:hover { background: rgba(14,116,144,0.25); color: #a5f3fc; border-c
 
 /* ── Toolbar & Buttons ──────────────────────────────────────────────────── */
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+/* Board hardware row: NRST / BOOT0 / user button / LED lamp */
+#boardBtnRow button.armed { border-color: var(--amber); color: var(--amber); box-shadow: 0 0 10px rgba(251,191,36,0.35); }
+#boardLed { font-size: 20px; color: #334155; line-height: 1; margin-left: 4px; }
+#boardLed.on { color: #4ade80; text-shadow: 0 0 10px rgba(74,222,128,0.8); }
 .toolbar .grow { flex: 1 1 200px; }
 button {
   background: #0a1224; color: var(--dim); border: 1px solid var(--line);
@@ -572,7 +576,13 @@ footer .foot-tag {
                 <label class="file-btn">Load .map <input type="file" id="mapInput" accept=".map"></label>
                 <button id="runBtn" disabled>▶ Run</button>
                 <button id="stopBtn" class="danger" disabled>Stop</button>
-                <button id="resetBtn" disabled>Reset</button>
+                <button id="resetBtn" disabled title="NRST press (model reset + CPU/RAM reloaded, counters zeroed)">Reset ⏻</button>
+            </div>
+            <div class="toolbar" id="boardBtnRow" hidden>
+                <button id="nrstBtn" title="NRST press: full model reset, counters to zero (BOOT0 selects flash vs bootloader)">NRST ⏻</button>
+                <button id="bootBtn" title="BOOT0 strap: ON = boot system memory (USART1 bootloader path)">BOOT0: OFF</button>
+                <button id="usrBtn" title="Board user button (Maple BUT / Nucleo B1)">USR</button>
+                <span id="boardLed" title="Board LED (follows its GPIO drive)">●</span>
             </div>
             <div class="instr">
                 <div class="tile"><div class="k">Instr</div><div class="v" id="instCount">0</div></div>
@@ -726,6 +736,8 @@ function handleWorkerMsg(e) {
     if (firmwareData) log(`Loaded ${firmwareData.name || 'firmware'} on ${firmwareData.chip === 'stm32f105' ? 'STM32F105' : (firmwareData.chip || 'stm32f103c8')} (${firmwareData.bytes?.length || '?'} bytes) — worker ready. PC=0x${regs.PC.toString(16).padStart(8,'0')}`);
     updateRegsWorker(m.pc, m.sp, null);
     showChip(m.idcode);
+    workerBoardInfo = m.board || null;
+    boardButtonsInitWorker();
     setState('Ready');
   } else if (m.type === 'frame') {
     // stats
@@ -1491,6 +1503,8 @@ function updateVisuals() {
         const art = boardArt();
         const ledOn = !!emu.gpioReadOutput(art.led.port, art.led.num);
         renderBoard(ledOn);
+        const lamp = $('boardLed');
+        if (lamp) lamp.classList.toggle('on', ledOn);
         renderGpio();
         renderShowcase();
     } catch (e) {}
@@ -1634,6 +1648,7 @@ async function initEmulator(data, name, extDevices = {}, needsMainThread = false
         updateRegs();
         updateVisuals();
         try { showChip(emu.periphRead(0xE0042000, 4)); } catch {}
+        boardButtonsInit();
         const ph2 = $('gpioPlaceholder'); if (ph2) ph2.style.display = 'none';
         setState('Ready');
     } catch (e) {
@@ -2249,8 +2264,98 @@ $('stopBtn').addEventListener('click', () => {
 $('resetBtn').addEventListener('click', async () => {
     running = false;
     cancelAnimationFrame(animId);
-    if (firmwareData) await initEmulator(firmwareData, 'firmware');
+    if (useWorker && worker) {
+        worker.postMessage({ type: 'boardReset' });
+        log('NRST pressed — resetting…', 't-in');
+    } else if (emu) {
+        const tookBoot = emu.reset();
+        updateRegs();
+        updateVisuals();
+        pollUart();
+        setState('Ready');
+        log(tookBoot ? 'NRST pressed — BOOT0 high: USART1 bootloader path.' : 'NRST pressed — counters zeroed, back at reset vector.', 't-in');
+    }
 });
+
+// ---- Board hardware row: NRST / BOOT0 / user button / LED lamp ----
+// All semantics live in the WASM (`board_*` exports via emu.reset /
+// setBoot0 / boardInfo); these widgets only call them. The USR button
+// drives the board's user input (Maple BUT=PB8 active-low, Nucleo
+// B1=PC13 active-high); pills have no user button, so it hides. The LED
+// lamp reads the board's LED GPIO each visual pass (like the rig).
+let bootStrapped = false;
+const boardButtonsInit = () => {
+    const row = $('boardBtnRow');
+    if (!row || !emu) { if (row) row.hidden = true; return; }
+    let info = null;
+    try { info = emu.boardInfo(); } catch { row.hidden = true; return; }
+    row.hidden = false;
+    const ledName = info?.led?.name || 'PC13';
+    $('boardLed').title = `Board LED ${ledName} (follows its GPIO drive)`;
+    const btn = info?.button;
+    const usr = $('usrBtn');
+    if (!btn) {
+        usr.hidden = true;
+    } else {
+        usr.hidden = false;
+        usr.textContent = `USR ${btn.name}`;
+        usr.title = `Board user button ${btn.name} (active-${btn.level}) — press-and-hold drives it`;
+    }
+    $('bootBtn').textContent = `BOOT0: ${bootStrapped ? 'ON' : 'OFF'}`;
+    $('bootBtn').classList.toggle('armed', bootStrapped);
+    if (useWorker && worker) worker.postMessage({ type: 'boardBoot0', high: bootStrapped });
+    else if (emu) emu.setBoot0(bootStrapped);
+};
+$('nrstBtn').addEventListener('click', () => $('resetBtn').click());
+$('bootBtn').addEventListener('click', () => {
+    bootStrapped = !bootStrapped;
+    $('bootBtn').textContent = `BOOT0: ${bootStrapped ? 'ON' : 'OFF'}`;
+    $('bootBtn').classList.toggle('armed', bootStrapped);
+    if (useWorker && worker) worker.postMessage({ type: 'boardBoot0', high: bootStrapped });
+    else if (emu) emu.setBoot0(bootStrapped);
+    log(`BOOT0 jumper ${bootStrapped ? 'ON (reset boots the USART1 bootloader path)' : 'OFF (reset boots main flash)'}`, 't-in');
+});
+const usrDown = () => {
+    let info = null;
+    try { info = emu?.boardInfo(); } catch {}
+    const btn = useWorker ? workerUsrBtn() : info?.button;
+    if (!btn) return;
+    const active = btn.level === 'LOW' ? false : true;
+    if (useWorker && worker) worker.postMessage({ type: 'gpioSetInput', port: btn.port, pin: btn.pin, value: active });
+    else if (emu) emu.gpioSetInput(btn.port, btn.pin, active);
+};
+const usrUp = () => {
+    let info = null;
+    try { info = emu?.boardInfo(); } catch {}
+    const btn = useWorker ? workerUsrBtn() : info?.button;
+    if (!btn) return;
+    const idle = btn.level === 'LOW' ? true : false;
+    if (useWorker && worker) worker.postMessage({ type: 'gpioSetInput', port: btn.port, pin: btn.pin, value: idle });
+    else if (emu) emu.gpioSetInput(btn.port, btn.pin, idle);
+};
+// Worker path: main thread has no emu; cache the last boardInfo forwarded
+// by the worker's ready/frame messages (sent on init).
+let workerBoardInfo = null;
+const workerUsrBtn = () => workerBoardInfo?.button || null;
+const boardButtonsInitWorker = () => {
+    const row = $('boardBtnRow');
+    if (!row || !workerBoardInfo) { if (row) row.hidden = true; return; }
+    row.hidden = false;
+    $('boardLed').title = `Board LED ${workerBoardInfo.led?.name || 'PC13'} (follows its GPIO drive)`;
+    const btn = workerBoardInfo.button;
+    const usr = $('usrBtn');
+    if (!btn) usr.hidden = true;
+    else {
+        usr.hidden = false;
+        usr.textContent = `USR ${btn.name}`;
+        usr.title = `Board user button ${btn.name} (active-${btn.level}) — press-and-hold drives it`;
+    }
+    $('bootBtn').textContent = `BOOT0: ${bootStrapped ? 'ON' : 'OFF'}`;
+    $('bootBtn').classList.toggle('armed', bootStrapped);
+};
+$('usrBtn').addEventListener('mousedown', usrDown);
+$('usrBtn').addEventListener('mouseup', usrUp);
+$('usrBtn').addEventListener('mouseleave', usrUp);
 
 $('sendBtn').addEventListener('click', sendUart);
 $('uartInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendUart(); });

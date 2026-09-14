@@ -121,6 +121,8 @@ jobs:
         run: node tests/test_spec_vectors.mjs
       - name: DFU bootloader (AN3155 session)
         run: node tests/test_bootloader.mjs
+      - name: Board hardware (NRST/BOOT0/boardInfo in WASM)
+        run: node tests/test_board_buttons.mjs
       - name: Firmware format + ESM smoke tests
         run: |
           node tests/test_firmware_formats.mjs

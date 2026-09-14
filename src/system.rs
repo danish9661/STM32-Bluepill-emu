@@ -342,7 +342,7 @@ impl MpuState {
 }
 
 pub struct WasmSystem {
-    pub p: Rc<Peripherals>,    pending_dma: RefCell<Vec<DmaTransfer>>,
+    pub p: Rc<Peripherals>,    pub pending_dma: RefCell<Vec<DmaTransfer>>,
     absorb_buf: RefCell<Vec<u8>>,
     /// Virtual-peripheral transaction event queue (SPI/I2C/USART), drained by JS.
     pub event_queue: RefCell<Vec<VmEvent>>,

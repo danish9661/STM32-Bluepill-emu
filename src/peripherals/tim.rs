@@ -165,7 +165,11 @@ impl Timer {
             Box::new(Self {
                 cr1: 0, cr2: 0, smcr: 0, dier: 0, sr: 0, egr: 0,
                 ccmr1: 0, ccmr2: 0, ccer: 0, cnt: 0, psc: 0,
-                arr: 0xFFFF_FFFF,
+                // Reset value is 0xFFFF (RM0008: ARR reset = 0xFFFF, the
+                // TOP of the 16-bit counter — NOT 0xFFFF_FFFF, which made
+                // every closed-form jump compute over a 4B-tick window and
+                // wedged the post-NRST catch-up tick in process_batch).
+                arr: 0xFFFF,
                 ccr: [0; 4], rcr: 0, dcr: 0, dmar: 0, burst_idx: 0, or_: 0,
                  ccmr3: 0, ccr5: 0, ccr6: 0, pwm_duty: [0; 4],
                 bdtr: 0,
@@ -601,6 +605,15 @@ impl Peripheral for Timer {
     /// advancing the counter (the timer clock is gated in deep sleep).
     fn tick_frozen(&mut self, _sys: &System) {
         self.last_tick = instruction_count();
+    }
+
+    fn rebase_clock(&mut self, _sys: &System, now: u64) {
+        // NOTE: AFIO-remap reads are skipped here on purpose: the remap
+        // query re-borrows the bus + AFIO peripheral, which panics when
+        // called under the slot's own borrow_mut (board_nrst rebase loop).
+        // Input-capture pin sampling needs no remap for the rebase (only
+        // the delta base moves; edges are sampled on the next tick).
+        self.last_tick = now;
     }
 
     fn read(&mut self, sys: &System, offset: u32) -> u32 {

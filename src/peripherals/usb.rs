@@ -574,6 +574,10 @@ impl Usb {
 }
 
 impl Peripheral for Usb {
+    fn rebase_clock(&mut self, _sys: &System, now: u64) {
+        self.last_tick = now;
+    }
+
     fn tick(&mut self, sys: &System) {
         self.tick_usb(sys);
     }

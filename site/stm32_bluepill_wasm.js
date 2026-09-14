@@ -150,6 +150,68 @@ export function add_touchscreen(peripheral, touch_detected_pin, cs) {
 }
 
 /**
+ * Set the BOOT0 strap level (page BOOT0 jumper / host-driven probe).
+ * @param {boolean} high
+ */
+export function board_boot0(high) {
+    wasm.board_boot0(high);
+}
+
+/**
+ * Read back the BOOT0 strap level.
+ * @returns {boolean}
+ */
+export function board_boot0_get() {
+    const ret = wasm.board_boot0_get();
+    return ret !== 0;
+}
+
+/**
+ * Board identity block (BOOT/RST buttons + LED + clock note). One call
+ * replaces per-board docs lookups for drivers: the model only knows
+ * reset/boot *semantics* (BOOT0 held at reset → bootloader on USART1;
+ * NRST → AIRCR SYSRESETREQ), but a widget layer needs the hardware
+ * facts too (which LED lights, which user button exists per board).
+ *
+ * `chip`: 0=f103c8/cb pill, 1=maple_mini, 2=nucleo_f103rb,
+ * 3=f103rc, 4=f105, 5=gd32 pills. Returns
+ * [led_port, led_pin, btn_port, btn_pin, btn_level, boot_present,
+ *  nrst_present, crystal_hz, max_sysclk_mhz]:
+ * - LED: (port 0=A/1=B/2=C, pin) driven by firmware.
+ * - BTN: user button (port, pin, active level); Maple BUT=PB8/LOW,
+ *   Nucleo B1=PC13/HIGH, pills have NO user button (port = 0xFF).
+ * - boot_present/nrst_present: every board in the table has both.
+ * - crystal/fonts: 8 MHz HSE everywhere modeled; max SYSCLK 72 MHz
+ *   (instruction-budget timing — see `rcc_clocks_hz`).
+ * @param {number} chip
+ * @returns {Uint32Array}
+ */
+export function board_info(chip) {
+    const ret = wasm.board_info(chip);
+    var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
+}
+
+/**
+ * NRST press: full model reset — INSTRUCTION_COUNT to zero (all
+ * instruction-delta peripherals rebase; without this a post-reset tick
+ * sees now=0 against stale last_tick≈200K and every peripheral tries to
+ * "catch up" 200K ticks at once — the USART TXE storm wedged Node in
+ * process_batch), model-wide NVIC/DMA/event state cleared, pins,
+ * bootloader claim, debug mirrors.
+ * NOTE: the *native CPU + guest RAM* live in the driver (emulator.js
+ * recreates them via its own `reset()` path + firmware reload; this
+ * export only resets the map-independent model state). Returns 1 when
+ * the bootloader path is taken, else 0.
+ * @returns {number}
+ */
+export function board_nrst() {
+    const ret = wasm.board_nrst();
+    return ret >>> 0;
+}
+
+/**
  * Enable/disable the system-memory bootloader responder (AN3155 USART
  * protocol on USART1). While enabled it claims USART1 RX and answers the
  * host flashing flow instead of the USART model.
