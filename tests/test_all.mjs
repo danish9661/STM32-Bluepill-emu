@@ -3,7 +3,7 @@ import * as periph from '../pkg/stm32_bluepill_wasm.js';
 periph.initSync({ module: readFileSync(new URL('../pkg/stm32_bluepill_wasm_bg.wasm', import.meta.url)) });
 
 const { init, init_svd, periph_read, periph_write, tick, step_batch, has_pending_interrupt,
-        get_next_pending_interrupt, clear_current_interrupt, gpio_read_output, gpio_set_input,
+        get_next_pending_interrupt, clear_current_interrupt, set_intr_masks, gpio_read_output, gpio_set_input,
         gpio_read_input, get_uart_output, uart_rx_byte, uart_inject_break, adc_set_sim_value,
         is_watchdog_reset_requested, can_inject_message, gpio_set_slew, raise_fault,
         add_fsmc_bank, gpio_set_analog, adc_set_rc_tau, register_js_peripheral,
@@ -129,6 +129,14 @@ assert_eq(gpio_take_pin_events().length, 0, 'pin event: same-value ODR write sil
 periph_write(0x4001100C, 4, 1 << 13);
 ev = gpio_take_pin_events();
 assert_eq(ev.length === 3 && ev[2] === 1, true, 'pin event: ODR change = (2,13,1)');
+// gpio_set_input on a fresh pin registers an external driver (read_cb_mask):
+// the level then shows in IDR even with no prior callback (pins the
+// set_input_pin_raw mask regression that failed 3 tests mid-sprint).
+gpio_set_input(1, 7, true); // PB7 fresh pin, no prior driver
+periph_write(0x40010C00, 4, 0x4 << 28); // GPIOB CRL nibble 7 = PB7 input floating
+assert_eq(periph_read(0x40010C08, 4) >> 7 & 1, 1, 'GPIO fresh-pin gpio_set_input drives IDR via mask');
+gpio_set_input(1, 7, false);
+assert_eq(periph_read(0x40010C08, 4) >> 7 & 1, 0, 'GPIO fresh-pin gpio_set_input low reads 0');
 // CRL/CRH re-drive: input mode (ODR writes don't drive), then back to output —
 // the pin re-drives ODR=0 while the wire was high → event (2,13,0)
 gpioc_crh = (gpioc_crh & ~(0xF << 20)) | (0x4 << 20); // PC13 input floating
@@ -248,6 +256,21 @@ clear_current_interrupt();
 // SBK self-clears after one batch (break occupies the line briefly)
 step_batch(1);
 assert_eq(periph_read(USART1 + 0x0C, 4) & 1, 0, 'USART CR1 SBK self-clears');
+// TXEIE+TXE pends IRQ37: STM32duino's first print uses HAL_UART_Transmit_IT,
+// which stalls forever without the TXE IRQ — this arm must stay (a removal
+// wedged every firmware boot with zero UART output; no storm is possible:
+// the core ISR clears TXEIE once its TX ring empties).
+reset();
+periph_write(0x40021018, 4, (1 << 14) | (1 << 2)); // APB2ENR: USART1EN + GPIOAEN
+periph_write(USART1 + 0x08, 4, 0x341); // BRR 115200
+periph_write(USART1 + 0x0C, 4, (1 << 13) | (1 << 3) | (1 << 7)); // UE|TE|TXEIE
+periph_write(0xE000E100 + 0x04, 4, 1 << 5); // ISER1: USART1 IRQ 37
+set_intr_masks(0, 0);
+step_batch(1); // tick re-asserts TXE and runs update_interrupt
+assert_eq(periph_read(USART1 + 0x00, 4) & (1 << 7), 1 << 7, 'USART TXE held with TE');
+assert(has_pending_interrupt() && get_next_pending_interrupt() === 37,
+  'USART TXEIE+TXE pends IRQ 37');
+clear_current_interrupt();
 // Break outside LIN mode: framing error (FE) instead of LBD
 periph_write(USART1 + 0x10, 4, 0); // LINEN off
 assert_eq(uart_inject_break(USART1), true, 'uart_inject_break routes');
@@ -518,6 +541,34 @@ assert_eq(dual & 0xFFFF, 0x800, `dual ADC1 half = DAC value (${(dual & 0xFFFF).t
 assert_eq((dual >> 16) & 0xFFFF, 0x400, `dual ADC2 half = analog wire (${((dual >> 16) & 0xFFFF).toString(16)})`);
 // ADC2 converted too (its own EOC set)
 assert_eq(periph_read(0x40012800 + 0x00, 4) & 2, 2, 'dual ADC2 EOC set');
+
+// NRST aborts an in-flight conversion: start a long CONT-mode conversion,
+// reset the model mid-flight (board_nrst zeroes the instruction count — the
+// old code kept the stale end_at, so the conversion completed instantly
+// post-reset), then prove EOC does NOT appear without a fresh trigger.
+reset();
+periph_write(0x40021018, 4, 1 << 9); // ADC1EN
+adc_set_sim_value(0x2AA);
+periph_write(ADC1 + 0x10, 4, 7 << 0); // SMPR2 SMP0 = 239.5 cycles (long window)
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 16) | (1 << 22)); // ADON + CONT + SWSTART
+assert_eq(periph_read(ADC1 + 0x00, 4) & 2, 0, 'ADC EOC not set mid-conversion');
+periph.board_nrst();
+step_batch(1000); // far past the stale end_at
+assert_eq(periph_read(ADC1 + 0x00, 4) & 2, 0, 'ADC no EOC after NRST without fresh trigger');
+assert_eq(periph.drain_events().filter(e => e === 8).length, 0, 'ADC no AdcDone after NRST');
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 16) | (1 << 22)); // fresh SWSTART post-reset
+step_batch(252);
+assert_eq(periph_read(ADC1 + 0x00, 4) & 2, 2, 'ADC EOC after fresh SWSTART post-reset');
+assert_eq(periph_read(ADC1 + 0x4C, 4) & 0xFFF, 0x2AA, 'ADC DR correct post-reset');
+
+// Injected conversion is aborted by NRST too.
+reset();
+periph_write(0x40021018, 4, 1 << 9); // ADC1EN
+periph_write(ADC1 + 0x10, 4, 7 << 0); // long sample window
+periph_write(ADC1 + 0x08, 4, (1 << 0) | (1 << 21)); // ADON + JSWSTART
+periph.board_nrst();
+step_batch(1000);
+assert_eq(periph_read(ADC1 + 0x00, 4) & 4, 0, 'ADC no JEOC after NRST without fresh trigger');
 
 // ============================================================
 // RCC
@@ -846,6 +897,52 @@ periph_write(0xE000E008, 4, 0x5);
 assert_eq(periph_read(0xE000E008, 4), 0x5, 'ACTRL stores DISMCYCINT+DISFOLD');
 periph_write(0xE000E008, 4, 0xFFFFFFFF);
 assert_eq(periph_read(0xE000E008, 4), 0x7, 'ACTRL masks to implemented bits');
+
+// ICPR (0x180) clears a pended IRQ; 0x280 writes are RESERVED no-ops (an
+// earlier build aliased them to ICPR and silently dropped guest clears;
+// ARMv7-M ICPR lives at 0x180, IABR is read-only).
+// NOTE: the earlier get_next_pending_interrupt (USART1, prio 0) pushed an
+// active-priority entry that gates every later take (HW nesting rules:
+// nothing preempts prio 0 while it is active), so these asserts use a fresh
+// NVIC — no dispatch, no prio stack. set_intr_masks(0,0) is belt-and-braces:
+// has_pending_interrupt consults the live INTR_MASK statics (set from CPU
+// PRIMASK per batch on real driver paths; the raw wasm path needs them
+// explicit if any earlier test touched them).
+reset();
+set_intr_masks(0, 0);
+periph_write(NVIC + 0x00, 4, 1 << 6); // ISER0: EXTI0 IRQ 6
+periph_write(NVIC + 0x100, 4, 1 << 6); // ISPR0: pend EXTI0
+assert_eq(has_pending_interrupt(), true, 'NVIC EXTI0 pending pre-clear');
+periph_write(NVIC + 0x180, 4, 1 << 6); // ICPR0: clear
+assert_eq(periph_read(NVIC + 0x100, 4) & (1 << 6), 0, 'NVIC ICPR clears ISPR bit');
+assert_eq(has_pending_interrupt(), false, 'NVIC no pending after ICPR clear');
+periph_write(NVIC + 0x100, 4, 1 << 6); // pend again
+periph_write(NVIC + 0x280, 4, 1 << 6); // RESERVED write: must not clear
+assert_eq(periph_read(NVIC + 0x100, 4) & (1 << 6), 1 << 6, 'NVIC 0x280 write leaves ISPR bit');
+assert_eq(periph_read(NVIC + 0x200, 4) & (1 << 6), 0, 'NVIC IABR read-only (no dispatch yet)');
+assert_eq(has_pending_interrupt(), true, 'NVIC 0x280 write leaves pending');
+
+// Fairness rotation: a hot IRQ that re-pends itself yields to another
+// pending IRQ (last_popped alternation), so TXE-style drains can't starve
+// lower-priority IRQs within the 64-take batch budget. Silicon truth: the
+// dispatched IRQ stays ACTIVE until its handler returns, which normally
+// blocks its own priority level — the model tests the documented path
+// instead: clear the first dispatch (handler return), THEN re-pend hot,
+// and the waiter goes next instead of the hotter IRQ re-firing.
+reset();
+set_intr_masks(0, 0);
+periph_write(NVIC + 0x00, 4, (1 << 6) | (1 << 7)); // ISER0: IRQ 6 + 7
+periph_write(0xE000E320 + 6, 1, 0x40); // IPR6 prio 0x40 (higher)
+periph_write(0xE000E320 + 7, 1, 0x80); // IPR7 prio 0x80 (lower)
+periph_write(NVIC + 0x100, 4, (1 << 6) | (1 << 7)); // pend both
+assert_eq(get_next_pending_interrupt(), 6, 'NVIC fairness: higher prio first');
+// Handler for IRQ 6 returns WITHOUT re-pending (its IABR bit clears too —
+// the old pop-only return leaked it as phantom-active). IRQ 7's delivery
+// then proves the waiter was never starved, and the IABR shows only it.
+clear_current_interrupt();
+assert_eq(periph_read(NVIC + 0x200, 4) & (1 << 6), 0, 'NVIC IABR clears on return');
+assert_eq(get_next_pending_interrupt(), 7, 'NVIC fairness: waiter IRQ 7 goes next');
+clear_current_interrupt();
 
 // ============================================================
 // CRC
@@ -1330,6 +1427,29 @@ periph.dma_push_periph(USART1_PUMP + 0x04, new Uint8Array([0x51]));
 out = get_uart_output();
 assert_eq(out, 'PQ', 'dma_push_periph per-byte pushes land in order');
 
+// NRST discards an abandoned DMA plan: queue a periph->mem transfer, reset
+// before the pump, and prove the next pump serves no stale bytes and no
+// completion bits (board_nrst clears pending_dma + absorb_buf).
+reset();
+const DMA1N = 0x40020000, U1N = 0x40013800;
+periph_write(0x40021018, 4, (1 << 14) | (1 << 2)); // USART1EN + GPIOAEN
+periph_write(0x40021014, 4, 1 << 0); // DMA1EN
+periph.uart_rx_byte(U1N, 0x41); // 'A' queued in the RX FIFO
+periph_write(DMA1N + 0x08 + 4 * 0x14, 4, (1 << 7) | (1 << 2)); // CH5 MINC+TCIE
+periph_write(DMA1N + 0x08 + 4 * 0x14 + 4, 4, 2); // CNDTR=2
+periph_write(DMA1N + 0x08 + 4 * 0x14 + 8, 4, U1N + 0x04); // CPAR=DR
+periph_write(DMA1N + 0x08 + 4 * 0x14 + 12, 4, 0x20001000); // CMAR
+periph_write(U1N + 0x14, 4, 1 << 6); // CR3 DMAR
+periph_write(DMA1N + 0x08 + 4 * 0x14, 4, (1 << 7) | (1 << 2) | 1); // EN -> queues
+assert_eq(periph.dma_get_pending_count() >= 1, true, 'DMA plan queued pre-reset');
+periph.board_nrst();
+assert_eq(periph.dma_get_pending_count(), 0, 'NRST clears queued DMA plans');
+assert_eq(periph.dma_pump_all().length, 0, 'NRST: post-reset pump serves nothing');
+{ let comp = false;
+  for (let i = 0; i < 3; i++) periph.tick();
+  comp = (periph_read(DMA1N + 0x00, 4) & (1 << 17)) !== 0; // TCIF5
+  assert_eq(comp, false, 'NRST: no stale CH5 completion bit'); }
+
 reset();
 const SCB = 0xE000ED00;
 
@@ -1353,6 +1473,9 @@ group('TIM Counting');
 
 reset();
 const T2 = 0x40000000;
+// RM0008 reset value: ARR = 0xFFFF (the old 0xFFFF_FFFF made the closed-form
+// advance compute a 4B-tick window and wedged the post-NRST catch-up tick).
+assert_eq(periph_read(T2 + 0x2C, 4), 0xFFFF, 'TIM2 ARR reset = 0xFFFF');
 
 // Enable TIM2 clock
 periph_write(0x40021014, 4, 1 << 0);
@@ -3017,18 +3140,35 @@ assert_eq(periph_read(0x4002201C, 4) & 0x3FC, 0x3FC, 'FLASH OBR USER erased (sof
 // Select hardware watchdog: clear WDG_SW (OBR bit 2)
 periph_write(0x4002201C, 4, 0x3FC & ~(1 << 2));
 assert_eq(periph_read(0x4002201C, 4) & 0x3FC, 0x3F8, 'FLASH OBR WDG_SW clears');
-// WDG_SW=0 runs the IWDG without a KR start: tiny reload, no feed -> reset
+// WDG_SW=0 runs the IWDG without a KR start: tiny reload, no feed -> reset.
+// The IWDG is free-running on instruction time (tick arm, like silicon):
+// step_batch alone advances it — no register-access pump needed.
 const IWDG_O = 0x40003000;
 is_watchdog_reset_requested(); // clear any stale request first
 periph_write(IWDG_O + 0x00, 4, 0x5555); // unlock PR/RLR (no start)
 periph_write(IWDG_O + 0x04, 4, 0); // prescaler /4
 periph_write(IWDG_O + 0x08, 4, 1); // RLR=1 (shortest fuse)
 periph_write(IWDG_O + 0x00, 4, 0xAAAA); // refresh loads the counter (still no start)
-step_batch(1000);
-periph_read(IWDG_O + 0x04); // IWDG advances on register access: pump it
-step_batch(1000);
-periph_read(IWDG_O + 0x04);
-assert_eq(is_watchdog_reset_requested(), true, 'IWDG hardware mode resets without KR start');
+step_batch(1000); // 2 ticks of 512 instr consume the 1-tick fuse -> fires
+assert_eq(step_batch(1000), 1, 'IWDG hardware mode step_batch reports watchdog stop');
+assert_eq(is_watchdog_reset_requested(), false, 'reset flag was consumed by step_batch status');
+// Re-arm the same fuse and prove the free-run completes with zero register
+// touches after the KR writes (the old model needed a register pump).
+is_watchdog_reset_requested();
+periph_write(IWDG_O + 0x00, 4, 0xAAAA); // refresh again (no start)
+drain_events(); // flush the prior WdogReset event
+assert_eq(step_batch(1000), 1, 'IWDG fires on step_batch ticks alone');
+{ let wdog = false; for (const e of drain_events()) { if (e === 13) { wdog = true; break; } }
+  assert(wdog, 'IWDG pushes WdogReset{1} on expiry'); }
+// KR-started fuse also fires on step_batch-only ticks (no register pump).
+reset();
+periph_write(IWDG_O + 0x00, 4, 0x5555);
+periph_write(IWDG_O + 0x04, 4, 0); // /4 -> 512 instr/tick
+periph_write(IWDG_O + 0x08, 4, 1); // RLR=1
+periph_write(IWDG_O + 0x00, 4, 0xCCCC); // start
+periph_write(IWDG_O + 0x00, 4, 0xAAAA); // refresh
+is_watchdog_reset_requested();
+assert_eq(step_batch(1000), 1, 'IWDG KR-started fuse fires on step_batch ticks alone');
 
 // ============================================================
 // WKUP pin + standby wake gating

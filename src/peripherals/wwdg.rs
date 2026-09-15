@@ -59,6 +59,20 @@ impl Wwdg {
 }
 
 impl Peripheral for Wwdg {
+    /// Free-run tick (same class as IWDG: WWDG is PCLK1-clocked but the
+    /// model runs it on instruction time; register-access-only decrement
+    /// left the counter frozen between guest touches).
+    fn tick(&mut self, sys: &System) {
+        self.decrement_counter(sys);
+    }
+
+    /// NRST count-zero: re-anchor the delta base without processing state
+    /// (same class as the TIM catch-up wedge).
+    fn rebase_clock(&mut self, _sys: &System, now: u64) {
+        self.last_tick = now;
+        self.initialized = false;
+    }
+
     fn read(&mut self, sys: &System, offset: u32) -> u32 {
         self.decrement_counter(sys);
         match offset { 0x00 => self.cr, 0x04 => self.cfr, 0x08 => self.sr, _ => 0 }

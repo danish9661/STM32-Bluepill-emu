@@ -244,6 +244,15 @@ impl Nvic {
         self.active_prio_stack.pop();
     }
 
+    /// Take (and clear) the fairness-slot hint for `clear_current_interrupt`:
+    /// the most recently dispatched IRQ. The raw test/driver path has no CPU
+    /// exception-return to name the finished IRQ, so the return clears the
+    /// last dispatched entry's IABR bit (matching what the native
+    /// `exception_return` does with its exact IRQ).
+    pub fn last_popped_clear_take(&mut self) -> Option<i32> {
+        self.last_popped.take()
+    }
+
     /// Clear the IABR active bit for a returned exception (external IRQs
     /// only; system exceptions have no IABR bit). `get_next_pending_intr`
     /// sets the bit on dispatch but the old pop-only return left it set

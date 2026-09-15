@@ -36,6 +36,23 @@ impl Iwdg {
 }
 
 impl Peripheral for Iwdg {
+    /// Free-run tick: the LSI-clocked down-counter advances on instruction
+    /// time alone (silicon truth). Without this arm a started watchdog only
+    /// decremented when guest code touched its registers — step_batch ticks
+    /// alone never fired it (proven: 0xCCCC start + 100k batch = no reset
+    /// until a register read pumped it).
+    fn tick(&mut self, sys: &System) {
+        self.decrement_counter(sys);
+    }
+
+    /// NRST zeroes the instruction count: re-anchor the delta bases without
+    /// processing state, or the post-reset tick redeems the whole pre-reset
+    /// run as counter progress (same class as the TIM catch-up wedge).
+    fn rebase_clock(&mut self, _sys: &System, now: u64) {
+        self.last_tick = now;
+        self.sr_tick = now;
+    }
+
     fn read(&mut self, sys: &System, offset: u32) -> u32 {
         self.decrement_counter(sys);
         match offset {

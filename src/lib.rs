@@ -289,9 +289,16 @@ pub fn set_intr_masks(primask: u32, basepri: u32) {
     system::INTR_MASK_BASEPRI.store(basepri, Ordering::Relaxed);
 }
 
-/// Call after an ISR returns to pop the active priority stack.
+/// Call after an ISR returns to pop the active priority stack AND clear
+/// this entry's IABR active bit (set on dispatch). The old pop-only return
+/// left the bit set forever (phantom-active IRQs); the native
+/// `exception_return` path clears both, so this matches it.
 #[wasm_bindgen]
 pub fn clear_current_interrupt() {
+    let irq = sys().p.nvic.borrow_mut().last_popped_clear_take();
+    if let Some(q) = irq {
+        sys().p.nvic.borrow_mut().clear_active_bit(q);
+    }
     sys().p.nvic.borrow_mut().clear_current_interrupt();
 }
 

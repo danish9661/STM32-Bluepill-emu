@@ -435,6 +435,15 @@ impl Adc {
 }
 
 impl Peripheral for Adc {
+    /// NRST aborts any in-flight conversion (silicon resets the ADC
+    /// registers; a CONT-mode conversion started pre-reset must not
+    /// complete instantly post-reset off a stale end_at).
+    fn rebase_clock(&mut self, _sys: &System, _now: u64) {
+        self.conv = None;
+        self.jconv = None;
+        self.disc_next = 0;
+    }
+
     fn adc_dual_slave_start(&mut self, sys: &System) {
         // Slave follows the master unconditionally (own DUALMOD/EXTSEL
         // ignored); start_regular no-ops unless on and idle.

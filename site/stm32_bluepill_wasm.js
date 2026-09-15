@@ -246,7 +246,10 @@ export function can_inject_message(addr, tir, tdtr, tdlr, tdhr) {
 }
 
 /**
- * Call after an ISR returns to pop the active priority stack.
+ * Call after an ISR returns to pop the active priority stack AND clear
+ * this entry's IABR active bit (set on dispatch). The old pop-only return
+ * left the bit set forever (phantom-active IRQs); the native
+ * `exception_return` path clears both, so this matches it.
  */
 export function clear_current_interrupt() {
     wasm.clear_current_interrupt();
